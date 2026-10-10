@@ -98,13 +98,14 @@ Author semantic mip chains offline, including normal renormalization where neede
 levels and wrong payload sizes are rejected before GPU publication. Validation
 does not inspect the encoder's block contents or establish artistic quality.
 
-The renderer chooses the first matching supported variant when compression is
+The scene/particle renderer chooses the first matching supported variant when compression is
 enabled; otherwise it generates/uploads the existing RGBA semantic mip chain.
 RGBA fallback pixels are required and retained for unsupported devices, compression
 disable, archives and GPU recovery. Upload extents use physical block-rounded mip
 sizes as specified by [WebGPU texture copies](https://gpuweb.github.io/gpuweb/#texture-copies).
 Encoded CPU payload and actual GPU mip bytes are counted in scoped performance data.
-Changing the compression setting invalidates texture/material GPU bindings.
+Changing the compression setting invalidates texture/material GPU bindings. GUI
+textures retain their existing RGBA upload path.
 
 There is no KTX2/Basis decoder, runtime block encoder, compressed GLB extension or
 compressed archive codec. Ordinary PNG/JPEG/FBX/GLB loading remains RGBA; applications
@@ -123,9 +124,37 @@ FBX/GLB and archive tests cover the reused contracts.
 and `BROWSER_EXECUTABLE` configured as in the README. It tests actual WebGPU canvas
 budgets, unchanged paused pixels after `GPUDevice.destroy()`, retained scene/clock
 state, bounded adapter-failure retries, explicit reconnection, synthetic composed
-platform lifecycle events and an authored BC7 upload versus RGBA fallback.
+platform lifecycle events, an authored BC7 upload versus RGBA fallback, GUI
+resource/text-service recovery and shutdown during pending adapter acquisition.
 Evidence goes to `build/evidence/render-quality/`.
 
 These checks do not establish physical Android/iOS acceptance, Safari/Firefox
 compatibility, real OS GPU crashes, OS page discard, guaranteed BFCache eligibility,
 ETC2/ASTC execution on supporting hardware or sustained mobile performance.
+
+## Verified evidence — 2026-10-10
+
+- Emscripten 6.0.11 Release renderer: `build/web-quality-release`; staged site:
+  `build/quality-browser-site`, served locally at port 8110 during validation.
+- Native Debug: 12/12 targeted suites passed in `build/quality-native`: quality,
+  application, mesh detail, scene archives, shadows, GUI, materials, views, camera,
+  frame caching and FBX/GLB importers. This is scoped evidence, not a full-suite claim.
+- Chrome 154.0.8037.99: rendering-quality/recovery suite passed all eight flows with
+  no page/console errors. BC7 was supported and exercised on this adapter;
+  unsupported compression/API fallback was also exercised through controlled probes.
+- Final recovery-suite Wasm SHA256:
+  `B54888AA8CDE249A7EACDDD861CDC69F43E560EFE63AFCB065AECBEDB90C1982`.
+- Existing browser application, shadow, input and GUI suites passed. Input includes
+  Chromium touch/DPR emulation. The GUI test's pass count now includes its shadow
+  passes, fixing an obsolete four-pass expectation.
+- Evidence: `build/evidence/render-quality/results.json` with paired scene/BC7
+  PNGs; regression results in `build/evidence/quality-application/results.json`,
+  `build/evidence/quality-shadows/results.json`,
+  `build/evidence/quality-input/result.json`, and
+  `build/evidence/quality-gui/results.json`.
+
+The shared checkout contained concurrent application/assets/audio/GUI/persistence
+work. It was retained; browser output was staged separately from `dist`. Build
+configuration initially encountered not-yet-created sources, and a broad native
+build encountered an unfinished prefab test. Validation used the explicit targets
+above once their sources were ready.

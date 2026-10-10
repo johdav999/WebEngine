@@ -116,11 +116,10 @@ void Renderer::setScene(Scene& scene,std::span<const RenderView> views) {
     setViews(views);
     scene_=&scene;
 }
-Renderer::~Renderer() { releaseGpu();callbacks_->owner=nullptr; }
+Renderer::~Renderer() { releaseGpu(); }
 void Renderer::releaseGpu() {
     // Invalidate every outstanding adapter/device/timestamp callback before destroying resources.
     callbacks_->owner=nullptr;
-    callbacks_=std::make_shared<CallbackState>(CallbackState{this});
     ready_=false;initializing_=false;guiRenderer_.reset();
     if(surface_&&width_) surface_.Unconfigure();
     viewResources_.clear();activeView_=nullptr;activeCamera_=nullptr;
@@ -138,7 +137,8 @@ void Renderer::releaseGpu() {
     width_=height_=0;gpuTimingFailed_=false;stableFrames_=0;resetMeasurements();
 }
 void Renderer::initialize() {
-    if(ready_||initializing_) return;
+    if(ready_||initializing_||failed_||recoveryPending_) return;
+    callbacks_=std::make_shared<CallbackState>(CallbackState{this});
     initializing_=true;reportState(recoveryAttempts_?"recovering":"initializing");
     instance_=wgpu::CreateInstance();
     wgpu::EmscriptenSurfaceSourceCanvasHTMLSelector canvas{}; canvas.selector="#viewport";
@@ -649,8 +649,8 @@ void Renderer::uploadSkeleton(const std::shared_ptr<const SkinPose>& pose) {
 void Renderer::render(double updateMs,double intervalMs) {
     if(!ready_) return;
     try {
-        resizeCanvas();
         const auto started=emscripten_get_now();FrameTiming timing{};timing.updateMs=updateMs;timing.intervalMs=intervalMs;counters_={};resourceMs_=0;++frameSerial_;
+        resizeCanvas();
         int width=0,height=0; emscripten_get_canvas_element_size("#viewport",&width,&height);
         if(width<=0 || height<=0) return;
         if(static_cast<std::uint32_t>(width)!=width_ || static_cast<std::uint32_t>(height)!=height_) resize(width,height);
@@ -921,7 +921,8 @@ void Renderer::render(double updateMs,double intervalMs) {
         const auto commands=encoder.Finish();timing.encodeMs+=emscripten_get_now()-finalEncodeStart;
         counters_.cachedMaterialPipelines=materialPipelines_.size();
         const auto submitStart=emscripten_get_now();device_.GetQueue().Submit(1,&commands);
-        if(++stableFrames_==120) recoveryAttempts_=0;timing.submitMs=emscripten_get_now()-submitStart;
+        if(++stableFrames_==120) recoveryAttempts_=0;
+        timing.submitMs=emscripten_get_now()-submitStart;
         timing.cpuMs=updateMs+emscripten_get_now()-started;
         if(sampleSlot>=0) readGpuSample(sampleSlot);
         measurements_.recordFrame(timing,counters_);reportMeasurements(emscripten_get_now());

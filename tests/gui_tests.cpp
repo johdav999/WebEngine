@@ -112,7 +112,7 @@ void extensions() {
     const auto nodes=gui.accessibilityNodes();
     const auto it=std::find_if(nodes.begin(),nodes.end(),[&](const auto& n){return n.id==last.id();});
     require(it!=nodes.end()&&it->disabled&&it->name=="Last"&&it->description=="Final action","Accessible roles/names/state reflect widgets");
-    scroll.setAccessibilityHidden(true);require(gui.accessibilityNodes().empty(),"Decorative subtrees can be excluded");scroll.setAccessibilityHidden(false);
+    scroll.setAccessibilityHidden(true);require(gui.accessibilityNodes().empty(),"Decorative subtrees can be excluded");require(!gui.focusWidget(first.id()),"Delayed focus cannot enter an accessibility-hidden subtree");scroll.setAccessibilityHidden(false);
     last.setEnabled(true);scroll.setScrollOffset(0);gui.layout({400,300});
     require(gui.focusWidget(scroll.id()),"Scroll regions accept keyboard focus");gui.key(GuiKey::End);require(scroll.scrollOffset()==maximum,"End scrolls to bottom");gui.key(GuiKey::Home);require(scroll.scrollOffset()==0,"Home scrolls to top");
     gui.focusWidget(last.id());const auto r=last.bounds();

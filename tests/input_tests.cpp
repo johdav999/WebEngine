@@ -1,5 +1,6 @@
 #include "engine/input.hpp"
 #include "engine/orbit_controller.hpp"
+#include "engine/application.hpp"
 #include <iostream>
 #include <limits>
 #include <stdexcept>
@@ -92,6 +93,19 @@ int main() {
             bindings.setContexts(game);bindings.control(2,1);mapped.beginFrame();
         }
         mapped.beginFrame();check(mapped.action(InputActions::Move).value.x==1,"Mapper destruction releases its owned sources");
-        std::cout<<"Input transitions, aggregation, cancellation, coordinates, bindings and camera tests passed\n";
+        Application app;
+        InputBindings runtimeBindings([&app](std::span<const InputPacket> packets) { return app.submitInput(packets); });
+        const InputBinding runtimeMap[]={{1,1,InputActions::Move,{1,0}}};const InputContext runtimeContexts[]={{1,true}};
+        runtimeBindings.setBindings(runtimeMap);runtimeBindings.setContexts(runtimeContexts);
+        check(!runtimeBindings.control(1,1),"Application sink rejects input before start");
+        app.start(app.loadScene(std::make_unique<Scene>("Bindings")));app.advance(0);
+        runtimeBindings.control(1,1);app.advance(0.01);
+        check(app.input().action(InputActions::Move).pressed,"Bindings use the application-owned frame snapshot");
+        app.pause();runtimeBindings.control(1,1);app.advance(0.02);
+        check(app.input().action(InputActions::Move).held,"Menu/camera bindings remain available while paused");
+        app.setSuspended(true);runtimeBindings.cancel();check(!runtimeBindings.control(1,1),"Binding sink honors host suspension");
+        app.setSuspended(false);app.advance(0.03);check(!app.input().action(InputActions::Move).held,"Rejected suspended input is not replayed on resume");
+        app.shutdown();check(!runtimeBindings.control(1,1),"Binding sink honors terminal shutdown");
+        std::cout<<"Input transitions, aggregation, cancellation, coordinates, bindings, runtime integration and camera tests passed\n";
     } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }

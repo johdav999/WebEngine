@@ -3,7 +3,7 @@ const {chromium}=require('playwright');
 const {PNG}=require('pngjs');
 const fs=require('node:fs/promises');
 const assert=require('node:assert/strict');
-const base=process.env.DEMO_URL||'http://localhost:8107/';
+const base=process.env.DEMO_URL||'http://127.0.0.1:19473/';
 const evidence=process.env.EVIDENCE_DIR||'build/evidence/ui-input';
 function difference(a,b){const x=PNG.sync.read(a),y=PNG.sync.read(b);let pixels=0;assert.equal(x.data.length,y.data.length);for(let i=0;i<x.data.length;i+=4)if(Math.abs(x.data[i]-y.data[i])+Math.abs(x.data[i+1]-y.data[i+1])+Math.abs(x.data[i+2]-y.data[i+2])>20)++pixels;return pixels;}
 (async()=>{

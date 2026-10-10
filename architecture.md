@@ -14,14 +14,15 @@ This document describes the implementation inspected on 2026-10-10 and the archi
 
 | Target | Responsibility and dependencies |
 | --- | --- |
-| `engine_core` | Portable application runtime/clocks, scene hierarchy, lifecycle, prefabs/factories, input state, camera controllers, assets/importers, audio, animation, physics, effects, scene archives, render preparation and performance data. Privately links ufbx, cgltf, meshoptimizer, Jolt and the image decoder. |
-| `engine_gui` | Portable retained widget tree, layout, input handling and font/draw-list generation; publicly depends on `engine_core`. |
-| `engine_gui_browser` | Emscripten-only GUI input/text adapter; depends on `engine_gui`. |
+| `engine_core` | Portable application runtime/clocks, scene hierarchy, lifecycle, prefabs/factories, input state, camera controllers, assets/importers, audio, animation, physics, effects, scene/application archives, render preparation and performance data. Privately links ufbx, cgltf, meshoptimizer, Jolt and the image decoder. |
+| `engine_gui` | Portable retained widget tree, wrapping/scaled/scroll layout, input handling, accessibility descriptions and font/draw-list generation; publicly depends on `engine_core`. |
+| `engine_gui_browser` | Emscripten-only GUI input/text and accessibility adapter; depends on `engine_gui`. |
 | `engine_assets_browser` | Optional Emscripten HTTP source adapter for portable asset loaders; links `engine_core` and propagates Fetch linkage. |
 | `asset_browser_tests` | Explicit Emscripten HTTP/resource acceptance runner, excluded from normal builds; uses a self-hosted smoke server without a GPU. |
 | `engine_audio_browser` | Emscripten-only Web Audio device adapter; publicly depends on `engine_core`. |
 | `webengine` | Browser executable: application/demo entry point, WebGPU renderer, GUI renderer and demos; links the libraries above. |
 | Native test executables | Exercise portable systems without the browser renderer. The current native configuration is a core/test build, not a native game rendering backend. |
+| `persistence_wasm_tests` | Optional Node/Wasm persistence regression runner, enabled with `WEBENGINE_BUILD_PERSISTENCE_WASM_TESTS`; exercises the portable contracts on the 32-bit Wasm ABI. |
 | `spatial_query_tests` | Explicit Emscripten test target, excluded from normal builds; executes physics/query/sensor assertions in browser Wasm without publishing the playground. |
 | `animation_control_wasm_tests` | Explicit Emscripten test target, excluded from normal builds; executes portable animation controller/event/output assertions in Node Wasm without publishing the playground. |
 
@@ -126,8 +127,9 @@ users can continue supplying their own scheduler.
 See [input validation and device scope](docs/input-validation.md).
 
 Portable `InputBindings` maps application-defined control IDs to the same queued
-actions through an ordered context stack. It borrows `InputSystem`, owns a
-reserved source range and releases only those sources on reconfiguration,
+actions through an ordered context stack. It borrows `InputSystem` or owns a
+submission callback to `Application::submitInput`, preserving the runtime's
+input gate. It owns a reserved source range and releases only those sources on reconfiguration,
 cancellation or destruction. The browser adapter provides named stacked contexts
 and disposable virtual controls with validated stick configuration; physical key
 and DOM semantics remain outside portable controllers. See

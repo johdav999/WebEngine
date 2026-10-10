@@ -185,3 +185,5 @@ recovery, namespace isolation, page reloads, malformed checkpoints and exact Web
 pixels. Supply `NODE_PATH` and `BROWSER_EXECUTABLE` as for other browser smoke scripts.
 Evidence is saved under `build/evidence/persistence/`; mobile viewport checks are
 Chromium emulation and do not establish physical Android/iOS acceptance.
+See [the recorded validation](persistence-validation.md) for the actual native,
+Wasm, browser and downloaded-file interchange results from this change.

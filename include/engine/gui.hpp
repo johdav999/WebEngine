@@ -91,6 +91,7 @@ public:
     void setClipChildren(bool value) { clipChildren_=value; }
     bool visible() const { return visible_; }
     bool enabled() const { return enabled_; }
+    bool accessibilityHidden() const { return accessibilityHidden_ || (parent_ && parent_->accessibilityHidden()); }
     bool active() const;
     const GuiRect& bounds() const { return bounds_; }
     const GuiRect& clip() const { return clip_; }

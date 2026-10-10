@@ -1,4 +1,4 @@
-.audio-system-panel{grid-column:1/-1}
+.audio-system-panel{grid-column:1/-1;min-width:0}
 .audio-system-panel p{font-size:11px;line-height:1.5;color:var(--muted);overflow-wrap:anywhere}
 .audio-system-panel .buttons{flex-wrap:wrap;margin-top:10px}
 .audio-system-panel button{flex:1 1 70px}
@@ -7,3 +7,4 @@
 .audio-system-panel label:has(input[type=checkbox]){display:flex;align-items:center;gap:8px}
 .audio-system-panel input[type=checkbox]{margin:0;accent-color:var(--accent)}
 #sound-status{font-variant-numeric:tabular-nums;margin-bottom:0}
+@media(max-width:720px){aside:has(.audio-system-panel){grid-template-columns:repeat(2,minmax(0,1fr))}}

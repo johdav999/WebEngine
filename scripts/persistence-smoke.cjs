@@ -65,6 +65,12 @@ function pixelsEqual(a,b){
         adapter.dispose();await rejects(adapter.get('slot'),'closed');other.dispose();
       }
       const db=new EngineStorage.IndexedDBStorage({namespace:'rollback'});await db.put('slot',new Uint8Array([7]));
+      const parent=new EngineStorage.LocalStorageStorage({namespace:'prefix'}),child=new EngineStorage.LocalStorageStorage({namespace:'prefix:child'});
+      await parent.put('child:slot',new Uint8Array([7]));
+      check(await child.get('slot')===null,'Colon-containing namespaces cannot collide with save keys');
+      await child.put('slot',new Uint8Array([9]));
+      check((await parent.get('child:slot'))[0]===7,'Nested-looking localStorage namespaces remain independent');
+      await parent.remove('child:slot');await child.remove('slot');parent.dispose();child.dispose();
       const abort=new AbortController();
       await rejects(db.transaction('slot','readwrite',abort.signal,store=>{
         store.put({version:1,bytes:new Uint8Array([9]).buffer},'slot');abort.abort();

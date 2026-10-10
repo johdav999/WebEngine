@@ -65,8 +65,10 @@ void InputSystem::apply(const InputPacket& p) {
             static_cast<std::uint32_t>(p.buttons),static_cast<InputDevice>(int(p.device)),float(p.pressure)};
 }
 InputBindings::InputBindings(InputSystem& input,std::uint32_t firstSource)
-    : input_(input),firstSource_(firstSource) {
-    if(firstSource==0||firstSource>UINT32_MAX-1023) throw std::invalid_argument("Invalid binding source range");
+    : InputBindings([&input](std::span<const InputPacket> packets) { return input.submit(packets); },firstSource) {}
+InputBindings::InputBindings(Submit submit,std::uint32_t firstSource)
+    : submit_(std::move(submit)),firstSource_(firstSource) {
+    if(!submit_||firstSource==0||firstSource>UINT32_MAX-1023) throw std::invalid_argument("Invalid binding sink/source range");
 }
 InputBindings::~InputBindings() { cancel(); }
 void InputBindings::cancel() {
@@ -74,7 +76,8 @@ void InputBindings::cancel() {
     for(std::size_t i=0;i<held_.size();++i) if(held_[i]) {
         InputPacket p;p.id=bindings_[i].action;p.source=firstSource_+i;releases.push_back(p);
     }
-    input_.submit(releases);std::fill(held_.begin(),held_.end(),false);
+    if(!releases.empty()) submit_(releases);
+    std::fill(held_.begin(),held_.end(),false);
 }
 void InputBindings::setBindings(std::span<const InputBinding> bindings) {
     if(bindings.size()>1024) throw std::invalid_argument("Too many input bindings");
@@ -108,7 +111,7 @@ bool InputBindings::control(InputControlId control,float value) {
         if(!matched.empty()||context->blockLower) break;
     }
     if(packets.empty()) return false;
-    if(!input_.submit(packets)) { std::fill(held_.begin(),held_.end(),false);return false; }
+    if(!submit_(packets)) { std::fill(held_.begin(),held_.end(),false);return false; }
     for(const auto i:matched) if(!bindings_[i].displacement) held_[i]=value!=0&&(bindings_[i].value.x!=0||bindings_[i].value.y!=0);
     return true;
 }

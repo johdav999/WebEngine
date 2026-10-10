@@ -128,6 +128,8 @@ transitions wait for resume. Pending transitions retain the outgoing scene. Once
 dependencies are ready, the preparation callback runs once at an idle boundary,
 then normal presentation binding/activation run. Returning to that loaded scene
 does not repeat preparation; explicitly replacing its preparation resets it.
+If a preparation callback requests another transition, that newer request takes
+precedence at the following boundary; the current scene stays active meanwhile.
 
 Dependency failure/cancellation cancels remaining batch interests and rejects the
 transition. Preparation exceptions also reject it. Errors propagate to the host;
@@ -173,3 +175,6 @@ aborts. `ASSET_TEST_SITE` selects another runner directory; `EVIDENCE_DIR` selec
 output (default `build/evidence/assets/results.json`). This runner needs no GPU;
 it does not establish physical mobile acceptance, decode latency, sustained
 performance or renderer/GPU prewarming.
+
+See [the recorded validation scope](assets-validation.md) for the runs completed
+on 2026-10-10 and the separate full-suite limitation.

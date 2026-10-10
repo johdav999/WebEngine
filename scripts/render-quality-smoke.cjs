@@ -136,6 +136,21 @@ const pixels=buffer=>PNG.sync.read(buffer).data;
     await gui.mouse.click(box.x+input.bounds.x+20,box.y+input.bounds.y+20);await gui.keyboard.insertText('Recovered GUI');
     assert(await gui.evaluate(()=>EngineGui.snapshot().widgets.some(w=>w.type==='input'&&w.text==='Recovered GUI')));
     await gui.close();results.checks.push('GUI font/images rebuild with identical canvas pixels; text service remains usable after recovery');
+    const pending=await browser.newPage();
+    pending.on('pageerror',e=>results.errors.push(String(e)));
+    await pending.addInitScript(()=>{
+      const request=navigator.gpu.requestAdapter.bind(navigator.gpu);
+      navigator.gpu.requestAdapter=options=>new Promise(resolve=>{
+        window.__releaseAdapter=async()=>resolve(await request(options));
+      });
+    });
+    await pending.goto(`${base}/?resilienceTest=1`);
+    await pending.waitForFunction(()=>typeof window.__releaseAdapter==='function');
+    await pending.evaluate(()=>{Module._engine_shutdown();window.__releaseAdapter();});
+    await pending.waitForTimeout(250);
+    assert.equal(await pending.evaluate(()=>document.body.dataset.applicationState),'stopped');
+    assert.notEqual(await pending.evaluate(()=>document.body.dataset.gpuState),'ready');
+    await pending.close();results.checks.push('Shutdown invalidates pending adapter callbacks without reviving the engine');
     assert.deepEqual(results.errors,[]);results.passed=true;
   } finally {
     await fs.writeFile(path.join(evidence,'results.json'),JSON.stringify(results,null,2));await browser.close();

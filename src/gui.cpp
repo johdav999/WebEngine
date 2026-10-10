@@ -99,7 +99,7 @@ void TextInput::setSelection(std::size_t start,std::size_t end,bool backward) {
 void GuiSystem::layout(Vec2 logicalSize) {
     valid(logicalSize,true);logicalSize_=logicalSize;root_.size_=logicalSize;
     arrange(root_,{0,0,logicalSize.x,logicalSize.y},{0,0,logicalSize.x,logicalSize.y},root_.visible_);
-    if(focus_&&(!focus_->active()||focus_->clip_.empty())) blur();
+    if(focus_&&(!focus_->active()||focus_->clip_.empty()||focus_->accessibilityHidden())) blur();
     if(captured_&&(!captured_->active()||captured_->clip_.empty())) captured_=nullptr;
     if(scrollCapture_&&!scrollCapture_->active()) { scrollCapture_=nullptr;scrollDragging_=false; }
     if(hover_&&!hover_->active()) hover_=nullptr;
@@ -235,6 +235,7 @@ bool GuiSystem::focusWidget(std::uint64_t id) {
     const auto visit=[&](auto&& self,Widget& w)->void { if(w.id_==id) target=&w;for(const auto& child:w.children_) self(self,*child); };
     visit(visit,root_);
     if(!target||!target->focusable()||!reachable(*target)) return false;
+    if(target->accessibilityHidden()) return false;
     blur();reveal(*target);focus_=target;resetCaret();return true;
 }
 bool GuiSystem::activateWidget(std::uint64_t id) {
@@ -263,7 +264,7 @@ bool GuiSystem::key(GuiKey key,bool shift,bool repeat) {
     if(key==GuiKey::Tab) {
         std::vector<Widget*> widgets;
         const auto collect=[&](auto&& self,Widget& w)->void {
-            if(!w.active()) return;
+            if(!w.active()||w.accessibilityHidden_) return;
             if(w.focusable()&&reachable(w)) widgets.push_back(&w);
             for(const auto& child:w.children_) self(self,*child);
         };

@@ -109,10 +109,12 @@ const evidence=process.env.EVIDENCE_DIR||'build/evidence/audio-system';
     await page.locator('#sound-enable').scrollIntoViewIfNeeded();await page.screenshot({path:`${evidence}/controls.png`});
     await page.setViewportSize({width:390,height:844});
     await page.locator('#sound-enable').scrollIntoViewIfNeeded();
-    const fits=await page.locator('.audio-system-panel').evaluate(panel=>
-      [...panel.querySelectorAll('button,input[type=range]')].every(element=>{
-        const box=element.getBoundingClientRect();return box.left>=0&&box.right<=innerWidth;
-      }));
+    const fits=await page.locator('.audio-system-panel').evaluate(panel=>{
+      const bounds=panel.closest('aside').getBoundingClientRect();
+      return [...panel.querySelectorAll('button,input[type=range]')].every(element=>{
+        const box=element.getBoundingClientRect();return box.left>=bounds.left&&box.right<=Math.min(innerWidth,bounds.right);
+      });
+    });
     assert.equal(fits,true);await page.screenshot({path:`${evidence}/controls-mobile.png`});
     result.checks.push('Audio controls fit a 390-pixel emulated viewport');
     await page.evaluate(()=>Module._engine_shutdown());

@@ -41,6 +41,22 @@ safety can still cancel all input. After a context transition, submit fresh
 device state deliberately; the mapper does not reactivate old held values.
 At host/lifecycle cancellation, cancel the device mapper as well as the snapshot.
 Bindings and context stacks are runtime configuration, outside scene archives.
+For the application-owned snapshot, pass an owned submission callback rather
+than taking a mutable reference to the read-only snapshot:
+
+```cpp
+Application app; // outlives the mapper and its callback
+InputBindings bindings([&app](std::span<const InputPacket> packets) {
+    return app.submitInput(packets);
+});
+```
+
+The sink must consume the span synchronously, must not throw, and must follow
+the atomic rejection/cancellation contract of `InputSystem::submit`.
+`Application::submitInput` supplies that contract and rejects input while
+created, suspended or stopped. Paused applications still accept menu/camera
+input. Host lifecycle changes reset the underlying snapshot; cancel the mapper
+alongside that reset and submit fresh device state after resume.
 
 ## Browser contexts and virtual controls
 
@@ -134,6 +150,8 @@ of that focused textbox is hidden from assistive technology while it is in use.
 `setLiveRegion(true)` opts text into polite announcements. Use
 `setAccessibilityHidden(true)` for decorative subtrees, and supply explicit
 names for images, regions and text fields. Button/label text supplies defaults.
+Accessibility-hidden subtrees also leave keyboard/ID-based focus navigation;
+reserve this setting for decorative content, rather than hiding usable actions.
 
 This provides accessibility mechanisms, not a certification of a finished game.
 Text shaping, bidi, grapheme wrapping/selection, font fallback and multiline
@@ -147,4 +165,41 @@ and `tests/input-adapter-tests.cjs`. `scripts/ui-input-smoke.cjs` exercises the
 extensions with real Wasm/WebGPU, the browser accessibility tree, Unicode edits,
 scaled geometry, scrolling and Chromium touch. Existing `gui-smoke.cjs` and
 `input-smoke.cjs` cover the established input/text/rendering contracts.
-Current-run evidence and limitations will be recorded here after validation.
+Verified on 2026-10-10 using an isolated MinGW 16.1.0 Debug build,
+the repository-local Emscripten 6.0.11 Release build, and installed Chrome
+154.0.8037.99 with real WebGPU rendering:
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Focused native `input`, `gui`, `input_adapter` suites | 3/3 passed; GUI 168 assertions, adapter 4 test groups | `build/native-ui-input/Testing/Temporary/LastTest.log` |
+| Release Wasm/browser adapter build | Passed | `build/web-ui-input-release/` |
+| New UI/input browser acceptance | 7 groups passed, no browser errors | `build/evidence/ui-input/result.json` |
+| Existing GUI acceptance | 10 groups passed, no browser errors | `build/evidence/ui-input-gui-regression/results.json` |
+| Existing desktop/touch input acceptance | 10 groups passed, no browser errors | `build/evidence/ui-input-input-regression/result.json` |
+
+The GUI regression uses `?gui=1&shadows=off` for its existing four-pass baseline.
+The extension check uses 2x DPI, browser accessibility-tree inspection, native
+Unicode text editing, actual scaled/scrolling pixels and Chromium touch events.
+Screenshots are retained alongside the JSON results. It checks that touch
+scrolling changes the GUI offset without producing camera action deltas.
+Native binding coverage also exercises the `Application::submitInput` sink
+through created/running/paused/suspended/resumed/stopped states, including
+rejection without replay after resume.
+
+The shared checkout contains concurrent work; these checks used isolated native
+and browser build directories and a private copy of the browser site.
+Example repeat commands (supply Playwright/pngjs through `NODE_PATH` and a
+WebGPU Chrome installation through `BROWSER_EXECUTABLE`):
+
+```powershell
+cmake --build build/native-ui-input --target gui_tests input_tests
+ctest --test-dir build/native-ui-input -R '^(input|gui|input_adapter)$' --output-on-failure
+python scripts/serve.py --port 19473 --directory build/ui-input-site
+# In a second terminal:
+$env:DEMO_URL = 'http://127.0.0.1:19473/'
+node scripts/ui-input-smoke.cjs
+```
+
+Physical Android/iOS, OS keyboards/IME, real screen readers and sustained mobile
+performance were not tested. No complete accessibility compliance claim or
+cross-browser/device acceptance follows from this scoped evidence.

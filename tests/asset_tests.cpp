@@ -191,10 +191,22 @@ void ownedPreparationTeardown() {
     check(source.aborts==2&&live.cancelled()&&app.assets().cachedCount()==0,"Shutdown cancels pending scene IO immediately");
     live.complete<Mesh>(Mesh::cube());check(!app.activeScene(),"Late shutdown callback cannot restore a scene");
 }
+void preparationRedirect() {
+    Application app;const auto initial=app.loadScene(std::make_unique<Scene>());app.start(initial);
+    const auto staged=app.loadScene(std::make_unique<Scene>()),redirect=app.loadScene(std::make_unique<Scene>());
+    int prepared=0;
+    app.prepareScene(staged,std::make_shared<AssetPreparation>(app.assets(),std::vector<AssetId>{}),
+        [&](Scene&,const AssetPreparation&){++prepared;app.requestTransition(redirect);});
+    app.requestTransition(staged);
+    check(!app.commitTransition()&&app.activeSceneId()==initial,"A preparation redirect leaves current scene intact at this boundary");
+    check(app.commitTransition()&&app.activeSceneId()==redirect,"Last transition requested from preparation survives");
+    app.requestTransition(staged);app.commitTransition();check(prepared==1,"A prepared candidate can activate later without rerunning its callback");
+    app.shutdown();
+}
 }
 int main() {
     try {
         registryAndPublication();cancellationAndStaleCompletion();failureRetryAndWorkers();releaseAndBatches();abortAndOverflowContracts();
-        scenePreparation();initialFailureAndCancellation();ownedPreparationTeardown();std::cout<<"Asset resource contracts passed\n";return 0;
+        scenePreparation();initialFailureAndCancellation();ownedPreparationTeardown();preparationRedirect();std::cout<<"Asset resource contracts passed\n";return 0;
     } catch(const std::exception& error) { std::cerr<<error.what()<<'\n';return 1; }
 }

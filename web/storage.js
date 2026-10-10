@@ -116,11 +116,15 @@
   }
   class LocalStorageStorage extends ByteStorage {
     constructor({namespace,maxBytes=2*1024*1024,storage}={}) {
-      super(namespace,maxBytes);this.prefix=`WebEngine:${namespace}:`;
+      super(namespace,maxBytes);this.prefix=`WebEngine:${encodeURIComponent(namespace)}:`;
       // Access may throw when browser policy denies storage; defer it to an operation.
       this.storage=storage;
     }
-    backend() {return this.storage||globalThis.localStorage;}
+    backend() {
+      const storage=this.storage||globalThis.localStorage;
+      if(!storage)throw new StorageError('unavailable','localStorage is unavailable.');
+      return storage;
+    }
     put(key,bytes,{signal}={}) {
       let copy;try{copy=this.copy(bytes);}catch(error){return Promise.reject(failure(error));}
       return this.run(key,signal,()=>{

@@ -1,6 +1,7 @@
 #pragma once
 #include "engine/math.hpp"
 #include <cstdint>
+#include <functional>
 #include <span>
 #include <unordered_map>
 #include <vector>
@@ -72,11 +73,16 @@ struct InputContext {
 };
 // Portable device-to-action mapping. Stack order is bottom to top; the first
 // matching context owns a control. Configuration changes release this mapper's
-// sources only. The borrowed InputSystem must outlive this object. Reserve the
+// sources only. The borrowed InputSystem (or callback captures) must outlive this object. Reserve the
 // [firstSource, firstSource+1023] range exclusively for this mapper.
 class InputBindings {
 public:
+    using Submit = std::function<bool(std::span<const InputPacket>)>;
     explicit InputBindings(InputSystem& input,std::uint32_t firstSource=0x80000000u);
+    // Owns the non-throwing callback, which consumes packets synchronously and must implement
+    // InputSystem's atomic rejection/cancellation contract. Application::submitInput
+    // is a suitable sink; do not bypass its host/lifecycle gate.
+    explicit InputBindings(Submit submit,std::uint32_t firstSource=0x80000000u);
     ~InputBindings();
     InputBindings(const InputBindings&)=delete;
     InputBindings& operator=(const InputBindings&)=delete;
@@ -85,7 +91,7 @@ public:
     bool control(InputControlId control,float value); // Scalar key/axis or displacement.
     void cancel();
 private:
-    InputSystem& input_;
+    Submit submit_;
     std::uint32_t firstSource_;
     std::vector<InputBinding> bindings_;
     std::vector<InputContext> contexts_;

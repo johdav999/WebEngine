@@ -155,10 +155,13 @@ void Application::requestTransition(SceneId next,bool unloadPrevious) {
 }
 bool Application::commitTransition() {
     requireIdle();requireLive();if(!transition_) return false;
-    const auto request=*transition_;
-    try { if(!preparationReady(request.next)) return false; }
-    catch(...) { transition_.reset();throw; }
-    transition_.reset();
+    const auto request=*transition_;transition_.reset();
+    if(!preparationReady(request.next)) {
+        if(!transition_) transition_=request;
+        return false;
+    }
+    // Preparation is user code: a newer request must survive this boundary.
+    if(transition_) return false;
     if(request.next==active_) return false;
     auto* next=findScene(request.next);if(!next) throw std::invalid_argument("Unknown transition scene");
     const auto previous=active_;auto* old=activeScene();
