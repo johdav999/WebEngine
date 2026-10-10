@@ -1,0 +1,15 @@
+cmake_minimum_required(VERSION 3.22)
+project(WebEngineSelectionContracts LANGUAGES C CXX)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+if(NOT EMSCRIPTEN)
+  message(FATAL_ERROR "Configure this harness with emcmake")
+endif()
+# Use the production core without publishing the playground to dist/.
+add_subdirectory("../.." engine)
+add_executable(selection_wasm_tests ../selection_tests.cpp)
+target_link_libraries(selection_wasm_tests PRIVATE engine_core)
+target_compile_options(selection_wasm_tests PRIVATE -fexceptions)
+target_link_options(selection_wasm_tests PRIVATE -fexceptions -sENVIRONMENT=node
+  -sALLOW_MEMORY_GROWTH=1 -sEXIT_RUNTIME=1 -sFILESYSTEM=0)
+set_target_properties(selection_wasm_tests PROPERTIES SUFFIX ".js")

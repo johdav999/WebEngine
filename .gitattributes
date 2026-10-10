@@ -1,0 +1,12 @@
+* text=auto
+*.cpp text eol=lf
+*.c text eol=lf
+*.h text eol=lf
+*.hpp text eol=lf
+*.wgsl text eol=lf
+*.js text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.ps1 text eol=lf
+*.sh text eol=lf
+*.fbx -text

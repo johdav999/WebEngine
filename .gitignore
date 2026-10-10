@@ -1,0 +1,8 @@
+/build/
+/dist/
+/.tools/
+/.cache/
+/.vs/
+/.idea/
+*.user
+__pycache__/

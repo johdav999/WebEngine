@@ -1,0 +1,4 @@
+#pragma once
+inline constexpr const char* mesh_shader = R"WGSL(@MESH_SHADER@)WGSL";
+inline constexpr const char* particle_shader = R"WGSL(@PARTICLE_SHADER@)WGSL";
+inline constexpr const char* gui_shader = R"WGSL(@GUI_SHADER@)WGSL";

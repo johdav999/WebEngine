@@ -1,0 +1,28 @@
+name: Build and verify
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -S . -B build/native -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - run: cmake --build build/native
+      - run: ctest --test-dir build/native --output-on-failure
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Emscripten
+        run: |
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git .tools/emsdk
+          .tools/emsdk/emsdk install "$(cat .emscripten-version)"
+          .tools/emsdk/emsdk activate "$(cat .emscripten-version)"
+      - name: Compile WebAssembly and copy browser shell
+        run: |
+          source .tools/emsdk/emsdk_env.sh
+          emcmake cmake -S . -B build/web-release -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/web-release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: webengine-browser
+          path: dist/

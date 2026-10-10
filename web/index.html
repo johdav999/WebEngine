@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WebEngine · 3D playground</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="material-graph.css">
+  <link rel="stylesheet" href="audio-system.css">
+  <script src="performance.js" defer></script>
+  <script src="animation.js" defer></script>
+  <script src="morphs.js" defer></script>
+  <script src="audio.js" defer></script>
+  <script src="audio-panel.js" defer></script>
+  <script src="audio-system.js" defer></script>
+  <script src="audio-system-panel.js" defer></script>
+  <script src="gui.js" defer></script>
+  <script src="input.js" defer></script>
+  <script src="quality.js" defer></script>
+  <script src="app.js" defer></script>
+  <script src="ship-stress.js" defer></script>
+  <script src="fx.js" defer></script>
+  <script src="materials.js" defer></script>
+  <script src="material-graph.js" defer></script>
+  <script src="material-graph-editor.js" defer></script>
+  <script src="physics.js" defer></script>
+  <script src="compositing.js" defer></script>
+  <script src="storage.js" defer></script>
+  <script src="scene-archive.js" defer></script>
+</head>
+<body>
+  <header><a class="brand" href="./"><span class="brand-icon">W</span> WebEngine <span class="tag">PLAYGROUND / 001</span></a><a href="?gui=1">In-engine GUI demo</a><span class="stack">C++20 <span>→</span> WebAssembly <span>→</span> WebGPU</span></header>
+  <main>
+    <section class="viewport-panel" aria-label="Interactive 3D scene">
+      <div class="scene-title"><span class="eyebrow">LIVE SCENE</span><h1>A small world.<br>A solid foundation.</h1><p id="scene-description">Loading Knarr…</p></div>
+      <canvas id="viewport" aria-label="Drag or use arrow keys to orbit. Shift-drag to pan. Scroll or pinch to zoom." tabindex="0"></canvas>
+      <div class="camera-touch-controls" aria-label="Camera controls">
+        <button id="camera-zoom-in" type="button" aria-label="Zoom in">+</button>
+        <button id="camera-zoom-out" type="button" aria-label="Zoom out">−</button>
+      </div>
+      <div class="view-footer"><span><span class="dot" id="status-dot"></span><span id="status" role="status">Preparing engine…</span></span><span>DRAG / ARROWS TO ORBIT <b>·</b> SHIFT TO PAN <b>·</b> SCROLL / PINCH TO ZOOM</span></div>
+    </section>
+    <aside>
+      <div class="aside-heading"><span class="eyebrow">ENGINE INSPECTOR</span><h2>Scene essentials</h2></div>
+      <section class="inspector-section" aria-labelledby="quality-heading">
+        <h3 id="quality-heading">Rendering quality</h3>
+        <label>Profile <select id="quality-profile" disabled><option value="0">Low</option><option value="1" selected>Balanced</option><option value="2">High</option><option value="custom" disabled>Custom</option></select></label>
+        <details><summary>Resolution and shadow budgets</summary>
+          <form id="quality-form">
+            <label>Resolution scale <input id="quality-scale" type="number" min="0.25" max="2" step="0.05" value="1" required disabled></label>
+            <label>Maximum pixel ratio <input id="quality-ratio" type="number" min="0.5" max="4" step="0.5" value="2" required disabled></label>
+            <label>Maximum dimension <input id="quality-dimension" type="number" min="1" max="16384" value="4096" required disabled></label>
+            <label>Maximum pixels <input id="quality-pixels" type="number" min="1" max="268435456" value="16777216" required disabled></label>
+            <label>Maximum shadow maps <input id="quality-maps" type="number" min="0" max="4" value="4" required disabled></label>
+            <label><input id="quality-lod" type="checkbox" checked disabled> Use available mesh LOD</label>
+            <label><input id="quality-compressed" type="checkbox" checked disabled> Use available compressed textures</label>
+            <button type="submit" disabled>Apply budgets</button>
+          </form>
+        </details>
+        <p id="quality-capabilities" role="status">Waiting for GPU capabilities…</p>
+        <button id="retry-gpu" hidden>Retry GPU connection</button>
+      </section>
+      <section class="inspector-section" aria-labelledby="archive-heading">
+        <h3 id="archive-heading">Scenes &amp; assets</h3>
+        <div class="buttons"><button id="save-scene" disabled>Save scene</button><button id="open-scene" disabled>Open scene</button></div>
+        <div class="buttons"><button id="save-assets" disabled>Export assets</button><button id="open-assets" disabled>Import assets</button></div>
+        <details><summary>Browser saves</summary>
+          <div class="buttons"><button id="save-progress" disabled>Save progress</button><button id="load-progress" disabled>Open progress</button></div>
+          <button id="delete-progress" disabled>Delete saved progress</button>
+          <p>One checkpoint in this browser. Save explicitly; browser data can be cleared.</p>
+        </details>
+        <button id="archive-return" disabled hidden>Return to playground</button>
+        <input id="scene-archive-file" type="file" accept=".wescene" hidden>
+        <input id="asset-archive-file" type="file" accept=".weassets" hidden>
+        <p id="archive-status" role="status" aria-live="polite">Save the scene with its meshes, materials, textures and audio. Files stay on your device.</p>
+      </section>
+      <section class="inspector-section ship-stress-panel" aria-labelledby="ship-stress-heading">
+        <h3 id="ship-stress-heading">Hansa ship stress test</h3>
+        <form id="ship-stress-form">
+          <label for="ship-stress-count">Number of ships</label>
+          <input id="ship-stress-count" type="number" min="0" max="10000" step="1" value="100" required disabled aria-describedby="ship-stress-help">
+          <div class="buttons"><button id="ship-stress-apply" type="submit" disabled>Render ships</button><button id="ship-stress-stop" type="button" disabled>Return to scene</button></div>
+        </form>
+        <div class="buttons ship-stress-presets" aria-label="Ship count presets"><button type="button" data-ship-count="10" disabled>10</button><button type="button" data-ship-count="100" disabled>100</button><button type="button" data-ship-count="1000" disabled>1,000</button><button type="button" data-ship-count="10000" disabled>10,000</button></div>
+        <p id="ship-stress-help">0–10,000 Knarr ships, spread across the ground. Ships scale to fit. Check FPS and Performance below.</p>
+        <details id="detail-controls"><summary>Mesh detail and shadows</summary>
+          <label><input id="mesh-lod" type="checkbox" checked disabled> Screen-size mesh detail</label>
+          <label><input id="shadow-lod" type="checkbox" checked disabled> Shadow detail by texel size</label>
+          <label><input id="shadow-casting" type="checkbox" checked disabled> Cast shadows</label>
+          <label><input id="shadow-receiving" type="checkbox" checked disabled> Receive shadows</label>
+          <label><input id="shadow-culling" type="checkbox" checked disabled> Cull outside shadow volume</label>
+          <label>Shadow resolution <select id="shadow-resolution" disabled><option>256</option><option>512</option><option selected>1024</option><option>2048</option></select></label>
+          <label>Shadow filtering <select id="shadow-filter" disabled><option value="1">1 comparison sample</option><option value="9" selected>9 comparison samples (soft)</option></select></label>
+          <p>Changes reset timing samples. Pause motion and keep the same camera for comparisons. Sun shadows in Scene controls disables all shadow work.</p>
+          <p id="detail-cost" aria-live="polite"></p>
+        </details>
+        <p id="ship-stress-status" role="status" aria-live="polite">Choose a count to render the fleet.</p>
+      </section>
+      <section class="inspector-section" id="physics-panel" aria-labelledby="physics-heading">
+        <h3 id="physics-heading">Physics playground</h3>
+        <div class="buttons"><button id="physics-start" disabled>Physics playground</button><button id="physics-return" disabled>Return to scene</button></div>
+        <p id="physics-help">Watch boxes and spheres fall, bounce, and settle. Click or tap a body to give it an impulse.</p>
+        <div class="buttons"><button id="physics-box" disabled>Add box</button><button id="physics-sphere" disabled>Add sphere</button><button id="physics-reset" disabled>Reset bodies</button></div>
+        <label><span>Show colliders</span><input id="physics-debug" type="checkbox" disabled></label>
+        <p id="physics-status" role="status">Start the playground to simulate bodies.</p>
+        <p id="physics-message" role="status"></p>
+      </section>
+      <section class="inspector-section">
+        <h3>Camera views</h3>
+        <label for="camera-layout">Layout</label>
+        <select id="camera-layout" disabled><option value="0">Single camera</option><option value="1">Split screen</option><option value="2">Overview inset</option></select>
+      </section>
+      <section class="inspector-section material-panel" aria-labelledby="material-heading">
+        <h3 id="material-heading">Materials · live preview</h3>
+        <div class="buttons"><button id="material-graph-open" disabled>Open material graph</button></div>
+        <div class="buttons"><button id="material-showcase" disabled>Material showcase</button><button id="material-return" disabled>Return to scene</button></div>
+        <p id="material-help">Select an object and a material slot. Edits affect this object only. Use Save scene to keep them.</p>
+        <fieldset id="material-fields" disabled>
+          <label for="material-object">Object</label><select id="material-object"></select>
+          <label for="material-slot">Material slot</label><select id="material-slot"></select>
+          <label for="material-shader">Shader</label><select id="material-shader"><option value="0">PBR</option><option value="1">Unlit</option></select>
+          <label for="material-color">Base color</label><input id="material-color" type="color" value="#ffffff">
+          <label for="material-roughness">Roughness <output></output></label><input id="material-roughness" type="range" min="0" max="1" step="0.01">
+          <label for="material-metallic">Metallic <output></output></label><input id="material-metallic" type="range" min="0" max="1" step="0.01">
+          <label for="material-normal">Normal strength <output></output></label><input id="material-normal" type="range" min="0" max="4" step="0.05">
+          <label for="material-occlusion">Occlusion strength <output></output></label><input id="material-occlusion" type="range" min="0" max="1" step="0.01">
+          <label for="material-emissive">Emissive color</label><input id="material-emissive" type="color" value="#ffffff">
+          <label for="material-emission">Emission intensity <output></output></label><input id="material-emission" type="range" min="0" max="20" step="0.1">
+          <label for="material-alpha">Alpha mode</label><select id="material-alpha"><option value="0">Opaque</option><option value="1">Mask / cutout</option><option value="2">Blend</option><option value="3">Additive</option></select>
+          <label for="material-opacity">Opacity <output></output></label><input id="material-opacity" type="range" min="0" max="1" step="0.01">
+          <label for="material-cutoff">Alpha cutoff <output></output></label><input id="material-cutoff" type="range" min="0" max="1" step="0.01">
+          <label class="check-label" for="material-double"><span>Double-sided</span><input id="material-double" type="checkbox"></label>
+          <details><summary>UV transform</summary><div class="material-uv">
+            <label for="material-scale-x">Scale U</label><input id="material-scale-x" type="number" step="0.1">
+            <label for="material-scale-y">Scale V</label><input id="material-scale-y" type="number" step="0.1">
+            <label for="material-offset-x">Offset U</label><input id="material-offset-x" type="number" step="0.1">
+            <label for="material-offset-y">Offset V</label><input id="material-offset-y" type="number" step="0.1">
+          </div></details>
+          <details><summary>Texture maps</summary>
+            <p id="material-maps"></p>
+            <label for="material-map">Map to edit</label><select id="material-map"><option value="0">Base color · sRGB</option><option value="1">Roughness G / metallic B · linear</option><option value="2">Normal · tangent space +Y</option><option value="3">Occlusion R · linear</option><option value="4">Emissive · sRGB</option></select>
+            <div class="buttons"><button id="material-map-load">Choose image</button><button id="material-map-clear">Remove map</button></div>
+            <input id="material-map-file" type="file" accept="image/png,image/jpeg,.tga,.bmp" hidden>
+          </details>
+          <button id="material-reset">Reset selected slot</button>
+        </fieldset>
+        <details class="material-environment" open><summary>Environment lighting</summary>
+          <label for="environment-intensity">Intensity <output></output></label><input id="environment-intensity" type="range" min="0" max="5" step="0.05" value="1" disabled>
+          <label for="environment-rotation">Rotation <output></output></label><input id="environment-rotation" type="range" min="-180" max="180" step="1" value="0" disabled>
+          <div class="buttons"><button id="environment-load" disabled>Choose panorama</button><button id="environment-reset" disabled>Studio sky</button></div>
+          <input id="environment-file" type="file" accept="image/png,image/jpeg,.tga,.bmp" hidden>
+          <p>Use a 2:1 panorama image for surrounding light and reflections.</p>
+        </details>
+        <p id="material-status" role="status" aria-live="polite">Waiting for the scene…</p>
+      </section>
+      <section class="inspector-section" aria-labelledby="morph-heading">
+        <h3 id="morph-heading">Morph targets</h3>
+        <div class="buttons"><button id="morph-demo" disabled>Load morph demo</button><button id="morph-reset" disabled>Reset weights</button></div>
+        <p id="morph-status" role="status">Import an FBX or GLB with morph targets, or load the demo.</p>
+        <fieldset id="morph-fields" disabled></fieldset>
+      </section>
+      <section class="inspector-section audio-system-panel" aria-labelledby="audio-system-heading">
+        <h3 id="audio-system-heading">Audio system</h3>
+        <p>Play overlapping sounds or a music loop. A quiet test tone is ready to use.</p>
+        <div class="buttons"><button id="sound-enable">Enable audio</button><button id="sound-shot">Play emitter</button><button id="sound-loop">Loop music</button></div>
+        <div class="buttons"><button id="sound-fade">Fade out music</button><button id="sound-stop">Stop all voices</button><button id="sound-import">Import shared sound</button></div>
+        <input id="sound-file" type="file" accept=".mp3,.wav" hidden>
+        <label for="sound-master">Master volume</label><input id="sound-master" type="range" min="0" max="1" step="0.01" value="1">
+        <label><input id="sound-mute" type="checkbox"> Mute all buses</label>
+        <label for="sound-effects">Effects bus volume</label><input id="sound-effects" type="range" min="0" max="1" step="0.01" value="1">
+        <label for="sound-music">Music bus volume</label><input id="sound-music" type="range" min="0" max="1" step="0.01" value="1">
+        <label for="sound-x">Emitter X position</label><input id="sound-x" type="range" min="-10" max="10" step="0.1" value="2">
+        <p id="sound-status" role="status" aria-live="polite">Enable audio with a click or key press.</p>
+      </section>
+      <section class="inspector-section audio-panel" aria-labelledby="audio-heading">
+        <h3 id="audio-heading">MP3 / WAV audio</h3>
+        <button id="import-audio" data-audio-control>Import audio</button>
+        <input id="audio-file" data-audio-control type="file" accept=".mp3,.wav,audio/mpeg,audio/wav,audio/x-wav" hidden>
+        <p id="audio-name">No audio loaded</p>
+        <canvas id="audio-waveform" width="512" height="160" role="slider" aria-label="Audio waveform position" aria-disabled="true" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0" tabindex="-1"></canvas>
+        <div class="audio-time"><output id="audio-position">0:00.00</output><span>/</span><output id="audio-duration">0:00.00</output></div>
+        <label class="audio-seek-label" for="audio-seek">Position in audio</label>
+        <input id="audio-seek" data-audio-control type="range" min="0" max="0" step="0.01" value="0" disabled>
+        <div class="buttons"><button id="audio-play" data-audio-control disabled>Play</button><button id="audio-pause" data-audio-control disabled>Pause</button><button id="audio-stop" data-audio-control disabled>Stop</button></div>
+        <p id="audio-status" role="status">Select a local MP3 or WAV · up to 32 MB</p>
+        <p class="audio-help">Click or drag the waveform to seek. Stop returns to the beginning.</p>
+      </section>
+      <details class="inspector-section performance-panel" open>
+        <summary>Performance <span data-perf="build">—</span></summary>
+        <p class="perf-caption">Rolling mean / p95 · milliseconds</p>
+        <dl class="perf-values">
+          <dt>Frame interval</dt><dd data-perf="interval">—</dd>
+          <dt>CPU engine work</dt><dd data-perf="cpu">—</dd>
+          <dt>GPU render passes</dt><dd data-perf="gpu">—</dd>
+          <dt>Draw calls</dt><dd data-perf="draws">—</dd>
+          <dt>Instances / batched draws</dt><dd data-perf="instances">—</dd>
+          <dt>Triangles submitted</dt><dd data-perf="triangles">—</dd>
+          <dt>Skinned instances / rigs</dt><dd data-perf="skeletons">—</dd>
+          <dt>Bone writes / bytes</dt><dd data-perf="boneUploads">—</dd>
+          <dt>Particles / FX draws</dt><dd data-perf="particles">—</dd>
+          <dt>Particle writes / bytes</dt><dd data-perf="particleUploads">—</dd>
+          <dt>Uploads</dt><dd data-perf="uploads">—</dd>
+          <dt>GPU payload estimate</dt><dd data-perf="gpuMemory">—</dd>
+        </dl>
+        <details class="perf-breakdown"><summary>Timing and memory details</summary><dl class="perf-values">
+          <dt>Animation update</dt><dd data-perf="update">—</dd>
+          <dt>Scene collection</dt><dd data-perf="collect">—</dd>
+          <dt>Prepare &amp; upload</dt><dd data-perf="prepare">—</dd>
+          <dt>Command encoding</dt><dd data-perf="encode">—</dd>
+          <dt>Queue submit (CPU)</dt><dd data-perf="submit">—</dd>
+          <dt>GPU layers: B / W / O</dt><dd data-perf="gpuLayers">—</dd>
+          <dt>GPU shadow maps</dt><dd data-perf="gpuShadows">—</dd>
+          <dt>GPU sampling</dt><dd data-perf="gpuSamples">—</dd>
+          <dt>CPU window</dt><dd data-perf="samples">—</dd>
+          <dt>Materials / pipelines</dt><dd data-perf="materials">—</dd>
+          <dt>Material writes / bytes</dt><dd data-perf="materialUploads">—</dd>
+          <dt>Resource cache</dt><dd data-perf="cache">—</dd>
+          <dt>CPU asset payload</dt><dd data-perf="cpuMemory">—</dd>
+          <dt>CPU frame storage</dt><dd data-perf="frameMemory">—</dd>
+          <dt>CPU / GPU growth this frame</dt><dd data-perf="frameGrowth">—</dd>
+          <dt>CPU / GPU growth since reset</dt><dd data-perf="frameGrowthTotal">—</dd>
+          <dt>Objects uploaded</dt><dd data-perf="changedObjects">—</dd>
+          <dt>Object writes / bytes</dt><dd data-perf="objectUploads">—</dd>
+          <dt>Camera/light writes / bytes</dt><dd data-perf="frameUploads">—</dd>
+          <dt>Scene matrix rebuilds: L / W / N</dt><dd data-perf="transformBuilds">—</dd>
+          <dt>Wasm capacity</dt><dd data-perf="wasmMemory">—</dd>
+          <dt>Upload bytes since reset</dt><dd data-perf="uploadTotal">—</dd>
+          <dt>Last resource preparation</dt><dd data-perf="resource">—</dd>
+        </dl><p class="perf-caption">GPU timing excludes uploads and presentation. Memory shows payload estimates; Wasm shows reserved capacity.</p></details>
+        <details class="perf-breakdown"><summary>Last asset load</summary><p data-perf="asset" class="perf-caption">No import yet</p><dl class="perf-values">
+          <dt>Read / fetch</dt><dd data-perf="assetRead">—</dd>
+          <dt>Copy to Wasm</dt><dd data-perf="assetCopy">—</dd>
+          <dt>Model parse</dt><dd data-perf="assetParse">—</dd>
+          <dt>Image decode &amp; copy</dt><dd data-perf="assetDecode">—</dd>
+          <dt>Mesh conversion</dt><dd data-perf="assetConvert">—</dd>
+          <dt>Mesh optimization</dt><dd data-perf="assetOptimize">—</dd>
+          <dt>Vertices before / after</dt><dd data-perf="assetVertices">—</dd>
+          <dt>Fit for preview</dt><dd data-perf="assetFit">—</dd>
+          <dt>Import wall time</dt><dd data-perf="assetTotal">—</dd>
+        </dl></details>
+        <div class="buttons"><button id="reset-performance" disabled>Reset samples</button><button id="export-performance" disabled>Export JSON</button></div>
+      </details>
+      <section class="inspector-section"><h3>Scene graph</h3><ul class="tree"><li>Demo scene<ul><li>Camera <span>perspective</span></li><li>Sun <span>directional</span></li><li>Ground &amp; grid</li><li id="assembly-node">Rotating assembly<ul><li>Core cube<ul><li>Nested crown</li></ul></li><li>4 satellite actors</li></ul></li><li id="imported-node" hidden><span id="imported-name">Imported model</span><ul id="imported-components"><li>Mesh component</li></ul></li><li>Moving light rig<ul><li>Point light<ul><li>Mesh marker</li></ul></li></ul></li><li>Overlay axes</li></ul></li></ul></section>
+      <section class="inspector-section"><h3>Render layers</h3><div class="layer"><span>01</span> Background <small>clear</small></div><div class="layer"><span>02</span> World <small>depth tested</small></div><div class="layer"><span>03</span> Overlay <small>above world</small></div></section>
+      <section class="inspector-section controls"><h3>Scene controls</h3><label><span>Directional light</span><input id="sun" type="checkbox" checked disabled></label><label><span>Sun shadows</span><input id="shadows" type="checkbox" checked disabled></label><label><span>Moving point light</span><input id="point" type="checkbox" checked disabled></label><div class="buttons"><button id="pause" disabled>Pause motion</button><button id="reset" disabled>Reset camera</button></div></section>
+      <section class="inspector-section importer"><h3>3D model</h3><div class="buttons"><button id="import-fbx" disabled>Import FBX / GLB</button><button id="restore-demo" disabled>Restore demo</button></div><input id="fbx-file" type="file" accept=".fbx,.glb,.png,.jpg,.jpeg,.tga,.bmp" multiple hidden disabled><p id="import-status" role="status">Select an FBX or GLB with companion images · 32 MB each</p><p id="texture-info" role="status">Embedded base-color textures load automatically.</p><button id="apply-texture" disabled>Override texture</button><input id="texture-file" type="file" accept=".png,.jpg,.jpeg,.tga,.bmp" hidden disabled></section>
+      <section class="inspector-section animation-panel"><h3>Skeletal animation</h3><button id="skeletal-demo" disabled>Load animated FBX demo</button><p id="animation-info">Import a skeletal FBX or GLB with animation clips.</p>
+        <div id="animation-controls">
+          <label for="animation-clip">Clip A / crossfade target</label><select id="animation-clip" disabled></select>
+          <label for="animation-clip-b">Clip B</label><select id="animation-clip-b" disabled></select>
+          <div class="buttons"><button id="animation-play" disabled>Play</button><button id="animation-pause" disabled>Pause / resume</button><button id="animation-stop" disabled>Stop</button></div>
+          <label>Loop <input id="animation-loop" type="checkbox" checked disabled></label>
+          <label>Speed <input id="animation-speed" type="number" value="1" min="0.1" max="4" step="0.1" disabled></label>
+          <label>Blend A → B <output id="animation-weight-value">0.50</output><input id="animation-weight" type="range" min="0" max="1" step="0.01" value="0.5" disabled></label>
+          <button id="animation-blend" disabled>Play blend</button>
+          <label>Fade seconds <input id="animation-fade-time" type="number" value="0.4" min="0" max="5" step="0.1" disabled></label><button id="animation-fade" disabled>Crossfade to A</button>
+        </div><p id="animation-state" role="status">Stopped · bind pose</p>
+      </section>
+      <section id="fx-panel" class="inspector-section animation-panel"><h3>Visual effects</h3>
+        <label for="fx-preset">Effect preset</label><select id="fx-preset" disabled><option value="0">Campfire</option><option value="1">Explosion</option></select>
+        <div class="buttons"><button id="fx-play" disabled>Play / restart</button><button id="fx-pause" disabled>Pause</button></div>
+        <div class="buttons"><button id="fx-stop" disabled>Stop emission</button><button id="fx-clear" disabled>Clear</button></div>
+        <p id="fx-status" role="status">Stopped · 0 particles</p>
+        <details><summary>Import flame flipbook</summary>
+          <label>Columns <input id="fx-columns" type="number" min="1" max="4096" value="4" disabled></label>
+          <label>Rows <input id="fx-rows" type="number" min="1" max="4096" value="2" disabled></label>
+          <label>Frames <input id="fx-frames" type="number" min="1" value="8" disabled></label>
+          <label>Cycles per particle <input id="fx-cycles" type="number" min="0.01" max="1024" step="0.1" value="1" disabled></label>
+          <button id="fx-import" disabled>Import PNG flipbook</button><input id="fx-file" type="file" accept=".png" hidden disabled>
+          <p id="fx-message" role="status">Frames run left to right, then top to bottom. Import applies to the flame emitter.</p>
+        </details>
+      </section>
+      <div class="metrics"><div><strong id="mesh-count">—</strong><span>MESHES</span></div><div><strong id="light-count">—</strong><span>LIGHTS</span></div><div><strong id="fps">—</strong><span>FPS</span></div></div>
+    </aside>
+    <section id="material-graph-panel" class="graph-panel" aria-labelledby="graph-heading" hidden>
+      <div class="graph-header"><div><span class="eyebrow">MATERIAL WORKSPACE</span><h2 id="graph-heading">Material graph</h2><p id="graph-target"></p></div><button id="graph-close">Close graph</button></div>
+      <div class="graph-toolbar">
+        <label for="graph-node-type">Node</label><select id="graph-node-type"></select><button id="graph-add">Add node</button>
+        <button id="graph-undo" disabled>Undo</button><button id="graph-redo" disabled>Redo</button><button id="graph-delete">Delete selected</button>
+        <button id="graph-fit">Fit graph</button><button id="graph-zoom-out" aria-label="Zoom graph out">−</button><button id="graph-zoom-in" aria-label="Zoom graph in">+</button><button id="graph-new">Reset graph</button><button id="graph-checker">Checker example</button>
+        <label for="graph-resolution">Bake size</label><select id="graph-resolution"><option>64</option><option selected>128</option><option>256</option></select>
+        <label class="graph-live"><input id="graph-live" type="checkbox" checked>Live preview</label><button id="graph-apply">Apply graph</button>
+        <button id="graph-save">Save JSON</button><button id="graph-load">Load JSON</button><input id="graph-file" type="file" accept=".json,application/json" hidden>
+      </div>
+      <p class="graph-help">Connect an output to an input. Click an input again to disconnect. Drag node headers to arrange; drag empty space to pan; scroll to zoom. Delete removes selected nodes. Values may feed color inputs. Unconnected inputs use material defaults.</p>
+      <div id="graph-canvas" class="graph-canvas" tabindex="0" aria-label="Material node graph"><div id="graph-world" class="graph-world"><svg id="graph-wires" aria-hidden="true"></svg><div id="graph-nodes"></div></div></div>
+      <p id="graph-status" role="status" aria-live="polite">Select a material to begin.</p>
+      <p class="graph-help">Procedural and image branches bake to texture maps when edited. Existing maps remain on channels the graph does not bake. Save JSON to keep graphs and embedded images across sessions.</p>
+    </section>
+  </main>
+  <footer><span>WEBENGINE <span class="version">v0.1</span></span><span>A browser engine, built from reusable parts.</span></footer>
+</body>
+</html>

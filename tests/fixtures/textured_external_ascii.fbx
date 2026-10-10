@@ -1,0 +1,68 @@
+; FBX 7.4.0 project file
+FBXHeaderExtension: { FBXVersion: 7400 }
+GlobalSettings: {
+ Properties70: {
+  P: "UpAxis", "int", "Integer", "",1
+  P: "UpAxisSign", "int", "Integer", "",1
+  P: "FrontAxis", "int", "Integer", "",2
+  P: "FrontAxisSign", "int", "Integer", "",1
+  P: "CoordAxis", "int", "Integer", "",0
+  P: "CoordAxisSign", "int", "Integer", "",1
+  P: "UnitScaleFactor", "double", "Number", "",100
+ }
+}
+Objects: {
+ Geometry: 1000, "Geometry::Panels", "Mesh" {
+  Vertices: *18 { a: -1,0,0,0,0,0,0,2,0,-1,2,0,1,0,0,1,2,0 }
+  PolygonVertexIndex: *8 { a: 0,1,2,-4,1,4,5,-3 }
+  LayerElementUV: 0 {
+   Name: "UVMap"
+   MappingInformationType: "ByPolygonVertex"
+   ReferenceInformationType: "IndexToDirect"
+   UV: *12 { a: 0,0,1,0,1,1,0,1,0,0,0,1 }
+   UVIndex: *8 { a: 0,1,2,3,4,1,2,5 }
+  }
+  LayerElementMaterial: 0 {
+   MappingInformationType: "ByPolygon"
+   ReferenceInformationType: "IndexToDirect"
+   Materials: *2 { a: 0,1 }
+  }
+  Layer: 0 {
+   LayerElement: { Type: "LayerElementUV" TypedIndex: 0 }
+   LayerElement: { Type: "LayerElementMaterial" TypedIndex: 0 }
+  }
+ }
+ Model: 2000, "Model::Panels", "Mesh" { Version: 232 }
+ Material: 3000, "Material::White", "" {
+  ShadingModel: "lambert"
+  Properties70: { P: "DiffuseColor", "Color", "", "A",1,1,1 }
+ }
+ Material: 3001, "Material::Tinted", "" {
+  ShadingModel: "lambert"
+  Properties70: { P: "DiffuseColor", "Color", "", "A",0.5,1,1 }
+ }
+ Texture: 4000, "Texture::UVColors", "" {
+  Type: "TextureVideoClip"
+  FileName: "Textures/uv-colors.png"
+  RelativeFilename: "Textures/uv-colors.png"
+  Properties70: {
+   P: "UVSet", "KString", "", "", "UVMap"
+   P: "WrapModeU", "enum", "", "",1
+   P: "WrapModeV", "enum", "", "",0
+  }
+ }
+ Video: 5000, "Video::UVColors", "Clip" {
+  Type: "Clip"
+  Filename: "Textures/uv-colors.png"
+  RelativeFilename: "Textures/uv-colors.png"
+ }
+}
+Connections: {
+ C: "OO",1000,2000
+ C: "OO",2000,0
+ C: "OO",3000,2000
+ C: "OO",3001,2000
+ C: "OP",4000,3000,"DiffuseColor"
+ C: "OP",4000,3001,"DiffuseColor"
+ C: "OO",5000,4000
+}

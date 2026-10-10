@@ -1,0 +1,1318 @@
+# WebEngine
+
+Versioned application snapshots, custom component codecs, stable saved identities
+and IndexedDB/localStorage byte adapters build on the scene archives. The inspector
+offers an explicit browser checkpoint under **Scenes & assets → Browser saves**.
+See [Persistence and browser storage](docs/persistence.md).
+
+Asset identifiers, asynchronous loading, caching, progress, cancellation, unloading
+and preparation before scene activation are available through `AssetManager`,
+`AssetPreparation` and `Application::prepareScene`. See [asset resource contracts](docs/assets.md).
+
+Reusable object definitions are available through `Prefab`: instantiate configured
+actor/component hierarchies with shared assets, per-instance overrides and
+application-registered component factories. See [prefab usage and contracts](docs/prefabs.md).
+
+Selection and interaction is available through `InteractionComponent` and
+`Scene::selection()`: pointer/ray picking, action eligibility/execution, and
+ordered selection/focus events. See [the API and integration guide](docs/selection.md).
+
+Application start/pause/resume/shutdown, scene ownership and transitions, and
+input/simulation/presentation clock contracts are documented in
+[Application and scene lifecycle](docs/application-lifecycle.md).
+
+A C++20 browser 3D engine starter, compiled to WebAssembly with Emscripten. The C++ renderer uses the WebGPU C++ API through [Emdawnwebgpu](https://emscripten.org/docs/porting/multimedia_and_graphics/WebGPU-support.html); JavaScript hosts the canvas and forwards input.
+
+The demo automatically loads `tests/fixtures/Knarr.fbx` through the FBX importer, including its seven embedded base-color textures and material assignments. It renders with a ground grid, a perspective orbit camera, a directional light, a moving point light, and overlay axes. Pause motion, switch lights, drag to orbit, scroll to zoom, or reset the camera.
+
+The browser build copies the Knarr asset to `dist/assets/Knarr.fbx`, which the page fetches at startup. Use **Import FBX / GLB** to select one local binary or ASCII `.fbx` file or binary glTF 2.0 `.glb` file together with its companion images. Embedded images load automatically; external references resolve against selected images by filename, case-insensitively. Missing images produce an inspector warning and use the material color. **Override texture** applies an image to every material of the imported mesh. Files stay local; no file upload is involved. **Restore demo** returns to the original cube scene. Reload the page to load Knarr again.
+
+## Run on Windows
+
+Prerequisites: Git, Python 3, CMake 3.22+, and Ninja on PATH. Use PowerShell from this directory:
+
+```powershell
+./scripts/setup.ps1                  # Install pinned Emscripten 6.0.11 in .tools/emsdk
+./scripts/build.ps1                  # Debug WebAssembly build
+./scripts/serve.ps1                  # http://localhost:8080; Ctrl+C to stop
+```
+
+Open [the demo](http://localhost:8080) in a WebGPU-capable browser. WebGPU requires a secure context: localhost works for development; deploy through HTTPS. Browser/GPU support is checked at startup and errors appear in the status bar.
+
+The setup script does not install global SDK environment settings. `.tools`, `build`, and `dist` are ignored by Git. First setup downloads the compiler toolchain; the first browser build also downloads the SDK-pinned Dawn port.
+
+```powershell
+./scripts/build.ps1 -Configuration Release
+./scripts/serve.ps1 -Port 8081
+```
+
+Both configurations have their own build outputs. Each build publishes its selected output plus the shell into `dist/`. Deploy that entire directory, including `webengine.js` and `webengine.wasm`, with `application/wasm` as the Wasm MIME type. This starter uses one browser thread and needs no cross-origin isolation headers.
+
+## Run on Linux or macOS
+
+Install Git, Python 3, CMake, and Ninja, then:
+
+```sh
+git clone --depth 1 https://github.com/emscripten-core/emsdk.git .tools/emsdk
+.tools/emsdk/emsdk install "$(cat .emscripten-version)"
+.tools/emsdk/emsdk activate "$(cat .emscripten-version)"
+source .tools/emsdk/emsdk_env.sh
+emcmake cmake -S . -B build/web-debug -G Ninja -DCMAKE_BUILD_TYPE=Debug
+cmake --build build/web-debug
+python3 scripts/serve.py
+```
+
+## Composable camera controllers
+
+`CameraController` composes world-space orbit, follow, tracking, group framing,
+half-life smoothing, swept-sphere collision avoidance and interruptible pose/lens
+transitions. Targets use actor/component handles or world points. Applications
+choose behaviours and supply commands, camera delta and viewport aspect after
+scene/physics updates. Collision constraints run after smoothing/transitions and
+reuse optional scene queries; cameras alone do not initialize physics.
+
+See [camera controller contracts and examples](docs/camera-controllers.md) for
+following/orbit modes, framing, custom behaviours/queries, ownership, update
+ordering and validation. The playground's existing parent-space `OrbitController`
+remains compatible with input actions and scene archives.
+
+## Rendering quality and browser resilience
+
+The **Rendering quality** inspector selects Low, Balanced (default) or High,
+with custom resolution scale, DPR/dimension/pixel limits and shadow-map counts.
+`?quality=low|balanced|high` selects the initial profile. Device capabilities and
+GPU connection status are reported in the panel and performance JSON. Device
+loss automatically rebuilds GPU resources while retaining scene and pause state;
+exhausted recovery exposes an explicit retry. Visibility, frozen pages and
+pagehide/pageshow share the existing suspension/clock contract.
+
+Optional LOD reuses prepared shared meshes. Authored semantic BC7/ETC2/ASTC mip
+variants can use supported devices with retained RGBA fallback; ordinary asset
+imports continue to decode RGBA. See [quality APIs, lifecycle and validation](docs/rendering-quality.md).
+
+## Mouse, keyboard and mobile input
+
+Portable `InputBindings` maps application-defined controls through a context
+stack to the existing action snapshots. The browser adapter also supports
+stacked contexts and disposable virtual controls with configurable stick dead
+zones, radius and axis inversion. GUI wrapping, scaling, scroll panels and
+accessibility integration are described in [UI/input integration](docs/ui-input-integration.md).
+Open `?gui=1&guiExtensions=1` to exercise these GUI features.
+
+The browser host uses `web/input.js` and Pointer Events for mouse, pen and
+multi-touch input. `engine::InputSystem` in `engine_core` exposes the same action
+API to all controllers. The demo camera consumes `Orbit`, `Pan`, `Zoom` and
+`ResetCamera`; applications can consume `Select`, `Move`, `Look`, `Interact` or
+their own nonzero 32-bit action IDs.
+
+| Action | Mouse / keyboard | Android / iOS browser touch |
+| --- | --- | --- |
+| Orbit | Left drag, arrow keys | One-finger drag |
+| Pan | Middle drag, Shift-drag, Shift + arrows | Two-finger drag |
+| Zoom | Wheel, + / − | Pinch, hold + / − buttons |
+| Select action | Click | Tap |
+| Reset camera | R, Reset camera button | Reset camera button |
+
+Focus the canvas to use camera keys. Six CSS pixels separate taps from drags.
+Adding/removing a finger rebases the gesture without jumping. A pointer keeps its
+owner until release: scene, C++ GUI or a virtual control. GUI input and focused
+text fields consume input before camera controls. Existing GUI text editing uses
+its browser textarea service for Unicode, selection, composition and mobile
+keyboards; gameplay never derives text from physical key codes.
+
+Input is batched into Wasm once before each frame update. The host retains a
+reusable buffer and rebuilds its typed-array view after Wasm memory growth. The
+engine preserves all press/release transitions, including taps between frames,
+and sums displacement once per frame. Held axes use elapsed time; pointer
+displacement does not. Blur, hidden pages, viewport resizing and context changes
+release held input and discard unfinished gestures. Event queues are bounded;
+overflow or invalid packets cancel input instead of leaving keys stuck.
+
+`InputActionState` supplies `pressed`, `held`, `released`, `value` (a clamped
+two-dimensional held axis) and `delta` (accumulated displacement). Independent
+bindings have independent source IDs: releasing one key/finger preserves another
+source holding the same action. Opposing sources can produce a zero axis while
+the action remains held. `beginFrame()` consumes the pending queue and expires
+the previous frame's edges and deltas. `events()` retains ordered records for
+that frame; `pointers()` contains scene-owned active contacts, with both local
+CSS coordinates and actual canvas backing pixels for picking.
+
+```cpp
+#include "engine/input.hpp"
+
+// Once per frame, after the device adapter has submitted input:
+input.beginFrame();
+const auto& movement = input.action(engine::InputActions::Move);
+const auto& look = input.action(engine::InputActions::Look);
+if (input.action(engine::InputActions::Interact).pressed) interact();
+move(movement.value, dt); // Held input is a rate.
+lookAround(look.delta);   // Pointer input is displacement.
+```
+
+The demo's browser adapter is `EngineInput.instance`. It starts in the `Camera`
+context. `Gameplay` maps WASD to `Move`, E to `Interact` and scene dragging to
+`Look`; `Menu` and `TextEntry` suspend scene controls. Custom contexts can have
+their own mappings. Physical keyboard bindings are configurable and removable:
+
+```js
+const input = EngineInput.instance;
+input.setContext('Gameplay');
+input.clearBindings('Gameplay');
+const unbind = input.bindKey('Gameplay', 'KeyI', EngineInput.Actions.Move, [0, 1]);
+// Later: unbind();
+
+// Application-provided HTML controls; .input-stick includes a moving thumb.
+input.attachControl(document.querySelector('#move-stick'), {
+  action: EngineInput.Actions.Move, kind: 'stick', context: 'Gameplay',
+});
+input.attachControl(document.querySelector('#interact'), {
+  action: EngineInput.Actions.Interact, context: 'Gameplay',
+});
+```
+
+Virtual sticks have a dead zone and a circular limit; several controls can be
+operated simultaneously. Controls should be native buttons with accessible
+labels and `touch-action: none`. Pointer coordinates use actual canvas dimensions,
+including the renderer's DPI cap. Mouse, keyboard and touch remain available
+simultaneously rather than being selected by OS detection. The starter ships
+camera controls; gameplay movement, object picking and game-specific control
+layouts belong to the application using these actions.
+
+`tests/input_tests.cpp` covers action edges, multiple sources, cancellation,
+malformed/overflow batches, coordinates and camera frame-rate behavior.
+`node scripts/input-smoke.cjs` checks real WebGPU pixels, desktop controls,
+Chromium multi-touch, virtual controls and GUI isolation. Use the browser test
+environment below; optional `DEMO_URL` and `EVIDENCE_DIR` select the server and
+evidence directory. Chromium mobile emulation does not establish physical Android,
+iOS Safari, native keyboard or OS IME acceptance; those remain device checks.
+
+## Directional shadow maps
+
+The demo sun casts shadows by default. **Sun shadows** toggles the depth passes;
+`?shadows=off` starts with them disabled. Lighting and shadows use the same
+visibility mask for each camera view, so inset views can have different casters.
+
+```cpp
+auto& sun = scene.addChild<engine::LightComponent>("Sun", engine::LightType::Directional);
+sun.direction = {-0.5f, -1, -0.4f};
+sun.shadow.enabled = true;
+sun.shadow.center = {0, 2, 0}; // Local to the light node, transformed by its hierarchy.
+sun.shadow.halfExtent = 10;   // Square XY half-size in world units.
+sun.shadow.halfDepth = 20;    // Half-distance along the light direction.
+sun.shadow.depthBias = 0.0005f; // Normalized shadow depth bias.
+sun.shadow.normalBias = 0.02f;  // World-space geometric-normal offset on grazing faces.
+mesh.castsShadow = true;
+mesh.receivesShadow = true;
+renderer.setShadowsEnabled(true);
+```
+
+Each view renders up to four opted-in directional lights among its first eight
+active lights into a shared 1024×1024 `Depth32Float` texture array (16 MiB nominal
+depth payload). Each light has an orthographic volume centered at `shadow.center`;
+configure its extent and depth to cover the relevant scene. XY translation snaps
+to shadow texels. The shader uses a 3×3 percentage-closer filter with a linear
+comparison sampler, raster depth bias, and configurable receiver bias. Receivers
+outside the volume remain lit. Shadows attenuate only the matching light's direct
+diffuse/specular contribution; ambient, environment lighting and emission remain.
+
+World-layer opaque and masked meshes cast shadows, including instanced, mirrored,
+double-sided and skeletal geometry. Masked materials use the same texture, UVs,
+opacity and alpha cutoff in both passes. Alpha/additive meshes can receive shadows
+but do not cast; particles and Background/Overlay geometry do not participate.
+Camera-frustum culling retains off-screen casters for the shadow pass. Casters use
+separate instance batches without reducing color-pass batching or repacking slots.
+Point-light shadows and cascaded directional maps are not implemented. Enabling
+shadows on a point light or supplying invalid settings raises an error; lights
+beyond the four-map budget stay lit and emit a one-time diagnostic.
+
+Performance exports include `shadowPasses`, `shadowDrawCalls`, `shadowInstances`,
+the shadow depth allocation, and `gpu.shadowMs`. `gpu.totalMs` includes shadows
+plus all color layers; `gpu.layersMs` retains the three color-layer durations.
+Unchanged shadow camera matrices and instance data are not uploaded again.
+
+`ctest --test-dir build/native --output-on-failure` includes shadow projection,
+texel stability, hierarchy, participation and timing tests. With the browser test
+dependencies described below, `node scripts/shadow-smoke.cjs` verifies real WebGPU
+pixels, cutouts, skinning, multiple lights/views, camera masks, off-screen casters,
+disabled shadows and warm uploads. Screenshots/results go to
+`build/evidence/shadows/`. Legacy exact-count renderer checks use `shadows=off`
+and `culling=off` to preserve their color-pass baselines.
+
+## Reusable scene objects
+
+`Node` provides a name, local transform, enabled state, and owned children. `Actor`, `Component`, and `Scene` share that hierarchy. Components can have their own child components or actors; a scene can own actors or components directly.
+
+```cpp
+#include "engine/scene.hpp"
+#include "engine/actor.hpp"
+#include "engine/mesh_component.hpp"
+#include "engine/orbit_controller.hpp"
+using namespace engine;
+
+Scene scene{"My scene"};
+auto& actor = scene.addChild<Actor>("Crate");
+actor.transform.position = {0, 1, 0};
+
+const auto geometry = Mesh::cube();
+auto& mesh = actor.addChild<MeshComponent>("Body", geometry);
+mesh.color = {0.1f, 0.6f, 0.9f};
+
+auto& child = mesh.addChild<MeshComponent>("Attachment", geometry);
+child.transform.position = {0, 1, 0};
+child.transform.scale = {0.3f, 0.3f, 0.3f};
+
+auto& camera = scene.addChild<CameraComponent>("Camera");
+OrbitController controls(camera);
+auto& light = scene.addChild<LightComponent>("Key light", LightType::Directional);
+light.direction = {-1, -1, -1};
+light.intensity = 2;
+```
+
+`addChild<T>()` returns a stable reference. Parents own children through `unique_ptr`; nodes cannot be copied. World transforms compose recursively, including component-to-component nesting. Disabling any node excludes its entire subtree from scene collection. `Scene::collect()` produces mesh and light descriptions for rendering.
+
+`MeshComponent` instances share immutable `Mesh` geometry through `shared_ptr<const Mesh>`. Each instance has its own transform, color tint, layer, and optional `texture` override. A mesh carries UVs, materials, and indexed material ranges. Geometry and decoded `Texture` resources are uploaded once and shared across components. Expired resources are removed from the GPU caches.
+
+```cpp
+mesh.color = {1, 1, 1}; // Neutral tint for the texture's original colors.
+mesh.texture = engine::Texture::loadMemory(imageBytes, "Crate base color");
+// Or populate the override directly (preserves it on decode failure):
+mesh.loadTexture(imageBytes);
+mesh.texture.reset(); // Use the mesh's imported material textures again.
+```
+
+The shared decoder supports PNG, JPEG, TGA, and BMP in native builds and WebAssembly using pinned [stb_image v2.30](https://github.com/nothings/stb/tree/013ac3beddff3dbffafd5177e7972067cd2b5083). Source pixels use a top-left UV origin and RGBA8 storage. Material slots choose the GPU interpretation: base color and emission are sRGB, while metallic–roughness, occlusion and tangent-space normal maps are linear. Color mips average in linear light, normal mips renormalize vectors, and odd dimensions retain edge texels. Cube, plane, sphere and FBX geometry provide UVs and tangents. Explicit alpha modes control mesh transparency; particle effects retain their dedicated shaders.
+
+`CameraComponent` supports perspective and orthographic projection and derives its view from its world transform. `OrbitController` operates in its camera parent's coordinate system and can be used with another camera. A `LightComponent` supports directional or point lighting with color, intensity, and point range. Position and direction inherit the hierarchy. The starter shader supports the first eight enabled, visible lights and warns if more are supplied.
+
+Camera lens setters validate the complete update before changing state:
+
+```cpp
+camera.setPerspective(pi / 3, 0.1f, 100.0f); // Vertical FOV in radians; 0 < near < far.
+camera.setOrthographic(10.0f, 0.0f, 100.0f); // Vertical world height; 0 <= near < far.
+camera.setViewport({0.5f, 0, 0.5f, 1});     // Right half of the render target.
+camera.setVisibilityMask(0x2);
+mesh.visibilityMask = 0x2;                 // Lights also have visibilityMask.
+camera.lookAt({0, 0, 0});                  // World target; default world up is +Y.
+const auto pixels = camera.pixelViewport(targetWidth, targetHeight);
+const auto ray = camera.screenPointToRay({mousePixelX, mousePixelY}, pixels);
+const auto screen = camera.worldToScreen(worldPoint, pixels);
+const auto point = camera.screenToWorld(screen.pixel, screen.depth, pixels);
+const auto& clipping = camera.frustum(pixels.width / pixels.height);
+```
+
+`Viewport` is normalized to the render target; `PixelViewport` is an actual pixel rectangle with a top-left origin and downward Y. Conversion methods take that pixel rectangle directly. Convert CSS pointer coordinates to canvas backing pixels before picking. Aspect comes from the actual rectangle, including its width/height fractions. Depth uses WebGPU's `[0,1]` range. `ScreenPoint` contains pixel coordinates, depth, `inFront`, and `visible` (inside the clip volume with an enabled camera; this does not test occlusion). A point on the perspective eye plane returns NaN coordinates/depth and `visible=false`. Offscreen pixels may be unprojected. Perspective rays originate at the camera eye; orthographic rays originate on the near plane and are parallel.
+
+`view()`, `projection(aspect)`, `viewProjection(aspect)`, `inverseViewProjection(aspect)`, and `frustum(aspect)` return cached references, valid until a later camera query changes their inputs. `revision()` observes direct transform/lens writes and ancestor changes; lens mode, viewport, visibility mask, effective enabled state, and the last queried aspect also advance it. Compare revision values for changes rather than counting increments. Legacy `fieldOfView`, `nearPlane`, and `farPlane` writes remain supported and are validated on camera queries. `worldPosition()`, `forward()`, `right()`, and `up()` expose world-space position and normalized transformed axes. Scale remains part of the inherited view transform; nonuniform parent scale can skew these axes. `lookAt()` accounts for parent transforms, preserves position/scale, and rejects coincident targets, zero up vectors, and parallel target/up directions.
+
+Visibility masks select meshes and lights by overlapping bits, independently of `RenderLayer`; components default to group `1` and cameras default to all groups. Filtering one component does not suppress differently masked children. Disabling a node still suppresses its subtree, and a disabled camera or ancestor submits no scene objects. `Scene::collect(mask)` and `RenderFrame::collect(scene, instancing, mask)` support the same filtering outside the renderer. Camera selection remains with `Renderer(scene, camera)`; no per-camera main flag or controller settings are added. Use `Renderer::setViews()` to compose ordered cameras into one canvas; see the multi-camera example below.
+
+Multi-camera compositing uses one renderer, one surface acquisition, and one GPU submission:
+
+```cpp
+Renderer renderer(scene, mainCamera); // Existing single-camera use stays supported.
+mainCamera.setViewport({0, 0, 1, 1});
+overviewCamera.setViewport({0.68f, 0.05f, 0.28f, 0.32f});
+overviewCamera.setOrthographic(18, 0.1f, 100);
+const std::array views = {
+    RenderView{&mainCamera},
+    RenderView{&overviewCamera, std::array<float, 4>{0.04f, 0.07f, 0.1f, 1}},
+};
+renderer.setViews(views);
+// RenderView{&overlayCamera, std::nullopt} draws over existing color.
+// Renderer(scene) starts with no views; setViews({}) clears the canvas.
+```
+
+Views draw in list order. Each view completes Background, World, and Overlay before
+its successor. `clearColor` clears only that camera's viewport; `std::nullopt` loads
+earlier color. Depth starts fresh for each camera/layer, so later cameras can draw
+over earlier geometry regardless of its depth. GUI renders once over the completed
+canvas. This is direct viewport compositing; it does not provide camera render
+textures, whole-view opacity, postprocessing, or shared depth between cameras.
+
+Cameras remain caller-owned and must stay alive until removed from the renderer's
+view list. `setViews()` validates and copies the list atomically. Disabled cameras
+(including disabled ancestors) are skipped without clearing their rectangles.
+The target is initialized to the default background each frame, including when
+all views are disabled or the list is empty. Viewport aspect, visibility masks,
+transparent sorting, billboard axes, and staging/upload caches are independent
+per view. Mesh, material, texture, environment, and skeleton resources stay shared.
+A [WebGPU scissor rectangle](https://developer.mozilla.org/en-US/docs/Web/API/GPURenderPassEncoder/setScissorRect)
+clips draws and viewport clear triangles; normalized rectangle edges round by
+pixel centers, so odd-width split screens have no gap. GPU layer timings sum
+across active views; draw/upload counters count actual work across the compositor.
+
+The playground's **Camera views** selector offers Single camera, Split screen,
+and Overview inset. `tests/render_view_tests.cpp` checks planning, masks, disabled
+ancestors, atomic validation, pixel rounding, and independent cached staging.
+`node scripts/compositing-smoke.cjs` verifies real WebGPU pixels for split/inset
+views, load-color overlays, ordering, independent depth, viewport clipping,
+particles, resize, disabled/empty views, upload reuse, and public layout controls.
+Use the same browser/dependency environment as the other smoke checks; evidence
+is written to `build/evidence/compositing/`.
+
+
+Frustum planes have inward unit normals ordered left, right, bottom, top, near, far. `containsPoint`, `intersectsSphere`, `intersectsAabb`, and `intersectsTransformedAabb` provide visibility tests. The renderer automatically culls meshes against each camera's frustum using that view's viewport aspect ratio. Static local bounds are cached on shared mesh resources; skeletal bounds follow the current bone palette and are cached until its revision changes. Updating animated bounds scans skinned vertices on the CPU.
+
+Culling covers opaque and transparent meshes in every layer, preserves traversal order and original instance slots, and never hides a mesh's children. Off-screen geometry remains in `SceneFrame` and `RenderFrame::batches()` for shadow casting; camera passes use `RenderFrame::cameraBatches()` and transparent passes respect `MeshDraw::cameraVisible`. This reduces camera submissions while retaining staging and resource uploads required by shadows. Particles retain their existing behavior.
+
+Use `MeshComponent::frustumCulling=false` for custom vertex deformation or `Renderer::setFrustumCullingEnabled(false)` to disable culling globally (`?culling=off` in the demo). Bounds with no usable positions conservatively remain visible. Mesh resources are immutable after publication; call `Mesh::invalidateBounds()` after editing static vertex positions in place before reuse. Camera-free `Scene::collect()` stays unculled; supply a `Frustum*` to scene/frame collection for visibility classification. Performance JSON reports `visibleMeshes` and `culledMeshes` alongside the original `meshes` count, summed across views.
+
+`frustum_culling_tests` covers clipping planes, camera/aspect changes, transformed and animated bounds, masks, hierarchy, transparent meshes, stable object uploads and warm frame capacities. `scripts/frustum-culling-smoke.cjs` compares WebGPU pixels and submissions with culling on/off for two camera positions. Run it against a browser build using the same Playwright setup as the browser acceptance script; evidence is saved under `build/evidence/frustum-culling/`.
+
+## Materials and image-based lighting
+
+Use **Open material graph** in the Materials inspector, or open
+`?scene=materials&graph=1`, to author node-based materials with live 3D preview,
+typed connections, color/value math, UV transforms, checker/noise patterns, local
+image textures, undo/redo and JSON save/load. Procedural branches bake into the
+existing PBR texture slots when edited. See [Material graph editor](docs/material-graph.md)
+for controls, architecture, limits and verification.
+
+The four material stages are implemented: independent shared assets/slot instances,
+GPU bindings and render-state variants, metallic–roughness PBR and import mapping,
+then baked environment lighting and a live browser inspector.
+
+`Mesh::materials` contains `shared_ptr<const Material>` assets. A `MeshPart` indexes
+one slot. Build an asset, then stop mutating it after publishing. Components share
+geometry and asset references; `MaterialInstance` holds optional scalar/map/state
+overrides plus tint, opacity and UV transforms. Primitive meshes without explicit
+parts still have slot zero. `setMaterial(slot, instance)` validates before changing
+an override; `clearMaterial(slot)` restores the mesh asset. Failed edits leave the
+previous state intact. Successful `loadFbx` calls clear stale slot overrides.
+
+```cpp
+#include "engine/material.hpp"
+auto oak = std::make_shared<engine::Material>();
+oak->name = "Oak";
+oak->baseColorTexture = engine::Texture::loadMemory(woodBytes);
+oak->normalTexture = engine::Texture::loadMemory(normalBytes);
+oak->roughness = 0.75f;
+std::shared_ptr<const engine::Material> sharedOak = oak; // Publish; freeze oak.
+engine::MaterialInstance appearance(sharedOak);
+appearance.tint = {0.7f, 0.9f, 1.0f};
+appearance.roughness = 0.5f;
+mesh.color = {1, 1, 1}; // Legacy component tint still multiplies the material.
+mesh.setMaterial(0, appearance);
+```
+
+The contract follows [glTF metallic–roughness conventions](https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html):
+base-color and emissive factors are linear; roughness uses G and metallic uses B
+of the shared map; occlusion uses R and affects indirect lighting. Tangent-space
+normal maps use +Y and expose `normalScale`. Material defaults are white,
+nonmetallic, roughness 0.6, opaque and single-sided. Optional map overrides distinguish
+inheritance (disengaged) from removal (engaged null). Missing maps share white or
+flat-normal fallback textures. One source image can have distinct cached GPU
+uploads for color, data or normal interpretation.
+
+`AlphaMode::Opaque` ignores texture/material alpha and writes depth. `Mask` tests
+combined alpha against `alphaCutoff` and writes depth. `Blend` and `Additive` use
+the camera-sorted FX queue, depth-test without writing depth, and output premultiplied
+alpha. Modes are per slot. `doubleSided` disables backface culling and corrects
+backface normals. Mirrored instances select the appropriate front-face winding;
+tangents and bitangents follow skinning and world transforms. Tangent generation
+averages matching corners and splits mirrored UV orientations, retaining skin
+weights. It is not a MikkTSpace implementation; author normal maps against this
+basis or check imported assets visually.
+
+PBR uses GGX direct highlights and Fresnel with energy-conserving diffuse lighting.
+`MaterialShader::Unlit` uses base color/emission without lights; particles retain
+dedicated effect shaders. Pipelines are cached by alpha/shader/culling/skinning/
+winding state, independent of texture identity. Material parameter buffers and
+bind groups are shared by effective binding, excluding per-instance color and
+opacity. Unchanged scenes perform no material, object, camera or bone writes.
+Expired bindings/resources are reclaimed while reusable frame capacities remain.
+Performance JSON exposes material/pipeline counts and material write bytes.
+
+FBX imports map available base color/factor, roughness, metalness, emission,
+normal, occlusion, opacity, double-sided and unlit properties through ufbx,
+including its Blender PBR mapping. Separate scalar textures are packed into G/B
+using their red channel (linear nearest resampling when resolutions differ).
+Glossiness textures are inverted; ufbx already converts scalar glossiness to
+roughness. Transparent base-color alpha infers Mask for binary alpha and Blend
+for partial alpha; scalar opacity below one selects Blend. Decode/packed-map bytes
+share the import budget. Knarr now decodes 21 source images and generates seven
+metallic–roughness maps, with 117,440,512 bytes of cumulative decode/packing work;
+this is not a live-memory measurement. Unsupported alternate UV transforms/sets,
+layered/procedural maps, separate opacity maps and transmission produce warnings.
+
+`Scene::environment` defaults to `Environment::studio()`, an HDR procedural sky
+with a broad light source. `Environment::bake(name, radianceCallback)` accepts
+linear HDR radiance and precomputes a GGX specular cube mip chain, diffuse
+irradiance cube and split-sum BRDF LUT. These upload as filterable float16 textures.
+`Environment::fromEquirectangular(image)` accepts sRGB RGBA8 panorama images.
+Set `environmentIntensity` and Y-axis `environmentRotation` (radians), or clear
+`environment` to disable image-based lighting. Reflection detail depends on the
+baked cube resolution (default 32, configurable power of two from 4 to 128).
+Lighting parameters change without rebaking/reuploading images.
+
+Open `?scene=materials` or click **Material showcase**. Select an object and slot;
+edit PBR/unlit parameters, alpha/culling, UV transforms or local texture maps.
+**Reset selected slot** restores its mesh asset. **Return to scene** retains the
+imported model and its edits. **Override texture** remains a whole-mesh convenience
+and updates base-color overrides in existing instances too; direct `mesh.texture`
+assignment fills slots without explicit material/map overrides. **Choose panorama**
+replaces environment lighting; **Studio sky** restores the default. All files stay
+local. Use **Save scene** to retain inspector edits and embedded assets across sessions.
+See [scene and asset archives](docs/scene-archives.md).
+
+The showcase covers shared oak instances, polished/rough copper, cutout cloth,
+alpha transparency, animated normal mapping and an unlit surface. This renderer
+uses ordinary mesh-origin sorting for blended surfaces; it does not implement
+refractive glass, per-triangle sorting, shadow maps or a material graph editor.
+Panorama file loading supports PNG/JPEG/TGA/BMP rather than HDR/EXR file decoding;
+HDR environment radiance is available through `bake`.
+
+Native `material_tests` checks atomic slot overrides, resource sharing, alpha
+routing, batching boundaries, texture semantics, mirrored UV seams, float16
+encoding and HDR convolution invariants. Browser acceptance uses actual WebGPU
+pixels and the inspector:
+
+```powershell
+node scripts/material-smoke.cjs
+```
+
+It also verifies static/skinned/mirrored tangent equivalence and double-sided
+backfaces with isolated `?materialTest=1` fixtures. Screenshots and results are in
+`build/evidence/materials/`; the scoped validation record is in
+`docs/materials-validation.md`.
+
+## Actor identity, components and lifecycle
+
+Actors reuse `Node` for names, transforms, enabled state and child ownership.
+`Scene::spawn<T>()` (or the existing `addChild<T>()`) registers an actor immediately
+and assigns a scene-scoped `ActorId` with a slot and generation. Resolve it through
+`scene.findActor(id)`; stale, foreign-scene and pending-destruction handles return
+null. IDs are runtime handles, not persistent save identifiers. Detaching or moving
+an actor to another scene retires its old handle; same-scene reparenting preserves it.
+
+```cpp
+class RotatingActor : public engine::Actor {
+public:
+    explicit RotatingActor(std::string name):Actor(std::move(name)) {
+        setTickEnabled(true); // Actor updates are opt-in.
+    }
+protected:
+    void tick(double seconds) override { transform.rotation.y+=float(seconds)*0.25f; }
+};
+
+auto& actor=scene.spawn<RotatingActor>("Crate");
+auto& mesh=actor.addComponent<MeshComponent>("Body",Mesh::cube());
+actor.addTag("selectable");
+const ActorId handle=actor.id();
+scene.update(deltaSeconds); // Lifecycle, actor/component ticks and animations once.
+if(auto* live=scene.findActor(handle)) {
+    if(auto* body=live->getComponent<MeshComponent>()) body->color={0.2f,0.6f,0.9f};
+}
+actor.destroy(); // Safe even from tick(); hidden and unresolvable immediately.
+scene.flushPendingDestroy(); // Or let the next scene update flush automatically.
+```
+
+`addComponent<T>()`, `getComponent<T>()`, `getComponents<T>()`, `hasComponent<T>()`
+and `removeComponent(component)` use the existing owned hierarchy. Queries include
+disabled and nested components, including a skeletal mesh's skeleton/animation,
+but stop at child actors. `Component::owner()` returns the nearest actor ancestor;
+components attached directly to the scene have no actor owner. The skeletal mesh's
+required skeleton/animation children cannot be removed or moved independently;
+remove the containing skeletal mesh instead. Query results are non-owning pointers
+and remain valid only until their components are removed.
+
+Override `onSpawn`, `onDespawn`, `onEnable`, `onDisable`, `tick`, and `fixedTick`
+on actor subclasses. Lifecycle hooks are `noexcept`. The first scene update calls
+spawn once, then enable when active in the hierarchy. `ActorState::Active` means
+spawned, including temporarily disabled actors. Public `enabled` writes and ancestor
+changes are reconciled at the next update; toggling tick alone does not disable an
+actor. Cleanup runs children first, before derived destructors, and also runs during
+scene teardown. Cleanup hooks must not add children to the departing subtree.
+Actors created during a tick begin their lifecycle on the next update.
+
+Call `scene.update(deltaSeconds)` once before rendering. `updateAnimations()` is a
+compatibility alias, so call one or the other. `fixedUpdate(stepSeconds)` is an
+explicit positive fixed step; it does not advance animation clocks or provide a
+physics accumulator. Actor tick opt-in governs both tick hooks. `tags()`, `addTag`,
+`removeTag`, `hasTag`, and `Scene::findActorsWithTag()` support unique actor labels.
+
+Node APIs now include `isActiveInHierarchy()`, `setEnabled`, validated
+`setLocalTransform`/`setWorldTransform`, `adoptChild`, `detachChild`, `removeChild`
+and `reparent(newParent, ReparentMode::KeepLocal/KeepWorld)`. Cycles and singular
+or sheared local TRS conversions are rejected before committing transforms.
+World preservation can fail under rotated nonuniform parents when the required
+local transform contains shear. Detach/reparent require an idle hierarchy and a
+subtree without pending removal; child removal in a scene is deferred. Public
+`visit()` does not flush removals itself. Scene updates flush after traversal;
+an explicit `flushPendingDestroy()` must also run outside traversal. Raw actor
+references must not be used after flushing destruction.
+
+## Component lifecycle, updates and settings
+
+`Component` inherits the existing `Node` name, transform, enabled state and child
+hierarchy. Adding a component to a scene registers it immediately: `id()` returns
+a scene-scoped `ComponentId`, and `isRegistered()` reports that registration.
+`scene.findComponent(id)` returns a non-owning pointer, or null for a stale,
+foreign-scene or pending-removal handle. Detachment and cross-scene reparenting
+invalidate the old handle; reparenting within one scene preserves it. Runtime
+handles are not persistent save identifiers.
+
+```cpp
+class MovementComponent : public engine::Component {
+public:
+    explicit MovementComponent(std::string name):Component(std::move(name)) {
+        setTickEnabled(true);
+        addTag("movement");
+    }
+    std::string_view typeName() const noexcept override { return "MovementComponent"; }
+protected:
+    void tick(double seconds) override { transform.position.x+=float(seconds); }
+    void onAttach() noexcept override { /* Initialize scene dependencies. */ }
+    void onDetach() noexcept override { /* Release subscriptions/resources. */ }
+};
+
+auto& movement=actor.addComponent<MovementComponent>("Movement");
+const auto handle=movement.id();
+scene.update(deltaSeconds); // Runs component lifecycle, ticks and animation once.
+movement.setFixedTickEnabled(true);
+scene.fixedUpdate(1.0/60.0); // Calls an overridden fixedTick independently.
+auto* mesh=movement.getComponent<MeshComponent>();
+movement.destroy(); // Queues removal; findComponent(handle) now returns null.
+scene.flushPendingDestroy(); // Deletes the component and its descendants when idle.
+```
+
+The first `Scene::update` or `fixedUpdate` calls `onAttach` and sets
+`isInitialized()`. Disabled components initialize too, but receive `onEnable`
+only when active in the hierarchy. `onEnable`/`onDisable` reconcile ancestor and
+component enabled changes at scene updates. Detachment immediately calls
+`onDisable` when needed, then `onDetach`, with descendants cleaned up first.
+Removing a component before its first update runs neither attach nor detach.
+Reattachment initializes it again; changing owners within one scene does not.
+
+Variable and fixed ticking are independently opt-in, controlled by
+`tickEnabled()`/`setTickEnabled()` and
+`fixedTickEnabled()`/`setFixedTickEnabled()`. Disabled and pending-removal
+subtrees do not tick. Components created during hooks or ticks begin on the next
+update. `AnimationComponent` opts into variable ticking and uses the same path;
+fixed updates do not advance playback. `updateAnimations()` remains an alias
+for the full scene update, so call either it or `update()` once per frame.
+
+Lifecycle and `onOwnerChanged(previous, current)` hooks are `noexcept`. Ownership
+notifications run after adoption, detachment or reparenting updates the hierarchy,
+including hierarchies outside a scene. A moved component subtree is notified
+only where its nearest actor ancestor actually changes. Hooks may queue removal
+or append children, but cannot erase/reparent nodes or reenter a scene update.
+Cleanup cannot add children inside the subtree being detached, and scene shutdown
+rejects all additions. `destroy()` requires a scene and respects protected
+implementation children such as a skeletal mesh's skeleton and animation player.
+
+`getComponent<T>()`, `getComponents<T>()` and `hasComponent<T>()` forward to the
+owning actor's queries. Results include the calling component, disabled components
+and nested components, exclude pending-removal subtrees, and stop at child actor
+boundaries. Without an actor owner, results are null/empty/false. Queries have
+const and mutable overloads. Component tags use `addTag`, `removeTag`, `hasTag`
+and `tags`; empty tags are rejected and duplicates are ignored.
+
+`serialize()` produces a version-1 `ComponentSnapshot` containing the stable
+`typeName`, name, local transform, enabled state, both tick flags and component
+tags. `deserialize(snapshot)` validates the version, matching type, finite,
+nonsingular transform and unique nonempty tags before changing any settings.
+It preserves identity, owner, children and initialization; enabled transitions
+are reconciled by the next scene update. `validate()` checks the current common
+settings, including legacy direct transform writes. Invalid settings throw
+`std::invalid_argument` and invalid snapshots leave existing settings intact.
+These virtual functions provide a common-settings persistence boundary: mesh
+assets, camera/light settings, animation clocks, child hierarchy and a file/JSON
+scene format are not included. Custom types should override `typeName()` with a
+stable label and extend persistence separately for their own properties.
+
+Native `component_tests` covers lifecycle, independent ticks, owner changes,
+queries, deferred removal, generation reuse, protected children, cleanup mutation,
+scene shutdown and snapshot validation/recovery.
+
+## FBX mesh importer
+
+`FbxImporter` uses vendored [ufbx v0.23.1](https://github.com/ufbx/ufbx/tree/26a482ae66871d7de36eb722aa060bce95bce274), pinned to a commit with its license included. It triangulates polygon faces, reads corner normals (or generates missing normals), converts coordinates to right-handed Y-up meters, and merges all mesh-node instances into one engine `Mesh`. Parent, pivot, and geometry transforms are baked into positions; normals use the corresponding inverse-transpose transform. Mirrored nodes have their triangle winding corrected. It imports per-face material assignments, base-color values, corner UVs (including seams and named texture UV sets), UV transforms, wrapping, and embedded or explicitly resolved base-color images. FBX's bottom-left UVs are converted to the engine's top-left convention once.
+
+```cpp
+#include "engine/mesh_component.hpp"
+
+engine::MeshComponent component{"Imported", nullptr};
+component.loadFbx(bytes); // std::span<const std::byte>, works in native code and WebAssembly
+
+// Native builds resolve relative images under the model directory,
+// with a basename fallback for relocated exports:
+component.loadFbxFile("assets/model.fbx");
+
+// Or get shared geometry without an existing component:
+auto geometry = engine::FbxImporter::loadMemory(bytes);
+
+// Memory imports can resolve companion images from your own asset store:
+engine::FbxImportOptions options;
+options.resolveTexture = [&](std::string_view path) {
+    return assets.readBytes(path); // Return vector<byte>, or {} when missing.
+};
+component.loadFbx(bytes, options);
+```
+
+These calls throw a descriptive exception if parsing or conversion fails. A component keeps its previous mesh on failure, and importing preserves its transform, color, layer, and children. Imported geometry owns its buffers and remains valid after the input bytes are released. The renderer detects the new shared mesh resource and uploads it once.
+
+The importer also retains skin bindings, bone hierarchy and animation clips for `SkeletalMeshComponent` (see below). Source lights, cameras and general node hierarchy are not recreated as engine actors. Polygonal geometry is required; NURBS/subdivision evaluation is outside this importer. `Mesh::warnings` reports missing external textures, unavailable UV sets, and unsupported texture arrangements. Corrupt supplied images fail the import and preserve the previous mesh. Shared FBX texture references are decoded once; material ranges are grouped to avoid a draw call per face. Native companion resolution never reads outside the model directory, including through symlinks.
+
+Default `FbxImportOptions` limits are 32 MiB of input, one million vertices before optimization, three million output indices, and 128 MiB for each of the parser's temporary and result allocators. A single source mesh's corner count and triangulation scratch buffer are also bounded. Textures are limited to 32 MiB encoded, 4096 pixels per dimension, 64 MiB decoded per image, and 128 MiB decoded across the import. Browser companion selection additionally limits the total encoded image bytes to 128 MiB. Custom options can lower these budgets; 4096 is the decoder's compiled maximum dimension.
+
+The demo additionally centers the imported geometry, places it above the ground, and uniformly fits it within four world units for preview. The reusable importer preserves the file's converted meter scale. File parsing currently runs synchronously in the browser's Wasm thread; large imports can pause animation while parsing. Import errors appear beside the picker and leave the current scene rendering.
+
+## GLB mesh importer
+
+`GlbImporter` loads binary glTF 2.0 with vendored [cgltf 1.15](https://github.com/jkuhlmann/cgltf/tree/v1.15). It produces the same immutable `Mesh`, PBR `Material`, `Skeleton`, sampled clips, and morph targets used by FBX. Use the existing **Import FBX / GLB** picker, material inspector, morph sliders, and skeletal playback/blending controls.
+
+```cpp
+#include "engine/glb_importer.hpp"
+#include "engine/skeletal_mesh_component.hpp"
+
+engine::SkeletalMeshComponent model{"Model", nullptr};
+model.loadGlb(bytes);                       // Native or WebAssembly
+model.loadGlbFile("assets/character.glb");  // Native only
+model.animation().play(0);
+auto shared = engine::GlbImporter::loadMemory(bytes);
+```
+
+`GlbImportOptions` and `GlbImportMeasurements` share the FBX option/timing contract. Memory imports perform no implicit IO; `resolveTexture` supplies companion images. Native file loading resolves URI-decoded image paths only inside the model directory, including symlink checks. Both APIs retain ownership independently of the input bytes, and failed component imports preserve the previous mesh. The parser has a bounded allocator; geometry, decoded textures, clips, and morphs enforce their respective budgets.
+
+Supported conversion:
+
+- The default scene (or first scene) merges its mesh instances in right-handed Y-up meters, baking world transforms and correcting mirrored winding. Indexed/non-indexed triangles, strips, fans, interleaved and sparse vertex accessors, normalized attributes, missing normals, and regenerated tangents are supported.
+- Metallic-roughness PBR retains all five texture slots, factors, normal scale, occlusion strength, emission, alpha mask/blend, and double-sidedness. PNG/JPEG images may be embedded in BIN, base64 data URIs, or explicit companions. Repeated texture references share decoded pixels. Unlit, emissive strength, quantized mesh attributes, and a shared `KHR_texture_transform`/UV set are supported. glTF UVs already have the engine's top-left origin.
+- Skinning retains ancestor transforms, per-instance inverse binds, normalized strongest-four weights from `JOINTS_0/1` and `WEIGHTS_0/1`, and rigid bindings for unskinned parts. Translation, quaternion rotation, and scale animation support LINEAR, STEP, and CUBICSPLINE source interpolation. Clips are resampled at the configured rate (30 Hz by default) into the existing runtime, including both endpoints. As with FBX, runtime interpolation between sampled frames approximates source curves and STEP boundaries. Existing limits are 256 hierarchy joints, 1024 bindings, and 64 clips.
+- Morph position/normal offsets, sparse targets, default weights, generated tangent offsets, and optimization preserve matching vertex streams. Morph-weight animation is warned about and omitted, matching the current FBX runtime limitation.
+
+Scope: `.gltf` JSON/external geometry buffers, Draco/meshopt compression, GPU-instancing extensions, sparse index accessors, and sheared skeletal local transforms are rejected. Unsupported required extensions fail explicitly. Non-triangle primitives and vertex colors are warned about; advanced optional material lobes use metallic-roughness fallback. Per-map UV sets/transforms differing from the material's primary texture are warned about and omitted. Mirrored-repeat samplers approximate repeat; sampler filtering follows the renderer. Cameras/lights and original node actors are not recreated.
+
+`python scripts/generate-glb-fixtures.py` recreates the original deterministic fixtures. `glb_importer_tests` covers material maps, skin deformation through the runtime palette, four interpolation clips, sparse morphs, instances/reflections, UV transforms, data URIs, companions, malformed input, budgets, and failure preservation. `scripts/glb-import-smoke.cjs` verifies the real picker and visible GPU pose changes, companion resolution, failure preservation, static replacement, and FBX regression. Set `NODE_PATH`, `BROWSER_EXECUTABLE`, and `DEMO_URL` as for the other browser checks; screenshots and results go to `build/evidence/glb`.
+
+## Imported mesh optimization
+
+FBX and GLB imports run a lossless meshoptimizer pass by default: weld only bit-identical
+position/normal/UV/tangent tuples, reorder triangles separately within each material
+batch for vertex-cache reuse, then order vertices by first indexed use. UV seams,
+hard normals, triangle winding, material boundaries, texture references, and
+source coordinates are preserved. Unreferenced vertices are removed; geometry
+is not simplified or quantized. Import budgets apply before optimization.
+
+`MeshOptimizer::optimize(Mesh&)` is reusable for other indexed meshes; invalid
+indices or incomplete/overlapping material ranges throw without changing buffers.
+The public CPU indices remain `uint32_t`. GPU uploads pack indices as `Uint16`
+when the maximum referenced index is at most 65,535, otherwise `Uint32`, and pad
+uploads to four-byte alignment. Memory measurements reflect the packed GPU data.
+
+Knarr keeps all 40,956 triangles and seven textured material batches while
+reducing 86,544 vertices (including tangent seam splits) to 38,621 (55.4% fewer). Its GPU geometry payload drops
+from 4,645,584 to 2,099,544 bytes (54.8% smaller), excluding textures. These are
+geometry savings, not a measured FPS improvement. Optimization adds one-time
+import work, shown separately in the Performance panel and JSON export together
+with vertex counts before/after. Set `FbxImportOptions::optimizeMeshes=false` or
+use `?optimizeMeshes=off` in the demo to compare imports; GPU index packing still
+chooses the smallest safe format in both modes.
+
+Pinned meshoptimizer v1.3 sources and MIT license are in `third_party/meshoptimizer/`;
+the browser distribution includes its license. Native optimizer tests compare
+every oriented full-attribute triangle in every Knarr material batch, exercise
+UV/normal seams and the 16/32-bit boundary, and check cache/fetch locality.
+`node scripts/mesh-optimization-smoke.cjs` uses the browser test environment below
+to compare deterministic WebGPU canvas pixels with optimization enabled/disabled,
+verify exact geometry payload counters, and save screenshots/JSON evidence.
+
+## Layered renderer
+
+The C++ `Renderer` takes a scene and ordered camera views (the original scene/camera constructor creates one view). It traverses the scene per active view and submits three ordered WebGPU render passes per view:
+
+| Layer | Behavior | Demo |
+| --- | --- | --- |
+| `Background` | Clears color and depth; optional background meshes | Dark backdrop |
+| `World` | Loads color, clears depth, depth-tests world geometry | Ground, grid, cubes, light marker |
+| `Overlay` | Loads color, clears depth, depth-tests within the overlay | Axes visible above world geometry |
+
+Assign `mesh.layer = RenderLayer::Overlay` to render a component above world objects. Depth is independent between layers. Each pass draws opaque meshes, then its sorted alpha queue, then additive effects. Particles belong to World and use its existing depth buffer; FX never clear world depth or write depth. Overlay still clears depth after world FX. Static and skinned meshes support opaque, alpha and additive pipelines. Shadow maps, additional asset formats, and an ECS are extension points.
+
+## Particles, flipbooks and reusable effects
+
+The **Visual effects** panel plays a campfire (flames, smoke and sparks) or a
+one-shot explosion (fireball, smoke and sparks). Effects start stopped so the
+existing demo remains unchanged until **Play / restart** or a preset selection.
+**Pause / Resume** freezes all emitter clocks and particles. **Stop emission**
+lets living particles drain; **Clear** removes them immediately. The scene's
+global **Pause motion** also freezes FX. Example textures are small procedural
+placeholders, not imported EmberGen simulations.
+
+```cpp
+#include "engine/effect_presets.hpp"
+
+auto& fire = actor.addChild<engine::EffectComponent>("Campfire", engine::campfireEffect());
+fire.transform.position = {0, 0.1f, 0};
+fire.play();
+// Call scene.update(deltaSeconds) once per frame, then render.
+fire.pause();
+fire.resume();
+fire.stop();       // Drain; stop(true) clears.
+fire.play();       // Restart with the definition's seed and retained pool storage.
+```
+
+`ParticleEmitterComponent` is usable directly or as an `EffectComponent` child.
+An immutable, shared `ParticleEmitterDefinition` specifies a bounded pool, seed,
+spawn rate, ordered timed bursts, duration/looping, randomized position/velocity/
+lifetime/rotation, gravity, angular velocity, and piecewise-linear size/RGBA
+curves over normalized particle age. Components have independent particle pools
+and playback clocks. `play(false)` resumes the emitter clock; `play()` restarts.
+Disabled ancestors freeze simulation and suppress rendering. Visibility masks
+follow the same camera filtering as meshes. `setDefinition()` validates before
+replacing the definition and restarting that emitter.
+
+```cpp
+auto smoke = std::make_shared<engine::ParticleEmitterDefinition>();
+smoke->name = "Smoke";
+smoke->texture = engine::Texture::loadMemory(pngBytes, "Smoke atlas");
+smoke->flipbook = {8, 8, 64, 1}; // columns, rows, used frames, cycles per lifetime
+smoke->blend = engine::BlendMode::Alpha;
+smoke->spawnRate = 12;
+smoke->velocityMin = {-0.1f, 0.4f, -0.1f};
+smoke->velocityMax = { 0.1f, 0.8f,  0.1f};
+smoke->size = {{0, 0.3f}, {1, 1.5f}};
+smoke->color = {{0, {0.4f, 0.4f, 0.4f, 0.5f}}, {1, {0.4f, 0.4f, 0.4f, 0}}};
+auto asset = std::make_shared<engine::EffectAsset>();
+asset->name = "Smoke effect";
+asset->emitters.push_back({smoke, {}}); // Each entry has its own local transform.
+auto& smokeEffect = actor.addChild<engine::EffectComponent>("Smoke", asset);
+```
+
+Publish definitions/assets as `shared_ptr<const ...>` and do not mutate their
+backing objects afterward. Multiple effect instances share definitions/textures
+but retain independent playback. Add more emitter entries to layer smoke, sparks
+and fire into one effect. Required emitter children cannot be removed independently;
+remove the effect component through the normal deferred lifecycle. Effect assets
+are C++ resources in this implementation; no JSON asset loader or visual editor
+is included. The common component snapshot does not persist FX assets or live particles.
+
+`ParticleSpace::Local` follows the component hierarchy, including size scaling.
+`World` captures position, velocity and size scale when a particle spawns; subsequent
+emitter movement leaves existing particles behind. Gravity uses the chosen
+simulation space. Particles use pooled CPU records, analytic constant-gravity
+integration, and a reused death-time heap to enforce capacity at subframe spawn
+times. Existing particles advance once per update, rather than once per emitted
+particle. Pool saturation drops emissions. A bounded per-update emission budget
+also drops events after very large deltas or excessive rates.
+
+The renderer uploads compact 64-byte particle instances and generates camera-facing
+quads in WGSL. Compatible consecutive particles share instanced draw calls.
+Alpha particles and transparent meshes sort together by camera-space center,
+back to front; texture batching never changes that order. Additive particles draw
+after alpha. Large intersecting transparent meshes can still need triangle sorting
+or order-independent transparency; sorting uses mesh origins. FX use premultiplied
+blending and the current renderer's display conversion. HDR compositing, bloom,
+soft-particle depth fading, collision and fluid simulation are not included.
+
+Flipbooks use top-left frame order, left to right then top to bottom. Grid cells
+must divide image dimensions evenly and the frame count must fit the grid.
+WGSL selects the frame from normalized age; cycles above one repeat playback.
+Sampling uses a half-texel cell inset and mip level zero to avoid neighboring-frame
+bleeding. This can alias at a distance; padded per-frame mips/texture arrays are a
+future quality extension. Existing decoder size limits apply to imported atlases.
+The **Import flame flipbook** controls apply a PNG and its grid settings to the
+first emitter of the selected demo effect; invalid data preserves its previous
+texture and particles. Selecting a preset restores its original definitions.
+
+Performance JSON includes visible particles, particle draw calls, transparent mesh
+draws, particle buffer growth and instance upload bytes. Unchanged paused instances
+reuse their GPU buffer. FX draw/triangle counts and GPU payload are included in the
+existing totals; GPU World timing includes FX. CPU frame storage includes sorted
+FX queues/staging but excludes per-emitter pools and simulation scratch.
+
+`node scripts/fx-smoke.cjs` checks real WebGPU pixels for alpha blending, world
+occlusion, cross-emitter sorting, additive overlap, overlays, mesh opacity and
+flipbook frames. It also exercises public controls, PNG import/error recovery,
+paused upload reuse and responsive layout, saving screenshots and results in
+`build/evidence/fx/`. It uses the same `NODE_PATH`, `BROWSER_EXECUTABLE` and local
+server setup as the existing browser tests. Renderer fixtures are enabled only
+with `?fxTest=1`; normal application pages cannot invoke them.
+
+The renderer owns GPU buffers, pipeline, bind groups, and resize-dependent depth texture. Camera and lighting uniforms upload when changed; an instance vertex buffer carries individual model matrices, inverse-transpose normal matrices, and colors. GPU errors and device loss stop rendering and appear in the shell. The scene must outlive its renderer; cameras must outlive their entries in the renderer view list.
+
+## Scene and asset saving
+
+**Save scene** downloads a self-contained `.wescene` file; **Open scene** restores it.
+Files include the complete built-in scene hierarchy, shared meshes/materials/textures,
+camera views, lighting, morph weights, skeletal animation and root-motion state,
+effects with live particles, and physics configuration/body velocities. The browser
+also retains orbit controls, motion state and imported MP3/WAV audio with its position.
+No original FBX, GLB, panorama or companion image is needed to reopen a save.
+
+**Export assets** writes a reusable `.weassets` library; **Import assets** retains
+its resources and adds mesh instances to the displayed scene. Opened scenes support
+material/environment editing, animation/morph controls and further saving. **Return
+to playground** restores the suspended original scene. The saved scene tree shows
+actual loaded nodes, including disabled subtrees.
+
+The portable `SceneArchive` API offers memory and native file save/load plus asset
+library extraction. Files are versioned, checksummed and bounded; loading validates a
+separate candidate before replacement, and native file writes atomically replace the
+destination. Unsupported custom C++ node types fail explicitly. Application behavior,
+GUI callbacks and physics solver internals need application-specific persistence.
+Material graph results are saved as their material parameters and baked texture maps;
+use the graph editor's JSON save/load for editable graph source.
+
+See [format, API and scope](docs/scene-archives.md). `scene_archive_tests` verifies
+round trips, malformed input, shared references and native files;
+`node scripts/scene-archive-smoke.cjs` verifies physical downloads, exact WebGPU pixels,
+embedded audio, fresh-page loading and failure recovery. Optional
+`NATIVE_ARCHIVE_PATH` adds a native-to-browser compatibility check.
+
+## Files
+
+| Path | Purpose |
+| --- | --- |
+| `include/engine/math.hpp` | Column-major transforms, affine inverse, WebGPU projection |
+| `include/engine/node.hpp`, `src/node.cpp` | Child ownership, inherited transforms, enabled subtrees |
+| `include/engine/actor.hpp`, `src/actor.cpp` | Reusable actor object |
+| `include/engine/component.hpp`, `src/component.cpp` | Base component object |
+| `include/engine/mesh.hpp`, `src/mesh.cpp` | Shared geometry and mesh factories |
+| `include/engine/mesh_optimizer.hpp`, `src/mesh_optimizer.cpp` | Lossless welding, cache/fetch ordering, GPU index packing |
+| `include/engine/texture.hpp`, `src/texture.cpp` | Shared RGBA textures, image decoding, and limits |
+| `include/engine/mesh_component.hpp`, `src/mesh_component.cpp` | Mesh instances, colors, and render-layer assignment |
+| `include/engine/fbx_importer.hpp`, `src/fbx_importer.cpp` | Binary/ASCII FBX conversion and native file loading |
+| `third_party/ufbx/` | Pinned parser, source provenance, and upstream license |
+| `third_party/stb/`, `src/image_decoder.c` | Pinned image decoder and license |
+| `include/engine/camera_component.hpp`, `src/camera_component.cpp` | Camera projections, cached matrices/frustum, viewport conversion and picking |
+| `include/engine/light_component.hpp`, `src/light_component.cpp` | Directional and point light components |
+| `include/engine/orbit_controller.hpp`, `src/orbit_controller.cpp` | Reusable camera orbit controls |
+| `include/engine/scene.hpp`, `src/scene.cpp` | Scene root and render-frame collection |
+| `include/engine/render_frame.hpp`, `src/render_frame.cpp` | Reusable draw/layer/light lists and instance staging |
+| `include/engine/skeletal_mesh_component.hpp`, `src/skeletal_mesh_component.cpp` | Mesh, skeleton and animation component integration |
+| `include/engine/skeleton_component.hpp`, `src/skeleton_component.cpp` | Joint hierarchy and per-instance GPU bone palette |
+| `include/engine/animation_component.hpp`, `src/animation_component.cpp` | Playback, loop, stop, quaternion blending and crossfades |
+| `include/engine/animation.hpp`, `src/animation.cpp`, `src/fbx_animation_import.cpp` | Shared animation data and FBX skin/clip conversion |
+| `include/engine/renderer.hpp`, `src/renderer.cpp` | C++ WebGPU initialization, resources, ordered render layers |
+| `include/engine/performance.hpp`, `src/performance.cpp` | Bounded CPU/GPU timing windows, counters, JSON summaries |
+| `src/main.cpp` | Demo scene, animation, frame loop, exported input functions |
+| `shaders/mesh.wgsl` | Directional/point diffuse lighting and tone mapping |
+| `web/` | Browser shell, input, controls, startup errors, metrics |
+| `scripts/` | Local SDK setup, builds, development server, optional browser checks |
+
+Shader edits trigger CMake regeneration and rebuild the embedded shader. `build/web-debug/compile_commands.json` can be used by clangd or a C++ editor.
+
+## Skeletal meshes and animation
+
+Optional [animation controllers and clip events](docs/animation-control.md) add
+typed parameters, ordered state transitions, parameter-driven blends and queued
+markers to the existing player. `consumeOutput()` drains owned events and root
+motion together; gameplay owns marker responses and collision-aware movement.
+
+`SkeletalMeshComponent` extends the texture/material/layer behavior of
+`MeshComponent` and owns child `SkeletonComponent` and `AnimationComponent`
+objects. Each component has its own header and C++ implementation. Immutable
+meshes, skeleton definitions and clips can be shared; playback clocks and poses
+belong to each component. Put skeletal mesh components under actors normally.
+
+```cpp
+auto& actor=scene.addChild<Actor>("Character");
+auto& mesh=actor.addChild<SkeletalMeshComponent>("Animated mesh");
+mesh.loadFbxFile("character.fbx"); // Native example; browser uses loadFbx(bytes).
+mesh.animation().play(0,true,1.0);  // Clip, loop, playback speed.
+scene.updateAnimations(deltaSeconds); // Call before renderer.render().
+mesh.animation().blend(0,1,0.5f); // Two clips with independent duration wrapping.
+mesh.animation().setBlendWeight(0.75f);
+mesh.animation().crossFade(1,0.4); // Fade from current pose, including an interrupted fade.
+mesh.animation().pause();
+mesh.animation().resume();
+mesh.animation().stop(); // Restore original bind pose and release clip playback state.
+```
+
+Root-motion extraction is opt-in and includes translation and quaternion rotation.
+Choose the locomotion joint by its index in `mesh.skeleton().skeleton()->joints`;
+imported rigs can have static FBX ancestors above that joint. Extraction anchors
+the selected joint's position and orientation to its bind pose in mesh coordinates,
+applies the same rigid correction to every hierarchy root, and keeps scale and
+relative limb animation in the skin pose. Assets and sampled clips stay immutable.
+
+```cpp
+auto& player=mesh.animation();
+player.enableRootMotion(rootJointIndex); // Default index is zero.
+player.play(0,true);
+scene.update(deltaSeconds);
+const auto movement=player.consumeRootMotion(); // Translation + rotation; consumes once.
+// For a mesh with identity placement beneath the actor and no physics controller:
+actor.setWorldTransform(actor.worldMatrix()*movement.matrix());
+player.disableRootMotion(); // Restore the normally animated root pose.
+```
+
+Gameplay consumes movement after the scene update and decides how to apply it,
+including collision/physics handling. The delta is in the skeletal mesh's local
+coordinates, before its component placement; convert through that placement when
+it differs from the actor's coordinates. Applying a rotation beneath nonuniform
+scale can require shear, which `setWorldTransform` rejects. Extraction itself
+does not move actors. Pending deltas compose in chronological order across updates;
+`rootMotionDelta()` inspects them without consuming. Turning loops accumulate their
+endpoint transform, including multiple loops in one update, instead of emitting
+the wrap back to frame zero. Non-looping clips extract only to their endpoint.
+Zero-duration clips, paused playback and disabled scene subtrees emit no movement.
+
+Play, blend, seek, blend-weight changes, crossfade, stop and extraction toggles clear
+pending movement, so playback controls never emit a teleport. Seeking rebases the
+next update at the requested time. Stop keeps the extraction setting for the same
+rig; replacing the skeleton clears it on the next update or playback configuration.
+Blending interpolates each clip's interval delta, with independent duration wrapping.
+Crossfades retain the existing frozen outgoing pose and weight target movement by
+the average fade weight over the update, including updates past the fade endpoint.
+As with pose blending, blended/faded rotation uses the shortest quaternion arc;
+use normal frame-sized updates for blended movement. Unblended loop extraction is
+independent of update subdivision. Warm extraction updates allocate no heap blocks.
+
+The browser inspector has clip selectors, play/pause/stop, loop and speed settings,
+a blend slider, and a crossfade duration/target. Settings for loop/speed apply
+when starting playback/blending. **Load animated FBX demo** imports the original
+two-bone column with two opposing bending clips. Open `?scene=skeleton` to load
+it directly. The usual FBX picker also accepts animated ASCII/binary FBX files
+and their companion images. Failed imports retain the current working scene.
+Non-loop playback holds the final pose; stop restores bind pose. Global **Pause
+motion** also freezes animation updates.
+
+FBX import retains ancestor hierarchy, mesh-to-bone bind matrices, normalized
+four strongest skin weights, and named animation stacks. It bakes evaluated
+local TRS poses (including FBX pivots, animation layers and transform inheritance)
+at 30 Hz, with both endpoints, then discards parser data. At runtime C++ samples
+poses, blends translations/scales and shortest-arc quaternion rotations, resolves
+the hierarchy, and builds bone matrices. **Vertex deformation and normal skinning
+run on the GPU**, using a shared immutable joint/weight vertex stream and a
+read-only bone storage buffer. Skeletal-only animation needs no per-frame CPU vertex
+deformation or mesh upload. Active morph targets use the cached CPU deformation
+path described below. Actor/component placement happens after skinning; preview fitting
+keeps bind-space geometry intact. Each palette uploads only when changed.
+
+The skin pipeline uses 14 vertex attributes and three vertex streams, within
+baseline WebGPU limits. Static meshes retain their existing pipeline and batching.
+Skeletal draws batch only when they share the same pose palette; independently
+animated components keep separate draw submissions. Mesh optimization welds and
+remaps all skin attributes together with positions/normals/UVs.
+
+Import limits are 256 hierarchy joints, 1,024 bindings (including identity), 64
+clips and 32 MiB sampled poses, in addition to existing geometry/parser limits.
+`FbxImportOptions::animationSampleRate` (1–120 Hz) and `maxAnimationBytes` are
+configurable. More than four influences are reduced and reported as a warning;
+dual-quaternion skins use linear skinning with a warning. Multiple skin deformers
+on one mesh, inconsistent shared-bone bind poses and sheared local joint transforms are rejected.
+GPU clip evaluation is not implemented.
+
+### Morph targets
+
+`Mesh::morphTargets` stores named additive mesh-local position offsets and optional
+normal/tangent offsets. Position streams must match the vertex count; empty normal
+or tangent streams preserve the base attributes. Publish the mesh as an immutable
+shared resource, then control weights independently on each `MeshComponent` or
+`SkeletalMeshComponent`:
+
+```cpp
+auto asset = std::make_shared<Mesh>(*Mesh::cube());
+MorphTarget stretch;
+stretch.name = "Stretch";
+for (const auto& vertex : asset->vertices)
+    stretch.positions.push_back({0, vertex.position.y > 0 ? 1.0f : 0.0f, 0});
+asset->morphTargets.push_back(std::move(stretch));
+auto& object = scene.spawn("Morph object").addComponent<MeshComponent>("Mesh", asset);
+object.setMorphWeight("Stretch", 0.75f); // Index overload also available.
+object.resetMorphWeights();             // Restore the resource's default weights.
+```
+
+Finite negative weights and extrapolation above one are allowed. Targets add to the
+base vertices without accumulation across updates. Normals are normalized and tangents
+orthogonalized, retaining tangent handedness. Set weights from gameplay/animation ticks
+to animate shapes. Mesh replacement resets weights when next accessed or collected.
+Malformed streams and nonfinite weights are rejected; finite weights that overflow
+vertex data are rejected when evaluating the pose, preserving the previous pose buffer.
+
+Morphing currently runs on the CPU when weights change, then uploads a cached vertex
+stream. Unchanged weights perform no deformation or vertex upload. Zero weights use
+the shared base GPU mesh and retain ordinary static instancing. Active instances keep
+separate pose buffers; indices, materials and skin weights stay shared. Deformation
+precedes GPU skinning in color, transparent and shadow passes. Culling uses matching
+morphed/skinned bounds. Optimization and tangent seam splitting retain all target
+attributes. Scene archives retain target assets and per-instance weights.
+
+FBX ASCII/binary imports expand sparse shape offsets over every converted corner,
+apply geometry transforms and meter conversion, preserve default effective weights,
+and derive tangent offsets. Missing FBX normal offsets preserve base normals. Node
+instances receive separate named targets; duplicate names gain numeric suffixes.
+FBX in-between key shapes are exposed as independent targets with their default
+effective weights and a warning. Automatic progressive-channel interpolation and
+FBX morph-weight animation playback are not implemented; animated channels report
+a warning. Import limits default to 128 targets and 64 MiB decoded offset streams,
+configurable through `maxMorphTargets` and `maxMorphBytes`.
+
+The inspector exposes imported target sliders and **Reset weights**. **Load morph
+demo**, or `?scene=morph`, loads the original two-shape column. Native `morph_tests`
+cover instance isolation, normals/tangents, bounds, skinning, welding/seams, ASCII/
+binary import, conversion, budgets, replacement and archive round trips.
+`node scripts/morph-smoke.cjs` exercises actual WebGPU color/shadow pixels, sliders,
+combined shapes, transparency, skinning, culling and unchanged-buffer reuse.
+
+The panel/JSON expose skinned instances, cached palettes, bone write calls/bytes
+and `gpuSkinBytes` (a subset of `gpuBufferBytes`). CPU asset payload includes skin
+vertex streams but excludes skeleton/clip metadata and pose scratch buffers.
+Native tests cover root-motion extraction and consumption, turning loops, scaled
+ancestors, transitions and allocation-free updates, plus binary/ASCII import, bind pose, blending/fades, loop/stop,
+disabled subtrees, failure recovery, and weight-preserving optimization; 1,000
+warm animated updates/collections allocate zero ordinary heap blocks.
+`node scripts/skeletal-animation-smoke.cjs` verifies real WebGPU deformation,
+exact blend endpoints, bind-pose stop, playback/fade controls and buffer release.
+
+## Audio system
+
+The reusable C++ `AudioSystem` provides shared immutable sounds, simultaneous
+voices, loops, hierarchical buses, volume/mute controls, interruptible fades and
+scene-handle-based positional emitters/listeners. The optional browser backend
+uses Web Audio with explicit activation and host suspension. Open **Audio system**
+in the inspector for overlapping effects, looping music, bus controls, fade-out,
+positional playback and local MP3/WAV sound imports.
+
+See [audio contracts, usage and validation](docs/audio.md) for lifetime rules,
+PCM decoding, frame ordering, browser activation and persistence scope.
+
+## MP3 and WAV audio
+
+The inspector's **Import audio** loads one local `.mp3` or `.wav` without uploading it.
+**Play** starts at the selected position, **Pause** holds it, and **Stop** silences
+playback and returns to zero. Click or drag the waveform, or use the position
+slider, to seek while stopped, paused or playing. The waveform supports arrow
+keys (one second, or ten with Shift), Home and End. The playhead and elapsed /
+total time follow the browser's audio clock; reaching the end holds the final
+position, and Play starts again from zero. Scene motion controls do not pause audio.
+
+`web/audio.js` provides the reusable `EngineAudioPlayer`; `web/audio-panel.js`
+binds the inspector and exposes its instance as `window.EngineAudio`:
+
+```js
+const player = new EngineAudioPlayer();
+await player.loadFile(file); // A File named .mp3 or .wav; decode failure preserves the current track.
+player.setPosition(12.5);    // Seconds, clamped to [0, duration].
+await player.play();        // Call from a user gesture to allow browser audio output.
+player.pause();
+player.stop();
+console.log(player.snapshot()); // Name, state, position, duration, channels, loading, contextState.
+await player.dispose();     // Stops playback, releases samples, closes its owned AudioContext.
+```
+
+The player uses the browser's [Web Audio decoder](https://developer.mozilla.org/en-US/docs/Web/API/BaseAudioContext/decodeAudioData)
+and retains decoded samples for playback and waveform peaks across all channels.
+Imports are limited to 32 MiB encoded, 15 minutes and 128 MiB retained PCM.
+The browser allocates the full decoded buffer before the latter limits can be
+checked; this is intended for bounded clips rather than streaming large music
+libraries. Successful replacement stops the previous track; failed replacement
+preserves it. Concurrent imports keep the newest request, and Stop/Pause cancel
+a pending Play. No C++ decoder dependency or Wasm audio copy is required.
+An optional `{ context }` constructor argument uses an existing AudioContext
+without closing it on disposal. `change` events report load/playback transitions;
+read `position` for the live clock. `peaks` contains interleaved minimum/maximum
+values for up to 512 waveform bins.
+
+`node scripts/audio-smoke.cjs` uses the same browser/dependency setup as the
+other smoke checks. It imports original stereo MP3 and PCM WAV tones and checks waveform
+rendering, pointer/keyboard/range seeking, nonzero Web Audio output, pause/stop
+silence, completion/replay, malformed-import recovery, pending-play cancellation,
+concurrent-import ordering, disposal and mobile layout. Evidence is saved to
+`build/evidence/audio/`. These checks establish browser audio output samples;
+speaker/headphone audibility remains a manual device check.
+
+## Instanced rendering
+
+Instancing is enabled by default for shared mesh components, including imported
+FBX meshes. Each ordered layer groups consecutive draws with the same mesh,
+index range, effective material binding, skin pose and mirrored winding. Transforms, inverse-transpose normals and
+tints remain individual instance attributes. Texture/scalar overrides, render state and material
+ranges split batches. Draws are never sorted across intervening resources or
+layers; noncontiguous object slots also split a batch to preserve original order.
+
+`MeshComponent::allowInstanceReordering` is an opt-in runtime batching hint for
+opaque objects whose equal-depth precedence may change. Contiguous opted-in runs
+within a layer group matching parts/materials into contiguous GPU instance slots;
+the original `SceneFrame` indices remain intact. Use `RenderFrame::instanceDraw()`
+to resolve a GPU slot to its draw. Order-sensitive and transparent components end
+each run. This runtime hint defaults to false when loading a scene archive.
+The ship stress fleet enables it: 100 and 1,000 fully visible Knarr ships each
+use seven color draws plus seven draws per shadow map. The scene totals are
+10 color-only draws or 17 with one shadow map. Geometry counts remain unchanged
+when detail settings are fixed. `scripts/ship-instancing-smoke.cjs` compares both
+fleet sizes with instancing disabled, including exact rendered pixels and shadows.
+
+The GPU reads the existing reusable 256-byte object slots as an instance vertex
+buffer (160 bytes of attributes). `DrawIndexed` supplies the batch's instance
+count and first-instance slot. Changed-only uploads, resource sharing and cached
+transforms continue to work; batching does not duplicate mesh geometry.
+`Renderer::setInstancingEnabled(false)` disables batching; the browser accepts
+`?instancing=off` for a visual/submission comparison.
+
+The performance panel and JSON distinguish actual `drawCalls` from
+`submittedInstances`, `instancedDrawCalls` and `maxInstancesPerDraw`. Triangle
+counts include every instance. The Knarr demo submits **11 draws instead of 46**
+(46 instances, 41,414 triangles); restoring the cube demo submits **3 instead of
+45** (45 instances, 530 triangles). `node scripts/instancing-smoke.cjs` compares
+exact canvas pixels with batching on/off, including rotated nonuniform instances
+and point-light visibility changes. These are submission reductions, not FPS claims.
+
+## Performance measurements
+
+The renderer retains a `RenderFrame` with reusable scene draw/light vectors,
+per-layer index/batch lists, and instance staging bytes. `Scene::collect(frame)`
+clears previous references and refills caller-owned storage while preserving
+capacity; the existing value-returning `collect()` remains available. Each layer
+visits its own instance batches once, preserving traversal/material order and global
+instance-slot addresses. Only changed active instance ranges are uploaded. Buffers grow
+when needed and retain their peak capacity through smaller/empty scenes and
+measurement resets. Old mesh/texture references are released before GPU cache
+cleanup so frame reuse does not keep obsolete assets alive.
+
+**Timing and memory details** shows reserved CPU frame storage and CPU/GPU growth
+events for the current frame and since reset. CPU growth counts vector capacity
+changes in scene draws, lights, layer lists, object staging and dirty ranges; GPU growth counts
+instance buffer creations/replacements. These scoped counters do not count
+all heap or WebGPU allocations. Command encoders, render passes and swapchain
+views still follow WebGPU's per-frame lifecycle. Native tests count zero heap
+allocations across 1,000 warm collections and instance preparations, verify live
+transform updates, and exercise growth, empty scenes, layer changes and release.
+`node scripts/frame-reuse-smoke.cjs` verifies stable capacities over 120 browser
+frames, grows to 159 material draws, restores/reimports without further growth,
+and checks active upload sizes and asset release. Optional `FRAME_BASELINE` is a
+pre-change deterministic Knarr canvas PNG for exact pixel comparison; use the
+same browser and viewport. The check measures capacity reuse and rendering correctness.
+
+Nodes cache local/world matrices and inverse-transpose normal matrices. Exact
+snapshots of public `Transform` fields detect direct writes; changes to a parent
+world matrix refresh descendants while unrelated subtrees retain their caches.
+Normal matrices are computed once per mesh component, shared by its material
+draws. The camera reuses its inverse and caches projection by FOV, aspect and
+clip planes. Scene traversal and public `worldMatrix()` calls share caches.
+
+Object staging compares all 160 instance-attribute bytes (model, normal, tint, shadow receiving) against
+the prior contents of each draw slot. This handles changed transforms/tints and
+slot changes after visibility, material-count or scene changes. Adjacent dirty
+slots are coalesced; a write includes padding between slots but omits the final
+96 padding bytes. Recreating the GPU object buffer forces all active slots to
+upload, including unchanged objects. Camera/light uniforms upload only when their
+1,136 bytes change. Mesh/texture bindings still update when resources change even
+if the object's instance data stays identical. Resetting measurements preserves caches.
+
+**Timing and memory details** and JSON report object slots/writes/bytes, separate
+camera/light writes/bytes, and local/world/mesh-normal rebuilds during collection.
+Camera inverse work outside collection is excluded from those rebuild counts;
+per-node cache metadata is excluded from payload estimates. Native tests cover
+direct writes, parent propagation, nonuniform normals, tints, sparse ranges,
+visibility, lens changes, invalid-transform recovery, and buffer invalidation.
+`node scripts/cache-upload-smoke.cjs` verifies real WebGPU output and writes using
+a controlled animation clock. On Knarr, steady animation uploads 160 object bytes
+for the moving marker plus 1,136 camera/light/environment/shadow bytes: **1,296 bytes/frame**. The rotating cube demo uploads seven adjacent moving slots in
+1,696 object bytes plus 1,136 globals: **2,832 bytes/frame**. Static/paused scenes
+perform zero uniform writes and no scene matrix rebuilds; camera orbit/reset
+updates only globals. The controlled-clock checks establish upload reduction
+and rendering correctness, not an FPS benchmark.
+
+### Screen-size mesh detail and shadow budgets
+
+The fleet demo prepares three shared static mesh LODs once per asset. The renderer
+selects them by projected bounds in each camera viewport, with 10% hysteresis.
+Distance, object scale, FOV and orthographic cameras are accounted for. Shadow
+maps choose detail independently in texels and cull casters outside each light's
+volume while retaining off-camera casters. Near-plane intersections retain full
+camera detail. Animated meshes retain their original geometry.
+
+Expand **Hansa ship stress test → Mesh detail and shadows** to compare full versus
+automatic camera/shadow detail, casting versus receiving, 256–2048 shadow-map
+resolution, and one versus nine comparison samples. **Sun shadows** disables all
+shadow work. Controls reset timing windows; pause motion and keep camera/count
+fixed for comparisons. The default is 1024 and nine samples.
+
+Engine callers can prepare a mutable static asset with
+`MeshOptimizer::generateLods(mesh)` before publishing it as `shared_ptr<const Mesh>`.
+The original and LOD levels retain shared material resources. LOD buffers add fixed
+asset memory, not one copy per ship. Derived LOD caches are not serialized by the
+current archive format. [Implementation, profiling and validation](docs/mesh-detail-validation.md)
+include the reusable API contracts and test procedure.
+
+The inspector's **Performance** panel reports rolling mean, nearest-rank p95, and (in JSON) maximum durations across the latest 120 submitted frames. It shows frame interval separately from CPU engine work. Expand **Timing and memory details** for animation update, scene collection, preparation/uploads, command encoding, and CPU queue-submission time. The CPU total includes renderer bookkeeping and resizing, but excludes the inspector's aggregation/display work and GPU execution. Frame intervals include browser scheduling and synchronous import stalls; the first callback and callbacks after a visibility change have no interval sample.
+
+Draw calls, submitted instances/triangles, passes, actual queue-write calls/bytes, resource cache counts, and memory estimates are collected from the render path. Shared resources are counted once. Instance uploads occur only when their shader data changes or the GPU instance buffer is recreated; camera/light uniforms upload when changed. CPU asset payload counts vertex/index buffers and retained decoded image pixels. GPU payload estimates include mesh/instance buffers, all mip levels, uniforms, timing readback buffers, and nominal four-byte depth pixels. They exclude surface images, object/allocator overhead, query-object storage, temporary import allocations, and driver overhead. Wasm capacity is the allocated linear-memory buffer, not live heap usage.
+
+If the adapter supports `timestamp-query`, the engine requests it and measures each layer and shadow map render-pass duration. Sampling is limited to 10 Hz with three asynchronous readback slots; rendering never waits for a slot or mapped results. GPU statistics use a separate 120-sample window (up to roughly 12 seconds), expose sample age, and sum the color layers and directional shadow passes across active views. They exclude GPU transfers, queue waiting, presentation, and profiler readback. Browser timestamp precision may be quantized. Unsupported/disabled timing is reported as unavailable with `null` durations, not zero. Add `?gpuTiming=off` to disable GPU sampling for an instrumentation-overhead comparison.
+
+**Last asset load** records successful and failed import attempts, including file read/fetch, copy into Wasm, model parsing, image decoding/copying, geometry/material conversion, lossless mesh optimization, and preview fitting. Vertex counts before/after optimization are included. Import wall time excludes GPU resource creation on the following render frame; **Last resource preparation** retains the most recent new-resource CPU preparation duration, including mip generation and queue writes. The C++ importer can fill caller-owned `FbxImportMeasurements` via `FbxImportOptions::measurements` in native or browser builds.
+
+The inspector refreshes at most four times per second. **Reset samples** clears CPU/GPU windows and cumulative upload counters while retaining cached resources; pending GPU results from before the reset are ignored. **Export JSON** downloads the current summaries, build mode, browser, scene, measurement definitions, up to 240 inspector snapshots, and the latest 20 asset attempts. The same report is available programmatically with `window.EnginePerformance.snapshot()`.
+
+For comparisons, use the same Release build, viewport, browser/GPU, scene, camera, and light settings. Let asset uploads finish, reset samples, then capture a stable run. Include cold-load measurements separately when testing importer changes. Debug builds include runtime checks and should be compared separately.
+
+`scripts/performance-smoke.cjs` checks exact Knarr submission/cache/upload counts and mip payload, rolling statistics, asset timings, asynchronous GPU samples, unavailable/disabled GPU fallback, reset, resource release, failed imports, and a physically saved JSON export. Use the same `NODE_PATH`, `BROWSER_EXECUTABLE`, and local server setup as the browser acceptance script below. Optional `EVIDENCE_DIR` selects its output directory.
+
+## In-engine GUI
+
+Open **In-engine GUI demo** or `?gui=1` for C++ labels, a text input, image,
+buttons and panels drawn directly inside the WebGPU canvas. The retained widget
+tree provides absolute/anchored and horizontal/vertical layout, nested clipping,
+pointer capture, keyboard focus, Tab navigation, a font atlas and single-line
+text editing through an invisible browser textarea service. GUI gestures are
+consumed before camera/game input. The normal playground keeps its HTML inspector.
+
+The portable API is in `include/engine/gui.hpp`; browser integration is in
+`include/engine/gui_browser.hpp`. See [GUI usage and architecture](docs/gui.md)
+for examples, packaging, performance accounting and the first-version text scope.
+`tests/gui_tests.cpp` runs with the native core suite;
+`scripts/gui-smoke.cjs` checks actual canvas pixels and browser interaction.
+
+## Hansa ship stress test
+
+Use **Hansa ship stress test** at the top of the demo inspector. Enter an integer
+from 0 to 10,000 and press **Render ships**, or choose a preset. The Knarr ships
+form a centered grid across the ground, scaling to fit without overlapping. The
+camera frames the fleet. **Return to scene** restores the previous imported model.
+Opening Physics, Materials, importing another FBX, or restoring the starter scene
+clears the fleet.
+
+All copies share the bundled Hansa Knarr mesh and textures. The existing FPS and
+Performance panels report rendering costs; JSON exports include the fleet count.
+Large counts intentionally stress the GPU, especially with shadows enabled.
+`tests/ship_stress_tests.cpp` covers layout, counts up to 10,000, invalid-count
+recovery and cleanup. `scripts/ship-stress-smoke.cjs` checks browser controls,
+actual canvas pixels, shared GPU assets, submissions and scene transitions using
+the same Playwright environment as the other browser smoke scripts.
+
+## Physics
+
+Optional [movement controllers](docs/movement.md) provide a device-independent
+character motor with grounding, slopes, steps, jumping, wall sliding and per-step
+movement results. Collision-free XYZ movement is also available.
+
+Jolt Physics runs inside the C++/WebAssembly engine with reusable rigid-body and
+collider components, a scene-owned physics world, fixed steps, render
+interpolation, collision events/layers, forces/impulses, filtered raycasts,
+convex-shape overlaps/sweeps, and sensor enter/exit events. Use
+**Physics playground** in the inspector or open `?scene=physics` to try falling
+boxes/spheres, click/tap impulses, and collider outlines. See
+[Physics usage and architecture](docs/physics.md) for the API, ownership contract,
+dependency setup, and verification commands. The first CMake configure downloads
+pinned Jolt 5.3.0; the browser remains single-threaded.
+
+## Verification
+
+`tests/camera_tests.cpp` covers validated perspective/orthographic lenses, WebGPU depth endpoints, pixel/world round trips, offset viewports, picking rays, all six frustum planes, sphere/AABB tests, parent-aware aiming, cache revisions, invalid-input recovery, and mesh/light visibility masks. `tests/render_view_tests.cpp` and `scripts/compositing-smoke.cjs` cover multi-view compositing.
+
+Native core tests need a C++20 compiler, CMake, and Ninja; no SDK or GPU is required:
+
+```sh
+cmake -S . -B build/native -G Ninja -DCMAKE_BUILD_TYPE=Debug
+cmake --build build/native
+ctest --test-dir build/native --output-on-failure
+```
+
+Tests cover nested transforms, scene/actor/component ownership, disabled subtrees, shared meshes, triangle winding, inverse-transpose normals, parented lights, and camera projection/orbit behavior. Importer tests add binary and ASCII fixtures, instancing, units/axis conversion, geometry offsets, mirrored scales, missing-normal generation, malformed indices, singular transforms, import limits, native path loading, and preservation of component state on failure. Texture tests cover image orientation, UV seams, shared embedded images, external resolution, material ranges/tints, resource overrides, image limits, corrupt-image recovery, and Knarr's seven textured materials. A native build provides the core and tests; the renderer targets the browser.
+
+`scripts/browser-smoke.cjs` is an optional acceptance check using Playwright and pngjs. Supply those packages through `NODE_PATH` or install them in a separate test environment. With the development server running and a WebGPU-capable Chrome/Edge installation:
+
+```powershell
+$env:NODE_PATH = 'path/to/test/node_modules'
+$env:BROWSER_EXECUTABLE = 'C:/Program Files/Google/Chrome/Application/chrome.exe'
+node scripts/browser-smoke.cjs
+```
+
+It checks real canvas changes for orbit/zoom/reset and both light toggles, frozen animation while paused, binary/ASCII FBX uploads, mesh replacement and repeated imports, import-error recovery, demo restoration, layer submission, responsive resizing, startup errors, and console/GPU validation errors. Texture checks verify that Knarr's seven images affect rendered pixels, overrides/reloads preserve geometry, embedded and companion versions render identically, missing-image fallback is visible, and corrupt images preserve the current scene. Screenshots and JSON results go to `build/evidence/`. This is a scoped test of that browser/GPU, not a browser compatibility matrix or performance benchmark.
+
+GitHub Actions builds native core tests and a release browser artifact. Browser rendering acceptance is separate from CI compilation.

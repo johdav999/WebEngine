@@ -1,0 +1,69 @@
+; FBX 7.4.0 project file
+FBXHeaderExtension: {
+    FBXHeaderVersion: 1003
+    FBXVersion: 7400
+    Creator: "WebEngine importer tests"
+}
+GlobalSettings: {
+    Version: 1000
+    Properties70: {
+        P: "UpAxis", "int", "Integer", "",1
+        P: "UpAxisSign", "int", "Integer", "",1
+        P: "FrontAxis", "int", "Integer", "",2
+        P: "FrontAxisSign", "int", "Integer", "",1
+        P: "CoordAxis", "int", "Integer", "",0
+        P: "CoordAxisSign", "int", "Integer", "",1
+        P: "UnitScaleFactor", "double", "Number", "",1
+        P: "OriginalUnitScaleFactor", "double", "Number", "",1
+    }
+}
+Objects: {
+    Geometry: 1000, "Geometry::Quad", "Mesh" {
+        Vertices: *12 {
+            a: -100,0,100,100,0,100,100,0,-100,-100,0,-100
+        }
+        PolygonVertexIndex: *4 {
+            a: 0,1,2,-4
+        }
+    }
+    Geometry: 1001, "Geometry::Triangle", "Mesh" {
+        Vertices: *9 {
+            a: 0,0,0,100,0,0,0,100,0
+        }
+        PolygonVertexIndex: *3 {
+            a: 0,1,-3
+        }
+    }
+    Model: 2000, "Model::Parent", "Null" {
+        Version: 232
+        Properties70: {
+            P: "Lcl Translation", "Lcl Translation", "", "A",100,200,300
+        }
+    }
+    Model: 2001, "Model::QuadA", "Mesh" {
+        Version: 232
+        Properties70: {
+            P: "GeometricTranslation", "Vector3D", "Vector", "",10,0,0
+            P: "Lcl Scaling", "Lcl Scaling", "", "A",2,1,0.5
+        }
+    }
+    Model: 2002, "Model::QuadB", "Mesh" {
+        Version: 232
+        Properties70: {
+            P: "Lcl Translation", "Lcl Translation", "", "A",500,0,0
+            P: "Lcl Scaling", "Lcl Scaling", "", "A",-1,2,1
+        }
+    }
+    Model: 2003, "Model::Triangle", "Mesh" {
+        Version: 232
+    }
+}
+Connections: {
+    C: "OO",2000,0
+    C: "OO",2001,2000
+    C: "OO",2002,2000
+    C: "OO",2003,0
+    C: "OO",1000,2001
+    C: "OO",1000,2002
+    C: "OO",1001,2003
+}

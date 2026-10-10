@@ -1,0 +1,1 @@
+stb_image v2.30 and stb_truetype v1.26 from https://github.com/nothings/stb/tree/013ac3beddff3dbffafd5177e7972067cd2b5083 . MIT license option selected. PNG, JPEG, TGA, and BMP decoding enabled; image filesystem I/O disabled. The GUI rasterizer accepts trusted application fonts only; see third_party/noto/README.md for the bundled font provenance.

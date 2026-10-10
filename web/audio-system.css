@@ -1,0 +1,9 @@
+.audio-system-panel{grid-column:1/-1}
+.audio-system-panel p{font-size:11px;line-height:1.5;color:var(--muted);overflow-wrap:anywhere}
+.audio-system-panel .buttons{flex-wrap:wrap;margin-top:10px}
+.audio-system-panel button{flex:1 1 70px}
+.audio-system-panel label{display:block;margin-top:14px;font-size:11px;color:#c6d2dd}
+.audio-system-panel input[type=range]{display:block;width:100%;margin:7px 0 12px;accent-color:var(--accent)}
+.audio-system-panel label:has(input[type=checkbox]){display:flex;align-items:center;gap:8px}
+.audio-system-panel input[type=checkbox]{margin:0;accent-color:var(--accent)}
+#sound-status{font-variant-numeric:tabular-nums;margin-bottom:0}
