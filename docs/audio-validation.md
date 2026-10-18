@@ -37,3 +37,8 @@ it does not establish all browser autoplay policy variants. The measured samples
 do not prove physical speaker output. Mobile viewport emulation is not physical
 Android/iOS acceptance. No sustained-performance benchmark, native audio device,
 audio archive codec, streaming or DSP/occlusion acceptance is claimed.
+
+Stage 4 extends these historical audio checks with playback-rate and driving
+example coverage. See [new contracts](driving-audio.md) and
+[Stage 4 evidence](driving-audio-validation.md); the earlier records above are
+not a new validation run of those extensions.

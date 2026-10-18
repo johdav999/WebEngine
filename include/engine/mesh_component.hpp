@@ -31,9 +31,11 @@ public:
     float opacity=1; // Alpha/Additive meshes depth-test, without writing depth.
     RenderLayer layer=RenderLayer::World;
     std::uint32_t visibilityMask=1; // Object groups, independent of ordered render layers.
+    bool receivesDecals=true;
     bool castsShadow=true,receivesShadow=true; // World layer only; blended meshes do not cast.
     bool frustumCulling=true; // Opt out for custom vertex deformation without CPU bounds.
     bool allowInstanceReordering=false; // Runtime batching hint: opaque parts may change equal-depth precedence.
+    MeshLodPolicy lodPolicy; // Independent camera/shadow presentation; never changes mesh or collision.
     // Weights are independent per component; finite negative/extrapolated weights are allowed.
     void setMorphWeight(std::size_t target,float weight);
     void setMorphWeight(std::string_view target,float weight);
@@ -42,6 +44,7 @@ public:
     std::shared_ptr<const MorphPose> morphPose() const; // Null when all weights are zero.
     MeshBounds localBounds(const std::shared_ptr<const SkinPose>& pose={}) const;
 private:
+    MeshBounds geometryBounds(const std::shared_ptr<const SkinPose>& pose) const;
     void synchronizeMorphs() const;
     mutable std::weak_ptr<const Mesh> morphMesh_;
     mutable std::vector<float> morphWeights_;

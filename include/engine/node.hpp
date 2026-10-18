@@ -11,6 +11,10 @@
 
 namespace engine {
 class Scene;
+class Actor;
+struct TerrainEdit;
+class Actor;
+struct TerrainEdit;
 struct TransformCacheStats { std::uint64_t localBuilds=0,worldBuilds=0,normalBuilds=0; };
 enum class ReparentMode { KeepLocal, KeepWorld };
 class Node {
@@ -33,6 +37,7 @@ public:
     // Detach/reparent require an idle hierarchy. Removal in a scene is deferred.
     std::unique_ptr<Node> detachChild(Node& child);
     bool removeChild(Node& child);
+    void setChildIndex(Node& child,std::size_t index); // Idle sibling ordering; no lifecycle change.
     void reparent(Node& newParent,ReparentMode mode=ReparentMode::KeepLocal);
     const auto& children() const { return children_; }
     Node* parent() { return parent_; }
@@ -41,6 +46,7 @@ public:
     const Scene* scene() const { return scene_; }
     bool isActiveInHierarchy() const;
     bool isPendingRemoval() const;
+    bool isProtectedChild() const { return protectedChild_; } // Read-only authoring metadata.
     // Persistent identity, independent of names and scene-scoped runtime handles.
     const std::string& savedId() const { return savedId_; }
     void setSavedId(std::string identity); // Idle hierarchy; rejects duplicates in this root.
@@ -66,6 +72,10 @@ private:
     friend class Scene;
     friend class SelectionSystem;
     friend class Prefab;
+    friend class RouteComponent;
+    friend class TerrainStream;
+    friend class TerrainPagedStream;
+    friend void applyTerrainEdit(Actor&,const TerrainEdit&);
     std::string savedId_;
     struct TraversalGuard {
         explicit TraversalGuard(Node& node);

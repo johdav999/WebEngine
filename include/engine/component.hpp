@@ -31,6 +31,9 @@ public:
     bool isInitialized() const { return initialized_; }
     bool tickEnabled() const { return tickEnabled_; }
     bool fixedTickEnabled() const { return fixedTickEnabled_; }
+    // Stable sibling ordering for fixed updates only; lower orders run first.
+    // Actor callbacks still precede their component children.
+    virtual int fixedTickOrder() const noexcept { return 0; }
     void setTickEnabled(bool value) { tickEnabled_=value; }
     void setFixedTickEnabled(bool value) { fixedTickEnabled_=value; }
     void destroy(); // Requires a scene; uses deferred removal, including descendants.

@@ -11,7 +11,7 @@ struct Demo {
     std::shared_ptr<const SoundAsset> sound;
     AudioVoiceId loop;
     ComponentId emitter,listener;
-    float x=2;
+    float x=2,rate=1;
     Demo() {
         std::vector<float> samples(48000*2);
         for(std::size_t i=0;i<samples.size();++i) samples[i]=0.12f*std::sin(2*pi*220*float(i)/48000);
@@ -51,8 +51,8 @@ void audioDemoCommand(engine::Scene& scene,int command,float value) {
         auto& d=get();
         switch(command) {
         case 0:d.audio.backend().activate();break;
-        case 1:{ AudioPlayOptions o;o.bus=d.effects;d.audio.playEmitter(d.bind(),o);break; }
-        case 2:{ d.audio.stop(d.loop);AudioPlayOptions o;o.bus=d.music;o.loop=true;d.loop=d.audio.play(d.sound,o);break; }
+        case 1:{ AudioPlayOptions o;o.bus=d.effects;o.playbackRate=d.rate;d.audio.playEmitter(d.bind(),o);break; }
+        case 2:{ d.audio.stop(d.loop);AudioPlayOptions o;o.bus=d.music;o.loop=true;o.playbackRate=d.rate;d.loop=d.audio.play(d.sound,o);break; }
         case 3:d.audio.stop(d.loop,1);break;
         case 4:d.audio.stopAll();break;
         case 5:d.audio.setBusVolume(d.audio.masterBus(),value);break;
@@ -61,6 +61,7 @@ void audioDemoCommand(engine::Scene& scene,int command,float value) {
         case 8:d.audio.setBusMuted(d.audio.masterBus(),value!=0);break;
         case 9:d.x=value;d.bind();break;
         case 10:d.audio.fadeBus(d.music,value,1);break;
+        case 11:if(!std::isfinite(value)||value<.125f||value>8)throw std::invalid_argument("Invalid preview rate");d.rate=value;d.audio.setVoicePlaybackRate(d.loop,value);break;
         default:throw std::invalid_argument("Unknown audio example command");
         }
         report();
@@ -75,4 +76,5 @@ void updateAudioDemo(const engine::Scene& scene,double seconds) {
     if(demo) { demo->spatialScene.synchronize();demo->audio.update(seconds,&demo->spatialScene);report(); }
 }
 void suspendAudioDemo(bool value) { if(demo) demo->audio.backend().suspend(value); }
+void stopAudioPreview(){if(demo)demo->audio.stopAll();}
 void shutdownAudioDemo() { stopped=true;demo.reset(); }

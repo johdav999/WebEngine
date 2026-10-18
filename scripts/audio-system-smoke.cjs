@@ -12,8 +12,12 @@ const evidence=process.env.EVIDENCE_DIR||'build/evidence/audio-system';
     const page=await browser.newPage({viewport:{width:1440,height:1040}});
     page.on('pageerror',e=>result.errors.push(String(e)));
     page.on('console',m=>{if(m.type()==='error')result.errors.push(m.text());});
-    await page.goto(`${url}/?gpuTiming=off`);
+    await page.route('https://fonts.googleapis.com/**',r=>r.fulfill({contentType:'text/css',body:''}));
+    const backend=process.env.RENDERER;
+    await page.goto(`${url}/?gpuTiming=off${backend?'&renderer='+backend:''}`);
     await page.waitForFunction(()=>document.body.dataset.defaultModel==='ready'&&Module._engine_audio_command);
+    if(backend)assert.equal(await page.evaluate(()=>EngineQuality.snapshot().backend),backend);
+    result.backend=await page.evaluate(()=>EngineQuality.snapshot().backend);
     const snap=()=>page.evaluate(()=>EngineAudioSystemDemo.snapshot());
     // Deliberately issue a voice before any browser gesture.
     await page.evaluate(()=>Module._engine_audio_command(1,0));

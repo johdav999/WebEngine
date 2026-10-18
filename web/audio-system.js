@@ -40,6 +40,7 @@ class EngineAudioDevice {
     } catch(error) { this.error=error.message; }
   }
   suspend(value) {
+    if(this.suspended===value) return;
     this.suspended=value;++this.activationRevision;
     if(value) this.activated=false;
     if(!this.context||this.disposed) return;
@@ -59,6 +60,8 @@ class EngineAudioDevice {
   }
   start(id,soundId,rate,channels,pcm,options,gain) {
     if(this.disposed||this.voices.has(id)) return false;
+    const playbackRate=options.playbackRate??1;
+    if(!Number.isFinite(playbackRate)||playbackRate<0.125||playbackRate>8) return false;
     let source,gainNode,panner,asset;
     try {
       const context=this.getContext();
@@ -72,7 +75,7 @@ class EngineAudioDevice {
         asset={buffer,refs:0};
       }
       source=context.createBufferSource();gainNode=context.createGain();
-      source.buffer=asset.buffer;source.loop=options.loop;gainNode.gain.value=gain;
+      source.buffer=asset.buffer;source.loop=options.loop;source.playbackRate.value=playbackRate;gainNode.gain.value=gain;
       if(options.spatial) {
         panner=context.createPanner();panner.panningModel='HRTF';panner.distanceModel='inverse';
         panner.refDistance=options.referenceDistance;panner.maxDistance=options.maxDistance;panner.rolloffFactor=options.rolloff;
@@ -102,6 +105,12 @@ class EngineAudioDevice {
   }
   stop(id) { this.release(id,true); }
   gain(id,value) { const v=this.voices.get(id);if(v) v.gainNode.gain.setValueAtTime(value,this.context.currentTime); }
+  playbackRate(id,value) {
+    const v=this.voices.get(id);
+    if(!v||!Number.isFinite(value)||value<0.125||value>8) return false;
+    try { v.source.playbackRate.setValueAtTime(value,this.context.currentTime);v.options.playbackRate=value;return true; }
+    catch(error) { this.error=error.message;return false; }
+  }
   position(id,values) {
     const p=this.voices.get(id)?.panner;if(!p) return;
     if(p.positionX) for(let i=0;i<3;++i) p['position'+'XYZ'[i]].setValueAtTime(values[i],this.context.currentTime);

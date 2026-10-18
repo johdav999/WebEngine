@@ -1,4 +1,13 @@
 #pragma once
+inline constexpr const char* fog_glsl=R"GLSL(@FOG_GLSL@)GLSL";
+inline constexpr const char* sky_shader = R"WGSL(@SKY_SHADER@)WGSL";
+inline constexpr const char* sky_vertex_glsl = R"GLSL(@SKY_VERTEX_GLSL@)GLSL";
+inline constexpr const char* sky_fragment_glsl = R"GLSL(@SKY_FRAGMENT_GLSL@)GLSL";
 inline constexpr const char* mesh_shader = R"WGSL(@MESH_SHADER@)WGSL";
 inline constexpr const char* particle_shader = R"WGSL(@PARTICLE_SHADER@)WGSL";
 inline constexpr const char* gui_shader = R"WGSL(@GUI_SHADER@)WGSL";
+
+inline constexpr const char* water_capture_shader=R"WGSL(@WATER_CAPTURE_SHADER@)WGSL";
+inline constexpr const char* underwater_shader=R"WGSL(@UNDERWATER_SHADER@)WGSL";
+inline constexpr const char* underwater_vertex_glsl=R"GLSL(@UNDERWATER_VERTEX_GLSL@)GLSL";
+inline constexpr const char* underwater_fragment_glsl=R"GLSL(@UNDERWATER_FRAGMENT_GLSL@)GLSL";

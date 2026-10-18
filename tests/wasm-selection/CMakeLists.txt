@@ -13,3 +13,9 @@ target_compile_options(selection_wasm_tests PRIVATE -fexceptions)
 target_link_options(selection_wasm_tests PRIVATE -fexceptions -sENVIRONMENT=node
   -sALLOW_MEMORY_GROWTH=1 -sEXIT_RUNTIME=1 -sFILESYSTEM=0)
 set_target_properties(selection_wasm_tests PROPERTIES SUFFIX ".js")
+add_executable(manipulation_wasm_tests ../manipulation_tests.cpp)
+target_link_libraries(manipulation_wasm_tests PRIVATE engine_core)
+target_compile_options(manipulation_wasm_tests PRIVATE -fexceptions)
+target_link_options(manipulation_wasm_tests PRIVATE -fexceptions -sENVIRONMENT=node
+  -sALLOW_MEMORY_GROWTH=1 -sEXIT_RUNTIME=1 -sFILESYSTEM=0)
+set_target_properties(manipulation_wasm_tests PROPERTIES SUFFIX ".js")

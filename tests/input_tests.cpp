@@ -68,6 +68,22 @@ int main() {
         a.setOrthographic(10,0,100);const auto orthographicBefore=a.worldToScreen(ca.target,{0,0,800,600});
         const auto orthoTarget=ca.target;ca.pan(40,30,600);const auto orthographicAfter=a.worldToScreen(orthoTarget,{0,0,800,600});
         check(close(orthographicAfter.pixel.x-orthographicBefore.pixel.x,40)&&close(orthographicAfter.pixel.y-orthographicBefore.pixel.y,30),"Orthographic pan uses orthographic lens scale");
+        CameraComponent flight;OrbitController pilot(flight);
+        const auto eye=flight.transform.position;pilot.look(90,-100);
+        check(close(flight.transform.position,eye),"Mouse look rotates around a fixed eye");
+        check(pilot.snapshot().elevation<0,"Free look can aim above the horizon");
+        const auto targetBefore=pilot.target;const auto forward=flight.forward();const auto right=flight.right();const auto up=flight.up();
+        pilot.translate({2,3,4});const auto offset=right*2+up*3+forward*4;
+        check(close(flight.transform.position,eye+offset)&&close(pilot.target,targetBefore+offset),"Flight moves eye and pivot along camera axes");
+        pilot.focus({42,-3,8},17);const auto framed=flight.worldToScreen(pilot.target,{0,0,800,600});
+        check(close(framed.pixel.x,400)&&close(framed.pixel.y,300)&&framed.inFront,"Focus centers the new orbit pivot");
+        const auto focused=flight.transform.position;pilot.orbit(0,0,-1.55f,1.55f);
+        check(close(flight.transform.position,focused),"Orbit resumes without a jump after focus");
+        bool rejectedNavigation=false;try{pilot.translate({INFINITY,0,0});}catch(const std::invalid_argument&){rejectedNavigation=true;}
+        check(rejectedNavigation&&close(flight.transform.position,focused)&&close(pilot.target,{42,-3,8}),"Invalid flight cannot publish partial camera state");
+        pilot.zoom(-100000);check(close(pilot.snapshot().distance,3),"Legacy zoom minimum is unchanged");
+        pilot.zoom(-100000,0.05f,1000000);check(close(pilot.snapshot().distance,0.05f),"Editor can zoom into small objects");
+        pilot.orbit(0,-100000);check(close(pilot.snapshot().elevation,0.05f),"Legacy orbit minimum is unchanged");
         InputSystem mapped;
         {
             InputBindings bindings(mapped);

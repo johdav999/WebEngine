@@ -60,7 +60,7 @@ int main(int argc,char** argv) {try {
     rejects([&]{link.setSavedId("target");},"Disabled node identity collision rejected");
     rejects([&]{link.setSavedId("invalid id");},"Invalid identity rejected");
     auto bytes=SceneArchive::save(original,{},{},{},{},codecs);
-    check(bytes[8]==std::byte{4},"Persistence uses archive version 4");
+    check(bytes[8]==std::byte{27},"Persistence uses archive version 27");
     rejects([&]{SceneArchive::load(bytes);},"Unregistered custom type rejected");
     auto loaded=SceneArchive::load(bytes,{},codecs);
     auto* restored=dynamic_cast<Link*>(loaded.scene->findSavedNode("link"));
@@ -90,7 +90,16 @@ int main(int argc,char** argv) {try {
     auto corrupt=bytes;corrupt[37]=std::byte{' '};checksum(corrupt);
     rejects([&]{SceneArchive::load(corrupt,{},codecs);},"Invalid saved identity rejected after CRC verification");
     Scene legacyScene;legacyScene.environment.reset();legacyScene.setSavedId("legacy");
-    auto oldSceneBytes=SceneArchive::save(legacyScene);
+    auto oldSceneBytes=SceneArchive::save(legacyScene);oldSceneBytes.pop_back(); // v17 absent-fog flag.
+    oldSceneBytes.erase(oldSceneBytes.end()-9,oldSceneBytes.end()-5); // v25 empty surface catalog.
+    oldSceneBytes.erase(oldSceneBytes.end()-9,oldSceneBytes.end()-5); // v10's empty terrain-library count, before metadata and sky.
+    oldSceneBytes.pop_back(); // Version 5's absent-sky flag; legacy scene has no views.
+    oldSceneBytes[8]=std::byte{4};
+    const auto v4Size=std::uint64_t(oldSceneBytes.size()-24);
+    for(int i=0;i<8;++i) oldSceneBytes[12+i]=std::byte((v4Size>>(8*i))&255);
+    checksum(oldSceneBytes);
+    auto v4=SceneArchive::load(oldSceneBytes);
+    check(!v4.scene->sky()&&v4.scene->savedId()=="legacy","Version 4 retains identity and defaults sky off");
     // A plain scene's only v4 addition is its identity prefix after kind/protection.
     oldSceneBytes.erase(oldSceneBytes.begin()+33,oldSceneBytes.begin()+43);
     const std::uint64_t payloadSize=oldSceneBytes.size()-24;

@@ -1,0 +1,4 @@
+#editor-route label:has(input[type=checkbox]){display:flex;align-items:center;justify-content:flex-start;gap:8px}
+#editor-route input[type=checkbox]{flex:0 0 auto;margin:0;width:auto}
+#route-profile{width:100%;min-width:0;box-sizing:border-box;font:11px/1.5 monospace}
+#route-overlay{contain:strict}

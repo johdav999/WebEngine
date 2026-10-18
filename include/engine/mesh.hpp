@@ -14,6 +14,16 @@ struct MeshPart { std::uint32_t firstIndex=0,indexCount=0,materialIndex=0; };
 struct MeshBounds { Vec3 minimum{},maximum{}; bool valid=false; };
 struct Mesh;
 struct MeshLod { std::shared_ptr<const Mesh> mesh; float maxPixels=0; };
+// Presentation-only selection, applied independently to camera pixels and shadow
+// texels. Negative fixed levels select automatically; level zero is full detail.
+struct MeshLodPolicy {
+    float cameraScale=1,shadowScale=1;
+    int cameraLevel=-1,shadowLevel=-1;
+    void validate() const {
+        if(!std::isfinite(cameraScale)||!std::isfinite(shadowScale)||cameraScale<=0||shadowScale<=0||cameraScale>64||shadowScale>64||
+            cameraLevel < -1||shadowLevel < -1||cameraLevel>16||shadowLevel>16) throw std::invalid_argument("Invalid mesh LOD policy");
+    }
+};
 // Additive offsets in mesh-local space, before skeletal skinning. Empty normal or
 // tangent streams preserve the base attribute. Position offsets cover every vertex.
 struct MorphTarget {

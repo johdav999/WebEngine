@@ -182,10 +182,11 @@ function differentPixels(a, b) {
     const unsupported = await browser.newPage();
     await unsupported.addInitScript(() => Object.defineProperty(navigator, 'gpu', { value: undefined }));
     await unsupported.goto(url);
-    await unsupported.waitForFunction(() => document.body.dataset.engine === 'error');
-    assert.match(await unsupported.locator('#status').textContent(), /WebGPU is unavailable/);
-    assert(await unsupported.locator('#pause').isDisabled());
-    result.checks.push('Unsupported browsers show a useful error with disabled controls');
+    await unsupported.waitForFunction(() => document.body.dataset.engine === 'ready' && document.body.dataset.defaultModel === 'ready');
+    assert.equal(await unsupported.evaluate(() => EngineQuality.snapshot().backend), 'webgl2');
+    assert.match(await unsupported.locator('#status').textContent(), /WebGL 2 renderer ready/);
+    assert(await unsupported.locator('#pause').isEnabled());
+    result.checks.push('Missing WebGPU selects WebGL 2 rendering with usable controls');
     assert.deepEqual(result.errors, [], 'Browser must have no runtime or GPU validation errors');
     result.passed = true;
     console.log(JSON.stringify(result, null, 2));

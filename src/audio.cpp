@@ -10,6 +10,9 @@ std::atomic<std::uint32_t> nextSound{1};
 void volume(float value) {
     if(!std::isfinite(value)||value<0||value>1) throw std::invalid_argument("Audio volume must be in [0,1]");
 }
+void rateValid(float value) {
+    if(!std::isfinite(value)||value<0.125f||value>8) throw std::invalid_argument("Audio playback rate must be in [0.125,8]");
+}
 void seconds(double value) {
     if(!std::isfinite(value)||value<0) throw std::invalid_argument("Audio time must be finite and nonnegative");
 }
@@ -86,7 +89,7 @@ float AudioSystem::busVolume(AudioBusId id) const {
 bool AudioSystem::busMuted(AudioBusId id) const { auto* b=const_cast<AudioSystem*>(this)->bus(id);return b&&b->muted; }
 AudioVoiceId AudioSystem::play(std::shared_ptr<const SoundAsset> sound,AudioPlayOptions options) {
     if(!sound) throw std::invalid_argument("Audio requires a sound asset");
-    volume(options.volume);seconds(options.offsetSeconds);positionValid(options.position);
+    volume(options.volume);rateValid(options.playbackRate);seconds(options.offsetSeconds);positionValid(options.position);
     if(options.bus==AudioBusId{}) options.bus=masterBus();
     if(!bus(options.bus)||options.offsetSeconds>=sound->duration()||!std::isfinite(options.referenceDistance)
         ||!std::isfinite(options.maxDistance)||!std::isfinite(options.rolloff)||options.referenceDistance<=0
@@ -128,6 +131,13 @@ bool AudioSystem::fadeVoice(AudioVoiceId id,float target,double duration) {
 bool AudioSystem::setVoicePosition(AudioVoiceId id,Vec3 value) {
     positionValid(value);auto* v=voice(id);if(!v||!v->options.spatial||v->emitter) return false;
     v->options.position=value;backend_->position(id.value,value);return true;
+}
+bool AudioSystem::setVoicePlaybackRate(AudioVoiceId id,float value) {
+    rateValid(value);auto* v=voice(id);if(!v||!backend_->playbackRate(id.value,value)) return false;
+    v->options.playbackRate=value;return true;
+}
+float AudioSystem::voicePlaybackRate(AudioVoiceId id) const {
+    auto* v=const_cast<AudioSystem*>(this)->voice(id);return v?v->options.playbackRate:0;
 }
 bool AudioSystem::isPlaying(AudioVoiceId id) const {
     return const_cast<AudioSystem*>(this)->voice(id)&&backend_->playing(id.value);

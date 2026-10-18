@@ -9,7 +9,9 @@ function difference(a,b,region=false) {
   const x=PNG.sync.read(a),y=PNG.sync.read(b);assert.equal(x.width,y.width);assert.equal(x.height,y.height);
   let changed=0,darker=0;
   for(let py=0;py<x.height;py++) for(let px=0;px<x.width;px++) {
-    if(region && !(px>x.width/2+0.6*x.height/8 && px<x.width/2+3.5*x.height/8 && Math.abs(py-x.height/2)<x.height/8)) continue;
+    // Sample receiver on either side, excluding the central caster footprint.
+    const offset=Math.abs(px-x.width/2);
+    if(region && !(offset>0.6*x.height/8 && offset<3.5*x.height/8 && Math.abs(py-x.height/2)<x.height/8)) continue;
     const i=(py*x.width+px)*4;let delta=0;
     for(let c=0;c<3;c++) delta+=x.data[i+c]-y.data[i+c];
     if(Math.abs(delta)>12) changed++;
@@ -24,10 +26,11 @@ function difference(a,b,region=false) {
   try {
     const page=await browser.newPage({viewport:{width:1440,height:1040},deviceScaleFactor:1});
     page.on('pageerror',e=>result.errors.push(String(e)));
-    page.on('console',m=>{if(m.text()==='Renderer uses first four shadow-casting directional lights')result.warnings.push(m.text());else if(m.type()==='error')result.errors.push(m.text());});
+    page.on('console',m=>{if(/^(?:WebGpu)?Renderer uses first four shadow-casting directional lights$/.test(m.text()))result.warnings.push(m.text());else if(m.type()==='error')result.errors.push(m.text());});
     await page.addInitScript(()=>{const raf=requestAnimationFrame.bind(window);window.requestAnimationFrame=cb=>raf(()=>cb(1000));});
     await page.goto(`${base}/?shadowTest=1`);
     await page.waitForFunction(()=>document.body.dataset.defaultModel==='ready'&&Number(document.body.dataset.frames)>10);
+    assert.equal(await page.evaluate(n=>Module._engine_msaa(n),Number(process.env.MSAA_SAMPLES||1)),1);
     await page.evaluate(()=>{window.__shadowErrors=[];const report=window.engineStatus;window.engineStatus=(s,e)=>{if(e)window.__shadowErrors.push(s);report(s,e);};});
     const canvas=page.locator('#viewport');
     const snap=()=>page.evaluate(()=>window.EnginePerformance.snapshot().latest);

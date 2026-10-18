@@ -56,7 +56,7 @@ float weight(float halfLife,double delta) {
 }
 }
 std::optional<Mat4> CameraTarget::resolve(const Scene* scene) const {
-    if(!finite(offset)) throw std::invalid_argument("Invalid camera target offset");
+    if(!finite(offset)||(poseSource!=CameraPoseSource::Simulation&&poseSource!=CameraPoseSource::Presentation)) throw std::invalid_argument("Invalid camera target offset/source");
     Mat4 matrix=Mat4::identity();
     if(const auto* point=std::get_if<Vec3>(&source)) {
         if(!finite(*point)) throw std::invalid_argument("Invalid camera target point");
@@ -69,12 +69,19 @@ std::optional<Mat4> CameraTarget::resolve(const Scene* scene) const {
         }
         if(!node||!node->isActiveInHierarchy()) return {};
         matrix=node->worldMatrix();
+        if(poseSource==CameraPoseSource::Presentation)if(const auto* physics=scene->physicsIfCreated())matrix=physics->presentationMatrix(*node);
     }
     for(float v:matrix.m) if(!std::isfinite(v)) throw std::invalid_argument("Invalid camera target transform");
     const Vec3 point=transformPoint(matrix,offset);
     if(!finite(point)) throw std::invalid_argument("Unrepresentable camera target");
     matrix.m[12]=point.x;matrix.m[13]=point.y;matrix.m[14]=point.z;
     return matrix;
+}
+Vec3 CameraTarget::velocity(const Scene* scene) const {
+    const Node* node=nullptr;if(scene){if(auto* actor=std::get_if<ActorId>(&source))node=scene->findActor(*actor);else if(auto* component=std::get_if<ComponentId>(&source))node=scene->findComponent(*component);}
+    if(!node||!node->isActiveInHierarchy())return {};
+    for(auto* ancestor=node;ancestor;ancestor=ancestor->parent())if(auto* actor=dynamic_cast<const Actor*>(ancestor))if(auto* body=actor->getComponent<RigidBodyComponent>();body&&body->hasBody())return body->pointVelocity(transformPoint(node->worldMatrix(),offset));
+    return {};
 }
 Vec3 CameraPose::forward() const { return transformDirection(JointPose{{},{1,1,1},rotation}.matrix(),{0,0,-1}); }
 Vec3 CameraPose::up() const { return transformDirection(JointPose{{},{1,1,1},rotation}.matrix(),{0,1,0}); }
@@ -100,7 +107,8 @@ void FollowCameraBehaviour::apply(CameraPose& pose,const CameraContext& context)
 }
 void TrackingCameraBehaviour::apply(CameraPose& pose,const CameraContext& context) const {
     unit(worldUp);
-    const auto matrix=target.resolve(context.scene);if(matrix) pose.aimAt(transformPoint(*matrix,{}),worldUp);
+    nonnegative(lookAheadSeconds);nonnegative(maxLookAhead);
+    const auto matrix=target.resolve(context.scene);if(matrix){auto ahead=target.velocity(context.scene)*lookAheadSeconds;const auto distance=length(ahead);if(distance>maxLookAhead)ahead=ahead*(maxLookAhead/distance);pose.aimAt(transformPoint(*matrix,{})+ahead,worldUp);}
 }
 void FramingCameraBehaviour::apply(CameraPose& pose,const CameraContext& context) const {
     if(!std::isfinite(padding)||padding<1) throw std::invalid_argument("Framing padding must be at least one");

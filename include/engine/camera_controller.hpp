@@ -9,14 +9,17 @@ namespace engine {
 class CollisionShape;
 // Handle targets resolve in the controlled camera's scene; stale, disabled and
 // pending-removal targets are unavailable. Offsets are in the target's local space.
+enum class CameraPoseSource { Simulation, Presentation };
 struct CameraTarget {
     std::variant<Vec3,ActorId,ComponentId> source=Vec3{};
     Vec3 offset{};
+    CameraPoseSource poseSource=CameraPoseSource::Simulation;
     CameraTarget()=default;
     explicit CameraTarget(Vec3 point):source(point) {}
     explicit CameraTarget(ActorId actor):source(actor) {}
     explicit CameraTarget(ComponentId component):source(component) {}
     std::optional<Mat4> resolve(const Scene* scene) const;
+    Vec3 velocity(const Scene* scene) const; // Physical point velocity or zero; no finite differencing.
 };
 struct CameraPose {
     Vec3 position{},focus{0,0,-1};
@@ -61,6 +64,7 @@ public:
 class TrackingCameraBehaviour final : public CameraBehaviour {
 public:
     CameraTarget target;
+    float lookAheadSeconds=0,maxLookAhead=5;
     Vec3 worldUp{0,1,0};
     void apply(CameraPose&,const CameraContext&) const override;
 };

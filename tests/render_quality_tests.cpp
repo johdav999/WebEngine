@@ -1,4 +1,5 @@
 #include "engine/render_quality.hpp"
+#include "engine/renderer.hpp" // Public facade must compile without browser/backend headers.
 #include "engine/texture.hpp"
 #include <cassert>
 #include <limits>
@@ -7,9 +8,18 @@ using namespace engine;
 template<class F> void rejects(F f) { bool threw=false;try { f(); } catch(const std::invalid_argument&) { threw=true; }assert(threw); }
 int main() {
     RenderCapabilities caps;
+    assert(caps.backend==RenderBackend::WebGpu&&caps.shadowMaps&&caps.pbr&&caps.instancing);
     const auto low=RenderQuality::profile(QualityProfile::Low), balanced=RenderQuality::profile(QualityProfile::Balanced);
     const auto high=RenderQuality::profile(QualityProfile::High);
     for(const auto& q:{low,balanced,high}) q.validate();
+    assert(low.msaaSamples==1&&balanced.msaaSamples==1&&high.msaaSamples==1);
+    auto antialiased=balanced;antialiased.msaaSamples=4;
+    assert(resolveMsaaSamples(antialiased,caps)==1);
+    caps.msaa4x=true;assert(resolveMsaaSamples(antialiased,caps)==4);
+    assert(resolveMsaaSamples(balanced,caps)==1);
+    for(auto samples:{0u,2u,8u,std::numeric_limits<std::uint32_t>::max()}) {
+        auto bad=balanced;bad.msaaSamples=samples;rejects([&]{resolveMsaaSamples(bad,caps);});
+    }
     assert(low.maxShadowMaps==1&&low.shadowFilterTaps==1&&high.shadowResolution==2048);
     auto extent=resolveResolution(1000,500,3,balanced.resolution,caps);
     assert(extent.width==2000&&extent.height==1000);

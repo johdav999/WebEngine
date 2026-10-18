@@ -1,4 +1,6 @@
+#include "engine/route.hpp"
 #include "engine/prefab_components.hpp"
+#include "engine/vehicle_component.hpp"
 #include "engine/skeletal_mesh_component.hpp"
 
 namespace engine {
@@ -28,6 +30,7 @@ template<class T> std::unique_ptr<Component> meshFactory(const PrefabMeshSetting
 void registerBuiltinPrefabComponents(ComponentFactoryRegistry& registry) {
     // Register into a copy first so collisions/allocation failure leave it intact.
     auto next=registry;
+    next.registerFactory<std::shared_ptr<const RouteAsset>>("RouteComponent",1,[](const auto& asset){return std::make_unique<RouteComponent>("Route",asset);});
     next.registerFactory<std::monostate>("Component",1,[](auto) { return std::make_unique<Component>(); });
     next.registerFactory<PrefabMeshSettings>("MeshComponent",1,meshFactory<MeshComponent>);
     next.registerFactory<PrefabMeshSettings>("SkeletalMeshComponent",1,meshFactory<SkeletalMeshComponent>);
@@ -36,7 +39,7 @@ void registerBuiltinPrefabComponents(ComponentFactoryRegistry& registry) {
         if(settings.projection==ProjectionMode::Perspective) component->setPerspective(settings.verticalFov,settings.nearPlane,settings.farPlane);
         else if(settings.projection==ProjectionMode::Orthographic) component->setOrthographic(settings.orthographicHeight,settings.nearPlane,settings.farPlane);
         else throw std::invalid_argument("Invalid prefab projection mode");
-        component->setViewport(settings.viewport);component->setVisibilityMask(settings.visibilityMask);return component;
+        component->setViewport(settings.viewport);component->setVisibilityMask(settings.visibilityMask);component->setFollow(settings.follow);return component;
     });
     next.registerFactory<PrefabLightSettings>("LightComponent",1,[](const auto& settings) {
         if((settings.type!=LightType::Directional && settings.type!=LightType::Point) || !finite(settings.color) || !finite(settings.direction)
@@ -51,6 +54,7 @@ void registerBuiltinPrefabComponents(ComponentFactoryRegistry& registry) {
     next.registerFactory<std::shared_ptr<const CollisionShape>>("ColliderComponent",1,[](const auto& shape) {
         return std::make_unique<ColliderComponent>("Collider",shape);
     });
+    next.registerFactory<std::shared_ptr<const VehicleDefinition>>("VehicleComponent",1,[](const auto& definition){return std::make_unique<VehicleComponent>("Vehicle",definition);});
     next.registerFactory<RigidBodySettings>("RigidBodyComponent",1,[](const auto& settings) {
         return std::make_unique<RigidBodyComponent>("Rigid body",settings);
     });

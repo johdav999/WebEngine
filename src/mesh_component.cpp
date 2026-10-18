@@ -60,7 +60,7 @@ std::shared_ptr<const MorphPose> MeshComponent::morphPose() const {
     if(!morphPose_) morphPose_=std::make_shared<MorphPose>();
     morphPose_->vertices.swap(vertices);++morphPose_->revision;morphDirty_=false;return morphPose_;
 }
-MeshBounds MeshComponent::localBounds(const std::shared_ptr<const SkinPose>& pose) const {
+MeshBounds MeshComponent::geometryBounds(const std::shared_ptr<const SkinPose>& pose) const {
     if(!mesh) return {};
     const auto morph=morphPose();const auto morphRevision=morph ? morph->revision : 0;
     if(!pose&&!morph) return mesh->localBounds();
@@ -86,6 +86,17 @@ MeshBounds MeshComponent::localBounds(const std::shared_ptr<const SkinPose>& pos
         }
     }
     animatedBounds_=next;boundsMesh_=mesh;boundsPose_=pose;boundsMorph_=morph;boundsRevision_=revision;boundsMorphRevision_=morphRevision;return next;
+}
+MeshBounds MeshComponent::localBounds(const std::shared_ptr<const SkinPose>& pose) const {
+    auto bounds=geometryBounds(pose);
+    if(!mesh||!bounds.valid) return bounds;
+    float margin=0;
+    for(std::size_t slot=0;slot<std::max<std::size_t>(1,mesh->materials.size());++slot) {
+        const auto m=resolvedMaterial(slot,false);
+        if(m.shader==MaterialShader::Water) margin=std::max(margin,m.water.amplitude);
+    }
+    bounds.minimum=bounds.minimum-Vec3{margin,margin,margin};
+    bounds.maximum=bounds.maximum+Vec3{margin,margin,margin};return bounds;
 }
 void MeshComponent::setMaterial(std::size_t slot,MaterialInstance instance) {
     const auto count=mesh ? std::max<std::size_t>(mesh->materials.size(),1) : 0;

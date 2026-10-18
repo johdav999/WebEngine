@@ -1,0 +1,33 @@
+(() => {
+  const panel=document.createElement('details');panel.id='vehicle-panel';
+  panel.innerHTML='<summary>Vehicle foundation</summary><p>W/S drive and reverse · A/D steer · Space brake · Shift handbrake. Click the canvas before driving.</p><button id="vehicle-course">Open handling course</button> <button id="vehicle-create">Create vehicle preset</button> <button id="vehicle-reset">Reset vehicle</button> <label><input id="vehicle-drive" type="checkbox">Driving controls</label><output id="vehicle-telemetry" style="display:block;white-space:pre-wrap"></output>';
+  const home=document.querySelector('aside')||document.body;
+  function relocate(){const target=document.body.classList.contains('editor-active')?document.querySelector('.dock-panel[data-panel=details] .dock-body'):home;if(target&&panel.parentElement!==target)target.prepend(panel);}
+  new MutationObserver(relocate).observe(document.body,{attributes:true,attributeFilter:['class']});relocate();
+  const output=panel.querySelector('output'),drive=document.getElementById('vehicle-drive');
+  for(const id of ["vehicle-drive","vehicle-reset"])document.getElementById(id).setAttribute("data-live-input-control","");
+  const devices=document.createElement('details');devices.id='vehicle-controls';devices.className='editor-content-section';devices.innerHTML=`<summary>Gamepad and preview controls</summary><p>Standard pad: left stick steer · RT throttle · LT brake · A handbrake · B reverse. Release controls to neutral after focus or controller changes.</p><label><input id="vehicle-gamepad-enabled" type="checkbox" checked>Gamepad input</label><label>Controller<select id="vehicle-gamepad-select"><option value="auto">Automatic standard controller</option></select></label><label><input id="vehicle-gamepad-invert" type="checkbox">Invert steering axis</label><output id="vehicle-gamepad-status"></output><p>Hold controls below during Play or live simulation. Configure Camera follow properties on the camera for the chase view.</p><div class="editor-content-buttons" id="vehicle-preview-controls"><button id="vehicle-preview-forward">Forward</button><button id="vehicle-preview-reverse">Reverse</button><button id="vehicle-preview-left">Left</button><button id="vehicle-preview-right">Right</button><button id="vehicle-preview-brake">Brake</button></div>`;panel.append(devices);
+  for(const control of devices.querySelectorAll("button,input,select"))control.setAttribute("data-live-input-control","");
+  const previewAllowed=()=>!!window.EngineInput?.instance?.ready()&&drive.checked&&!window.__applicationSnapshot?.suspended&&(window.EngineEditor?.active()?EngineEditor.playing():window.__applicationSnapshot?.state===1);
+
+  function contexts(){const input=window.EngineInput?.instance;if(!input)return;input.setContexts([{name:drive.checked?'Gameplay':'Camera',blockLower:true}]);}
+  function report(s){output.textContent=`${s.active?'Speed '+(s.speed*3.6).toFixed(1)+' km/h':'Vehicle ready · simulation paused'} · RPM ${s.rpm.toFixed(0)} · Gear ${s.gear}\nWheel contacts ${s.wheels.map(w=>w[0]?'●':'○').join(' ')} · Suspension ${s.wheels.map(w=>w[1].toFixed(2)).join(' ')} m\nSurfaces ${(s.surfaces||[]).map(w=>w.id||'default').join(' · ')} · Grip ${(s.surfaces||[]).map(w=>w.longitudinal.toFixed(2)).join(' ')}`;}
+  window.EngineVehicle={report};drive.addEventListener('change',contexts);
+  document.getElementById('vehicle-course').onclick=()=>{if(Module._engine_vehicle_course()){panel.open=true;drive.checked=true;contexts();Module._engine_editor_refresh?.();}else output.textContent='Return to the playground before opening a fresh handling course.';};
+  document.getElementById('vehicle-create').onclick=()=>{if(!window.EngineEditor?.active()||EngineEditor.playing()||EngineEditor.isBusy()){output.textContent='Enter Scene editor edit mode to create a preset.';return;}Module._engine_editor_vehicle_create();panel.open=true;};
+  document.getElementById('vehicle-reset').onclick=()=>Module._engine_vehicle_reset();
+  const timer=setInterval(()=>{if(document.body.dataset.defaultModel!=='ready'||!window.EngineInput?.instance)return;clearInterval(timer);
+    const input=EngineInput.instance;
+    const gamepad=input.gamepad=new EngineInput.GamepadInput(input,{allowed:previewAllowed});
+    let steer;function steering(){steer?.();steer=gamepad.bind({context:'Gameplay',kind:'axis',index:0,action:6,value:[1,0],invert:document.getElementById('vehicle-gamepad-invert').checked});}
+    steering();for(const [index,action,value] of [[7,6,[0,1]],[6,100,[1,0]],[0,101,[1,0]],[1,6,[0,-1]]])gamepad.bind({context:'Gameplay',kind:'button',index,action,value});
+    document.getElementById('vehicle-gamepad-enabled').onchange=e=>gamepad.setEnabled(e.target.checked);
+    document.getElementById('vehicle-gamepad-select').onchange=e=>gamepad.select(e.target.value==='auto'?null:Number(e.target.value));document.getElementById('vehicle-gamepad-invert').onchange=steering;
+    for(const [name,action,value] of [['forward',6,[0,1]],['reverse',6,[0,-1]],['left',6,[-1,0]],['right',6,[1,0]],['brake',100,[1,0]]]){const button=document.getElementById('vehicle-preview-'+name);button.addEventListener('pointerdown',event=>{if(!previewAllowed())event.stopImmediatePropagation();});input.attachControl(button,{context:'Gameplay',action,value});}
+    setInterval(()=>{const s=gamepad.snapshot(),select=document.getElementById('vehicle-gamepad-select'),selected=select.value,signature=JSON.stringify(s.devices);if(select.dataset.devices!==signature){select.dataset.devices=signature;select.replaceChildren(new Option('Automatic standard controller','auto'),...s.devices.map(p=>new Option(`${p.index}: ${p.id||'Controller'} (${p.mapping||'custom'})`,p.index)));if(s.selected!==null&&!s.devices.some(p=>p.index===s.selected))select.add(new Option(`Controller ${s.selected} (disconnected)`,s.selected));select.value=s.selected===null?'auto':String(s.selected);}
+      document.getElementById('vehicle-gamepad-status').textContent=s.error||(!s.devices.length?'No visible controller. Connect and activate a gamepad.':`Controller ${s.active??'unavailable'} · ${s.neutralRequired?'release controls to neutral':'ready'}`);for(const b of document.querySelectorAll('#vehicle-preview-controls button'))b.disabled=!previewAllowed();},100);
+    input.bindKey('Gameplay','Space',100);input.bindKey('Gameplay','ShiftLeft',101);input.bindKey('Gameplay','ShiftRight',101);
+    if(new URLSearchParams(location.search).get('scene')==='route'){Module._engine_route_example();panel.open=true;drive.checked=true;contexts();Module._engine_editor_refresh?.();}
+    if(new URLSearchParams(location.search).get('scene')==='vehicle')document.getElementById('vehicle-course').click();
+  },100);
+})();

@@ -22,7 +22,8 @@ struct Fixture {
     SceneId old,next;
     std::shared_ptr<AssetPreparation> batch;
     AssetRequest first,second,bad,invalid,oversize,timed,aborted,retried;
-    int stage=0,prepared=0;
+    AssetRequest worker,workerShared,workerGlb,workerImage,workerBad,workerCancelled,workerTimeout,workerMissing,workerOversize,workerBundle;
+    int stage=0,prepared=0,workerFrames=0;
     double start=emscripten_get_now();
     Fixture() {
         app.assets().registerAsset<Mesh>(model,meshLoader("slow-Knarr.fbx"));
@@ -42,7 +43,7 @@ struct Fixture {
         });app.requestTransition(next);
     }
     bool tick() {
-        check(emscripten_get_now()-start<15000,"Browser asset fixture timed out");
+        check(emscripten_get_now()-start<30000,"Browser asset fixture timed out");
         app.advance(emscripten_get_now()/1000);
         if(stage==0) {
             check(app.activeSceneId()==old&&prepared==0,"Scene activated before async IO completed");
@@ -73,6 +74,45 @@ struct Fixture {
             retried=app.assets().load<Mesh>(retry);stage=4;
         } else if(stage==4&&retried.progress().status==AssetStatus::Ready) {
             check(bool(retried.get<Mesh>()),"Retry resource missing");record("Retry starts a fresh HTTP operation after failure");
+            auto& assets=app.assets();
+            assets.registerAsset<Mesh>(AssetId{"worker"},browserDecodedAssetLoader("Knarr.fbx",AssetDecodeKind::Fbx));
+            assets.registerAsset<Mesh>(AssetId{"worker-glb"},browserDecodedAssetLoader("fixture.glb",AssetDecodeKind::Glb));
+            assets.registerAsset<Texture>(AssetId{"worker-bundle"},browserDecodedAssetLoader("fixture.wetex",AssetDecodeKind::TextureBundle));
+            assets.registerAsset<Texture>(AssetId{"worker-image"},browserDecodedAssetLoader("fixture.tga",AssetDecodeKind::Image));
+            assets.registerAsset<Mesh>(AssetId{"worker-bad"},browserDecodedAssetLoader("corrupt.fbx",AssetDecodeKind::Fbx));
+            assets.registerAsset<Mesh>(AssetId{"worker-cancel"},browserDecodedAssetLoader("worker-slow.fbx",AssetDecodeKind::Fbx));
+            BrowserDecodeOptions timeout;timeout.source.timeoutMilliseconds=10;
+            assets.registerAsset<Mesh>(AssetId{"worker-timeout"},browserDecodedAssetLoader("worker-slow.fbx",AssetDecodeKind::Fbx,timeout));
+            BrowserDecodeOptions missing;missing.workerUrl="missing-worker.js";
+            assets.registerAsset<Mesh>(AssetId{"worker-missing"},browserDecodedAssetLoader("Knarr.fbx",AssetDecodeKind::Fbx,missing));
+            BrowserDecodeOptions oversize;oversize.source.maxBytes=8;
+            assets.registerAsset<Mesh>(AssetId{"worker-large"},browserDecodedAssetLoader("Knarr.fbx",AssetDecodeKind::Fbx,oversize));
+            worker=assets.load<Mesh>(AssetId{"worker"});workerShared=assets.load<Mesh>(AssetId{"worker"});
+            workerGlb=assets.load<Mesh>(AssetId{"worker-glb"});workerImage=assets.load<Texture>(AssetId{"worker-image"});
+            workerBad=assets.load<Mesh>(AssetId{"worker-bad"});workerBundle=assets.load<Texture>(AssetId{"worker-bundle"});
+            workerTimeout=assets.load<Mesh>(AssetId{"worker-timeout"});workerMissing=assets.load<Mesh>(AssetId{"worker-missing"});
+            workerOversize=assets.load<Mesh>(AssetId{"worker-large"});stage=5;
+        } else if(stage==5) {
+            ++workerFrames;
+            const auto terminal=[](const AssetRequest& r){return r.progress().status==AssetStatus::Ready||r.progress().status==AssetStatus::Failed;};
+            if(terminal(worker)&&terminal(workerGlb)&&terminal(workerImage)&&terminal(workerBad)&&terminal(workerTimeout)&&terminal(workerMissing)&&terminal(workerOversize)&&terminal(workerBundle)) {
+                check(bool(worker.get<Mesh>()),worker.progress().error.c_str());
+                check(bool(workerGlb.get<Mesh>()),workerGlb.progress().error.c_str());
+                check(bool(workerImage.get<Texture>()),workerImage.progress().error.c_str());
+                check(worker.get<Mesh>()==workerShared.get<Mesh>(),"Worker sharing failed");
+                check(workerBad.progress().status==AssetStatus::Failed&&!workerBad.get<Mesh>(),"Worker corrupt decode published");
+                check(workerTimeout.progress().status==AssetStatus::Failed&&workerMissing.progress().status==AssetStatus::Failed&&workerOversize.progress().status==AssetStatus::Failed,"Worker limits/startup failure missing");
+                check(workerFrames>2,"Owner frames stopped while decoding");
+                check(workerBundle.get<Texture>()&&workerBundle.get<Texture>()->compressed.size()==1,"Worker bundle lost compression variants");
+                record("Isolated FBX/GLB/image workers, shared publication, owner frames, bounded queue, cancel, timeout, byte limits and startup/decode failure");
+                EM_ASM({ if(Module.assetWorkers.jobs.size||Module.assetWorkers.active) throw new Error('Worker leak'); });
+                workerCancelled=app.assets().load<Mesh>(AssetId{"worker-cancel"});stage=6;
+            }
+        } else if(stage==6&&workerCancelled.progress().completedBytes>0) {
+            workerCancelled.cancel();app.assets().update();
+            check(workerCancelled.progress().status==AssetStatus::Cancelled,"Active worker cancellation failed");
+            EM_ASM({ if(Module.assetWorkers.jobs.size||Module.assetWorkers.active) throw new Error('Worker cancellation leak'); });
+            record("Active worker HTTP cancellation releases worker and queue slot");
             app.shutdown();check(app.assets().cachedCount()==0,"Shutdown cache retained");record("Application shutdown clears resource cache");return true;
         }
         return false;

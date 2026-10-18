@@ -7,10 +7,14 @@
 #include <map>
 
 namespace engine {
+enum class SelectionGeometry { Bounds, Triangles };
 struct SelectionQuery {
     float maxDistance=1000;
     std::uint32_t selectionMask=0xffffffffu,visibilityMask=0xffffffffu;
     float minDistance=0;
+    SelectionGeometry geometry=SelectionGeometry::Bounds;
+    bool occlusion=false; // Visible mesh triangles block targets, even without providers.
+    std::uint32_t occluderMask=0xffffffffu; // Additional visibility-group filter for blockers.
 };
 enum class SelectionKind { Selection, Focus };
 enum class SelectionReason { Explicit, Pointer, Invalidated, Cancelled };
@@ -25,6 +29,9 @@ struct SelectionHit {
     ComponentId provider,surface; // surface is proxy provider or mesh component.
     Vec3 point;
     float distance=0; // World units, regardless of ray direction length or object scale.
+    std::optional<std::uint32_t> triangle; // Index-buffer triangle offset / 3; empty for bounds/proxies.
+    Vec3 normal{},barycentric{}; // World geometric normal; weights for the triangle's three vertices.
+    Vec2 uv{};
 };
 struct ActionHandle {
     ActorId target;

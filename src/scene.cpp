@@ -1,4 +1,5 @@
 #include "engine/scene.hpp"
+#include "engine/decal.hpp"
 #include "engine/mesh_component.hpp"
 #include "engine/skeletal_mesh_component.hpp"
 #include "engine/physics.hpp"
@@ -179,7 +180,12 @@ void Scene::updateNodes(Node& node,double delta,bool fixed) {
         else if(component->tickEnabled_) component->tick(delta);
     }
     if(!node.isActiveInHierarchy()) return;
-    for(std::size_t i=0;i<count;++i) updateNodes(*node.children_[i],delta,fixed);
+    if(fixed&&std::any_of(node.children_.begin(),node.children_.begin()+count,[](const auto& p){auto* c=dynamic_cast<const Component*>(p.get());return c&&c->fixedTickOrder()!=0;})){
+        std::vector<Node*> ordered;ordered.reserve(count);for(std::size_t i=0;i<count;++i)ordered.push_back(node.children_[i].get());
+        auto order=[](const Node* n){auto* c=dynamic_cast<const Component*>(n);return c?c->fixedTickOrder():0;};
+        std::stable_sort(ordered.begin(),ordered.end(),[&](const Node* a,const Node* b){return order(a)<order(b);});
+        for(auto* child:ordered){if(!node.isActiveInHierarchy())break;updateNodes(*child,delta,true);}
+    }else for(std::size_t i=0;i<count;++i) updateNodes(*node.children_[i],delta,fixed);
 }
 void Scene::update(double delta) {
     if(!std::isfinite(delta) || delta<0) throw std::invalid_argument("Invalid scene delta");
@@ -229,13 +235,13 @@ void Scene::synchronizePhysics() {
     if(physics_) physics_->synchronize();
 }
 void SceneFrame::clear() {
-    meshes.clear();lights.clear();particles.clear();
+    meshes.clear();lights.clear();particles.clear();ribbons.clear();
     for(auto& layer:layerDraws) layer.clear();
-    meshCount=storageGrowths=culledMeshes=0;
+    meshCount=meshParticleCount=decalCount=storageGrowths=culledMeshes=0;
     transformRebuilds={};
 }
 std::size_t SceneFrame::storageBytes() const {
-    auto bytes=meshes.capacity()*sizeof(MeshDraw)+lights.capacity()*sizeof(SceneLight)+particles.capacity()*sizeof(ParticleDraw);
+    auto bytes=meshes.capacity()*sizeof(MeshDraw)+lights.capacity()*sizeof(SceneLight)+particles.capacity()*sizeof(ParticleDraw)+ribbons.capacity()*sizeof(RibbonDraw);
     for(const auto& layer:layerDraws) bytes+=layer.capacity()*sizeof(std::uint32_t);
     return bytes;
 }
@@ -263,6 +269,7 @@ void Scene::collect(SceneFrame& frame,std::uint32_t visibilityMask,const Frustum
             frame.storageGrowths+=(meshCapacity!=frame.meshes.capacity())+(layerCapacity!=frame.layerDraws[layer].capacity());
         };
         if(const auto* mesh=dynamic_cast<const MeshComponent*>(&node); mesh && mesh->mesh && (mesh->visibilityMask&visibilityMask)) {
+            mesh->lodPolicy.validate();
             if(!std::isfinite(mesh->opacity)||mesh->opacity<0||mesh->opacity>1
                 ||(mesh->blend!=BlendMode::Opaque&&mesh->blend!=BlendMode::Alpha&&mesh->blend!=BlendMode::Additive))
                 throw std::invalid_argument("Invalid mesh blending or opacity");
@@ -286,7 +293,7 @@ void Scene::collect(SceneFrame& frame,std::uint32_t visibilityMask,const Frustum
                 const Vec3 x{world.m[0],world.m[1],world.m[2]},y{world.m[4],world.m[5],world.m[6]},z{world.m[8],world.m[9],world.m[10]};
                 appendDraw({mesh->mesh,world,color,mesh->layer,material.baseColorTexture,first,count,normal,skin,blend,mesh->opacity*material.opacity,std::move(material),dot(x,cross(y,z))<0,
                     mesh->castsShadow&&mesh->layer==RenderLayer::World&&blend==BlendMode::Opaque,mesh->receivesShadow&&mesh->layer==RenderLayer::World,visible,morph,mesh->allowInstanceReordering,
-                    mesh->mesh,bounds,mesh->id(),partIndex++});
+                    mesh->mesh,bounds,mesh->id(),partIndex++,mesh->lodPolicy,mesh->receivesDecals,mesh->visibilityMask});
             };
             if(mesh->mesh->parts.empty()) materialDraw(0,0,static_cast<std::uint32_t>(mesh->mesh->indices.size()));
             else for(const auto& part:mesh->mesh->parts) {
@@ -297,8 +304,10 @@ void Scene::collect(SceneFrame& frame,std::uint32_t visibilityMask,const Frustum
             }
         }
         if(const auto* emitter=dynamic_cast<const ParticleEmitterComponent*>(&node); emitter&&(emitter->visibilityMask&visibilityMask)) {
+            emitter->appendMeshes(frame,world,context.frustum);
             const auto capacity=frame.particles.capacity();emitter->appendDraws(frame.particles,world);
             frame.storageGrowths+=capacity!=frame.particles.capacity();
+            const auto rc=frame.ribbons.capacity();emitter->appendRibbons(frame.ribbons,world);frame.storageGrowths+=rc!=frame.ribbons.capacity();
         }
         if(const auto* light=dynamic_cast<const LightComponent*>(&node); light && (light->visibilityMask&visibilityMask)) {
             if(light->shadow.enabled) {
@@ -311,6 +320,8 @@ void Scene::collect(SceneFrame& frame,std::uint32_t visibilityMask,const Frustum
             frame.storageGrowths+=capacity!=frame.lights.capacity();
         }
     },Mat4::identity(),&frame.transformRebuilds);
+    struct {SceneFrame& frame;const PhysicsWorld* physics;std::uint32_t mask;} decalContext{frame,context.physics,visibilityMask};
+    visit([&decalContext](const Node& node,const Mat4& authoritativeWorld){if(const auto* decal=dynamic_cast<const DecalComponent*>(&node);decal&&(decal->visibilityMask&decalContext.mask))decal->appendDraw(decalContext.frame,decalContext.physics?decalContext.physics->renderMatrix(node,authoritativeWorld):authoritativeWorld);});
     if(physics_&&visibilityMask) physics_->appendDebugDraws(frame);
 }
 } // namespace engine

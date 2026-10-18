@@ -1,0 +1,35 @@
+#include "engine/editor.hpp"
+#include "engine/effect_archive.hpp"
+#include "engine/effect_presets.hpp"
+#include "engine/effect_preview.hpp"
+#include "engine/fx_frame.hpp"
+#include <iostream>
+using namespace engine;
+namespace {int checks=0;void check(bool ok,const char* why){++checks;if(!ok)throw std::runtime_error(why);}bool near(float a,float b){return std::abs(a-b)<.001f;}}
+int main(){try{
+ auto d=std::make_shared<ParticleEmitterDefinition>();d->renderMode=ParticleRenderMode::Ribbon;d->space=ParticleSpace::World;d->trailMinDistance=.1f;d->trailBreakDistance=5;d->trailLifetime=10;d->trailMaxPoints=16;
+ Scene scene;auto& e=scene.addChild<ParticleEmitterComponent>("Trail",d);scene.update(0);e.transform.position={1,0,0};scene.update(.1);
+ check(e.trailPointCount()>=10&&e.particles().empty(),"Distance samples use separate bounded trail storage");auto frame=scene.collect();check(frame.ribbons.size()>=9,"Sampled path produces segments");
+ auto bytes=SceneArchive::save(scene);auto loaded=SceneArchive::load(bytes);check(SceneArchive::save(*loaded.scene)==bytes,"Live ring archive round trips exactly");
+ e.transform.position={1.4f,0,0};scene.update(.1);auto* restored=dynamic_cast<ParticleEmitterComponent*>(loaded.scene->children()[0].get());restored->transform.position=e.transform.position;loaded.scene->update(.1);
+ check(SceneArchive::save(*loaded.scene)==SceneArchive::save(scene),"Restored sampler continues identically");
+ e.transform.position={20,0,0};scene.update(.1);frame=scene.collect();for(const auto& r:frame.ribbons)check(std::abs(r.end.x-r.begin.x)<2,"Teleport never bridges strips");
+ e.breakTrail();e.transform.position={21,0,0};scene.update(.1);check(e.trailPoint(e.trailPointCount()-1).breakBefore,"Explicit break starts new strip");
+ e.pause();bytes=SceneArchive::save(scene);scene.update(1);check(SceneArchive::save(scene)==bytes,"Paused trail freezes history");e.resume();e.transform.position={22,0,0};scene.update(.1);check(e.trailPoint(e.trailPointCount()-1).breakBefore,"Resume breaks moving source");
+ e.stop();scene.update(11);check(e.trailPointCount()==0&&scene.collect().ribbons.empty(),"Stopped trails drain by point lifetime");
+ e.setDefinition(d);e.transform.position={};scene.update(0);for(int i=1;i<30;++i){e.transform.position={i*.2f,0,0};scene.update(.01);}check(e.trailPointCount()==16&&e.droppedParticles()>0,"Ring capacity evicts oldest points");
+ auto dense=std::make_shared<ParticleEmitterDefinition>(*d);dense->trailMinDistance=.0001f;e.setDefinition(dense);scene.update(0);e.transform.position.x+=1;scene.update(.1);check(e.trailPointCount()==2&&e.droppedParticles()>256,"Per-update work limit breaks oversized sampling gaps");
+ Scene local;auto& parent=local.addChild<Node>("Parent");auto ld=std::make_shared<ParticleEmitterDefinition>(*d);ld->space=ParticleSpace::Local;auto& le=parent.addChild<ParticleEmitterComponent>("Local",ld);local.update(0);le.transform.position={1,0,0};local.update(.1);auto before=local.collect();parent.transform.position={3,0,0};auto after=local.collect();check(near(after.ribbons[0].begin.x-before.ribbons[0].begin.x,3),"Local trails follow parent transforms");
+ auto wf=scene.collect();e.setDefinition(d);e.transform.position={};scene.update(0);e.transform.position={1,0,0};scene.update(.1);wf=scene.collect();auto fixed=wf.ribbons[0].begin;e.transform.position={4,0,0};check(near(scene.collect().ribbons[0].begin.x,fixed.x),"World trail history stays detached");
+ FxFrame fx;fx.prepare(wf,Mat4::identity());check(fx.ribbonVertices().size()==wf.ribbons.size()*6,"Per-camera geometry emits two triangles per segment");for(const auto& v:fx.ribbonVertices())for(float x:v.positionAdditive)check(std::isfinite(x),"Ribbon geometry remains finite");
+ SceneFrame parallel;parallel.ribbons.push_back({{0,0,-1},{0,0,-2},{0,0,-1},{0,0,-1},1,1,0,1,0,{1,0,0,1},{0,1,0,0},Texture::white(),BlendMode::Alpha});fx.prepare(parallel,Mat4::identity());check(fx.ribbonVertices().size()==6&&std::isfinite(fx.ribbonVertices()[0].positionAdditive[0]),"Camera-parallel tangent has finite fallback");
+ auto asset=ribbonEffect();auto resource=EffectArchive::load(EffectArchive::save(asset));check(resource->emitters[0].definition->renderMode==ParticleRenderMode::Ribbon,"Reusable resource retains ribbon definition");
+ Scene author;EditorSession editor(author);check(editor.createEffect(asset),"Create authored trail");auto* source=editor.selectedEffect()->emitters()[0];author.update(0);source->transform.position={1,0,0};author.update(.1);bytes=SceneArchive::save(author);auto edit=std::make_shared<EffectAsset>(editor.selectedEffect()->asset());edit->name="Changed";check(editor.setEffectAsset(edit)&&editor.undo()&&SceneArchive::save(author)==bytes,"Undo restores exact live trail state");
+ EffectPreview preview;auto localAsset=std::make_shared<EffectAsset>(*asset);auto localDef=std::make_shared<ParticleEmitterDefinition>(*asset->emitters[0].definition);localDef->space=ParticleSpace::Local;localAsset->emitters[0].definition=localDef;preview.start(localAsset);for(int i=0;i<10;++i)preview.advance(.05);check(!preview.scene().collect().ribbons.empty(),"Local preview source motion generates a trail");check(SceneArchive::save(author)==bytes,"Preview does not mutate source");
+ auto shortPath=std::make_shared<ParticleEmitterDefinition>(*d);shortPath->trailMinDistance=1;shortPath->trailBreakDistance=5;Scene stopped;auto& se=stopped.addChild<ParticleEmitterComponent>("Stopped tip",shortPath);stopped.update(0);se.transform.position={.5f,0,0};stopped.update(.1);check(stopped.collect().ribbons.size()==1,"Short path draws transient head");se.stop();check(stopped.collect().ribbons.size()==1,"Stop preserves sub-sample endpoint while draining");
+ auto delayed=std::make_shared<ParticleEmitterDefinition>(*d);delayed->startDelay=.5;delayed->looping=false;delayed->duration=.5;Scene once;auto& oe=once.addChild<ParticleEmitterComponent>("Delayed",delayed);once.update(.25);check(oe.trailPointCount()==0,"Delay suppresses trail samples");oe.transform.position={.5f,0,0};once.update(.25);oe.transform.position={1,0,0};once.update(.5);check(!oe.playing()&&!once.collect().ribbons.empty(),"One-shot completion retains sampled strip");
+ e.visibilityMask=2;check(scene.collect(1).ribbons.empty(),"Trail masks filter collection");e.visibilityMask=1;e.enabled=false;check(scene.collect().ribbons.empty(),"Disabled trail is hidden");
+ auto ordered=SceneFrame{};ordered.ribbons={parallel.ribbons[0],parallel.ribbons[0]};ordered.ribbons[1].blend=BlendMode::Additive;fx.prepare(ordered,Mat4::identity());check(fx.batches(RenderLayer::World).size()==2&&fx.batches(RenderLayer::World)[0].blend==BlendMode::Alpha,"Alpha trails precede additive trails");
+ auto invalid=std::make_shared<ParticleEmitterDefinition>(*d);invalid->trailMaxPoints=1;bool rejected=false;try{e.setDefinition(invalid);}catch(const std::invalid_argument&){rejected=true;}check(rejected,"Invalid trail capacity rejected");
+ std::cout<<checks<<" trail checks passed\n";return 0;
+}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

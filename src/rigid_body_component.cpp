@@ -4,6 +4,8 @@
 
 namespace engine {
 void RigidBodySettings::validate() const {
+    for(float value:{centerOfMassOffset.x,centerOfMassOffset.y,centerOfMassOffset.z}) if(!std::isfinite(value)||std::abs(value)>100) throw std::invalid_argument("Invalid COM offset");
+    for(float value:{inertiaScale.x,inertiaScale.y,inertiaScale.z}) if(!std::isfinite(value)||value<.001f||value>1000) throw std::invalid_argument("Invalid inertia scale");
     if(motion!=BodyMotion::Static&&motion!=BodyMotion::Dynamic&&motion!=BodyMotion::Kinematic) throw std::invalid_argument("Invalid body motion");
     if(!std::isfinite(mass)||mass<=0||!std::isfinite(friction)||friction<0||friction>1
         ||!std::isfinite(restitution)||restitution<0||restitution>1||!std::isfinite(gravityFactor)
@@ -31,6 +33,10 @@ Vec3 RigidBodyComponent::angularVelocity() const { return world(*this).velocity(
 void RigidBodyComponent::setLinearVelocity(Vec3 value) { world(*this).command(id(),value,0); }
 void RigidBodyComponent::setAngularVelocity(Vec3 value) { world(*this).command(id(),value,1); }
 void RigidBodyComponent::addForce(Vec3 value) { world(*this).command(id(),value,2); }
+void RigidBodyComponent::addTorque(Vec3 value) { world(*this).command(id(),value,4); }
+void RigidBodyComponent::addForceAtPosition(Vec3 value,Vec3 point) {world(*this).bodyPointCommand(id(),value,point,0);}
+void RigidBodyComponent::addImpulseAtPosition(Vec3 value,Vec3 point) {world(*this).bodyPointCommand(id(),value,point,1);}
+Vec3 RigidBodyComponent::pointVelocity(Vec3 point) const {return world(*this).pointVelocity(id(),point);}
 void RigidBodyComponent::addImpulse(Vec3 value) { world(*this).command(id(),value,3); }
 void RigidBodyComponent::teleport(const Transform& pose,bool clearVelocity) { world(*this).teleport(id(),pose,clearVelocity); }
 void RigidBodyComponent::moveKinematic(const Transform& pose) { world(*this).moveKinematic(id(),pose); }

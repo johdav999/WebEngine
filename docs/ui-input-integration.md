@@ -203,3 +203,12 @@ node scripts/ui-input-smoke.cjs
 Physical Android/iOS, OS keyboards/IME, real screen readers and sustained mobile
 performance were not tested. No complete accessibility compliance claim or
 cross-browser/device acceptance follows from this scoped evidence.
+
+
+## Optional gamepads
+
+[Stage 3 input contracts](driving-controls.md#optional-browser-gamepad-adapter) add
+web/gamepad.js polling through BrowserInput.flush, source-isolated axes/buttons,
+context ownership, validated response/dead-zone/inversion settings, controller
+selection and neutral re-arm after focus/lifecycle changes. Bindings and devices
+remain host state, with read-only status and isolated preview controls in the editor.

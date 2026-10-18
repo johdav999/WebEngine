@@ -6,7 +6,7 @@
   const editable=target=>target?.matches?.('input, textarea, select, [contenteditable]:not([contenteditable="false"])')||target?.isContentEditable;
   class BrowserInput {
     constructor(canvas,{ready=()=>true,gui=()=>null}={}) {
-      this.canvas=canvas;this.ready=ready;this.gui=gui;this.context='Camera';this.contexts=[{name:'Camera',blockLower:true}];
+      this.focused=true;this.canvas=canvas;this.ready=ready;this.gui=gui;this.context='Camera';this.contexts=[{name:'Camera',blockLower:true}];
       this.pointers=new Map();this.keys=new Map();this.bindings=new Map();this.controls=new Map();
       this.queue=[];this.source=1;this.disposers=[];this.buffer=0;this.capacity=0;this.module=null;
       for(const [code,value] of [['ArrowLeft',[-1,0]],['ArrowRight',[1,0]],['ArrowUp',[0,-1]],['ArrowDown',[0,1]]]) {
@@ -26,7 +26,8 @@
       this.on(document,'focusin',event=>{
         if(event.target!==canvas&&![...this.controls.keys()].some(el=>el===event.target||el.contains(event.target))) this.cancelAll();
       });
-      this.on(window,'blur',()=>this.cancelAll());
+      this.on(window,'blur',()=>{this.focused=false;this.cancelAll();});
+      this.on(window,'focus',()=>{this.focused=true;});
       this.on(document,'visibilitychange',()=>{if(document.hidden)this.cancelAll();});
       this.on(window,'resize',()=>this.cancelAll());
     }
@@ -90,7 +91,7 @@
     pointerDown(event,control=null) {
       if(!this.allowed()||this.pointers.has(event.pointerId)||editable(event.target))return;
       if(!control&&event.pointerType!=='touch'&&event.button!==0&&event.button!==1)return;
-      const p=this.local(event),pointer={id:event.pointerId,element:control?.element||this.canvas,owner:'scene',device:event.pointerType,
+      this.focused=true;const p=this.local(event),pointer={id:event.pointerId,element:control?.element||this.canvas,owner:'scene',device:event.pointerType,
         x:p.x,y:p.y,startX:p.x,startY:p.y,dragged:false,source:this.nextSource(),control,buttons:event.buttons};
       if(control) {
         if(control.context&&!this.contextAllows(control.context))return;
@@ -206,13 +207,14 @@
       for(const b of bindings)this.setValue(b.action,b.source,0,0);if(event.cancelable)event.preventDefault();
     }
     cancelAll() {
-      const previous=[...this.pointers.values()];this.pointers.clear();this.keys.clear();this.gesture=null;this.queue=[];this.overflowed=false;this.enqueue(Types.CancelAll);
+      const previous=[...this.pointers.values()];this.pointers.clear();this.keys.clear();this.gesture=null;this.queue=[];this.overflowed=false;this.gamepad?.reset();this.enqueue(Types.CancelAll);
       for(const pointer of previous){
         if(pointer.owner==='gui')this.gui()?.pointer(3,{clientX:0,clientY:0});
         pointer.element.style.removeProperty('--stick-x');pointer.element.style.removeProperty('--stick-y');this.release(pointer);
       }
     }
     flush(module) {
+      this.gamepad?.poll();
       if(!this.queue.length||!module?._engine_input_submit)return;
       const bytes=this.queue.length*88;if(this.module!==module){this.buffer=0;this.capacity=0;this.module=module;}
       if(bytes>this.capacity){
@@ -225,7 +227,7 @@
       const accepted=module._engine_input_submit(this.buffer,this.queue.length);this.queue=[];this.overflowed=false;if(!accepted)this.cancelAll();
     }
     dispose() {
-      this.cancelAll();if(this.module)this.flush(this.module);for(const control of [...this.controls.values()])control.dispose();for(const remove of [...this.disposers])remove();this.disposers=[];
+      this.gamepad?.dispose();this.cancelAll();if(this.module)this.flush(this.module);for(const control of [...this.controls.values()])control.dispose();for(const remove of [...this.disposers])remove();this.disposers=[];
       if(this.buffer&&this.module)this.module._free(this.buffer);this.buffer=0;this.capacity=0;
     }
   }

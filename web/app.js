@@ -36,6 +36,10 @@ window.engineStatus = (text, error = false) => {
   statusDot.className = `dot ${error ? 'error' : 'ready'}`;
   document.body.dataset.engine = error ? 'error' : gpuReady ? 'ready' : 'recovering';
   for (const control of document.querySelectorAll('button:not([data-audio-control]):not(#retry-gpu), input:not([data-audio-control]), select')) control.disabled = error || !runtimeReady || !gpuReady;
+  const capabilities = window.EngineQuality?.snapshot();
+  if (capabilities?.shadows === false) {
+    for (const id of ['shadows','shadow-lod','shadow-casting','shadow-receiving','shadow-culling','shadow-resolution','shadow-filter','quality-maps','quality-compressed']) document.querySelector(`#${id}`).disabled = true;
+  }
   window.engineAnimationControls(!error && runtimeReady && gpuReady && !importBusy);
   window.engineMorphControls?.(!error && runtimeReady && gpuReady && !importBusy);
   window.engineMaterialControls?.(!error && runtimeReady && gpuReady && !importBusy);
@@ -187,9 +191,66 @@ async function loadFbxBytes(name, readBytes, companions = []) {
     window.engineShipStressControls?.(runtimeReady && !fatal);
   }
 }
+document.querySelector('#water-open').addEventListener('click',()=>{
+  if(runtimeReady && Module._engine_water_demo(1)) {
+    document.querySelector('#water-view').value='0';document.querySelector('#water-interactions').value='1';document.querySelector('#water-preset').value='0';Module._engine_water_preset(0);
+    document.querySelector('#scene-description').textContent='Lake water · reflections, refraction, foam, underwater fog and caustics';
+  }
+});
+document.querySelector('#water-return').addEventListener('click',()=>{
+  if(runtimeReady && Module._engine_water_demo(0)) document.querySelector('#scene-description').textContent='Playground restored · drag to orbit';
+});
+document.querySelector('#water-view').addEventListener('change',event=>{if(runtimeReady) Module._engine_water_view(Number(event.target.value));});
+document.querySelector('#water-interactions').addEventListener('change',event=>{if(runtimeReady) Module._engine_water_interactions(Number(event.target.value));});
+document.querySelector('#water-preset').addEventListener('change',event=>{if(runtimeReady) Module._engine_water_preset(Number(event.target.value));});
+window.engineAiState = state => {
+  window.__aiSnapshot=state;
+  const names=['Patrol','Follow','Investigate','Return','Blocked','Move to destination'];
+  const navigation=['idle','planning','moving','waiting to replan','arrived','goal unreachable','search budget exhausted','goal timed out','cancelled','waiting for rebuilt navigation'];
+  document.querySelector('#ai-status').textContent=state.active
+    ? `${names[state.state]} · ${navigation[state.navigationStatus]} · ${state.visible ? 'target visible' : 'target unseen'} · ${state.replans} replans`
+    : 'AI demo stopped.';
+};
+window.engineNavmeshState = state => {
+  window.__navmeshSnapshot=state;document.querySelector('#ai-navmesh').checked=state.enabled;
+  document.querySelector('#ai-navmesh-status').textContent=state.enabled
+    ? (state.ready ? `Revision ${state.revision} · ${state.polygons} walkable polygons · click ground to move · yellow shows the planned path` : `Revision ${state.revision} needs rebuilding · active routes stop before their next movement step`)
+    : 'Enable navmesh navigation, then click walkable ground to choose a destination.';
+};
+document.querySelector('#ai-navmesh').addEventListener('change',event=>{
+  if(runtimeReady) {if(!window.__aiSnapshot?.active) Module._engine_ai_demo(1);Module._engine_ai_navmesh(+event.target.checked);Module._engine_ai_snapshot();}
+});
+document.querySelector('#ai-navmesh-debug').addEventListener('change',event=>{if(runtimeReady)Module._engine_ai_navmesh_debug(+event.target.checked);});
+for(const [id,action] of [['ai-door-close',10],['ai-door-open',11],['ai-floor-remove',12],['ai-floor-restore',13],['ai-navmesh-rebuild',14]]) {
+  document.querySelector(`#${id}`).addEventListener('click',()=>{if(runtimeReady){Module._engine_ai_action(action);Module._engine_ai_snapshot();}});
+}
+document.querySelector('#ai-open').addEventListener('click',()=>{
+  if(runtimeReady&&Module._engine_ai_demo(1)) document.querySelector('#scene-description').textContent='Game AI · patrol, perception and investigation';
+});
+document.querySelector('#ai-return').addEventListener('click',()=>{
+  if(runtimeReady&&Module._engine_ai_demo(0)) document.querySelector('#scene-description').textContent='Playground restored · drag to orbit';
+});
+for(const [id,action] of [['ai-show',0],['ai-hide',1],['ai-remove',2],['ai-block',3],['ai-reset',4],['ai-away',5],['ai-move-blocker',6],['ai-seal',7],['ai-clear',8],['ai-retry',9]])
+  document.querySelector(`#${id}`).addEventListener('click',()=>{if(runtimeReady) {Module._engine_ai_action(action);Module._engine_ai_snapshot();}});
+setInterval(()=>{if(runtimeReady&&!fatal&&Module._engine_ai_snapshot&&document.body.dataset.engine==='ready') Module._engine_ai_snapshot();},250);
 async function loadDefaultModel() {
   defaultModelStarted = true;
+  if (['ai','navmesh'].includes(new URLSearchParams(location.search).get('scene'))) {
+    const ok=Module._engine_ai_demo(1);document.body.dataset.defaultModel=ok ? 'ready' : 'error';
+    if(ok&&new URLSearchParams(location.search).get('scene')==='navmesh') if(!Module._engine_ai_navmesh(1)) document.body.dataset.defaultModel='error';
+    document.querySelector('#scene-description').textContent='Game AI · patrol, perception and investigation';return;
+  }
+  if (new URLSearchParams(location.search).get('scene') === 'terrain') {
+    const ok=Module._engine_terrain_demo(1);document.body.dataset.defaultModel=ok ? 'ready' : 'error';
+    document.querySelector('#scene-description').textContent='Terrain hills · solid ground, height queries and scene saves';return;
+  }
   if (new URLSearchParams(location.search).get('fxTest') === '1') { document.body.dataset.defaultModel = 'ready'; return; }
+  if (new URLSearchParams(location.search).get('scene') === 'water') {
+    const ok=Module._engine_water_demo(1);
+    document.body.dataset.defaultModel=ok ? 'ready' : 'error';
+    document.querySelector('#scene-description').textContent='Lake water · reflections, refraction, foam, underwater fog and caustics';
+    return;
+  }
   if (new URLSearchParams(location.search).get('scene') === 'materials') { Module._engine_material_scene(1); document.body.dataset.defaultModel = 'ready'; document.querySelector('#scene-description').textContent='Material showcase · drag to inspect surfaces'; return; }
   if (new URLSearchParams(location.search).get('scene') === 'physics') { Module._engine_physics_action(0,0); document.body.dataset.defaultModel = 'ready'; return; }
   const sceneName=new URLSearchParams(location.search).get('scene');
@@ -273,18 +334,11 @@ window.Module = {
   onAbort(reason) { window.engineStatus(`Engine stopped: ${reason}`, true); },
   printErr(message) { console.error(message); },
 };
-if (!isSecureContext) {
-  EngineQuality.unavailable('A secure context is required for GPU access.');
-  window.engineStatus('WebGPU requires HTTPS or localhost. Start the local server.', true);
-} else if (!navigator.gpu) {
-  EngineQuality.unavailable('WebGPU API unavailable; GPU limits and features cannot be queried.');
-  window.engineStatus('WebGPU is unavailable. Use a browser and GPU with WebGPU support.', true);
-} else {
-  const script = document.createElement('script');
-  script.src = 'webengine.js';
-  script.onerror = () => window.engineStatus('Engine build missing. Run scripts/build.ps1, then reload.', true);
-  document.head.append(script);
-}
+// The C++ facade selects WebGPU or WebGL 2; absence of WebGPU is recoverable.
+const script = document.createElement('script');
+script.src = 'webengine.js';
+script.onerror = () => window.engineStatus('Engine build missing. Run scripts/build.ps1, then reload.', true);
+document.head.append(script);
 
 window.engineDetailSettings=()=>({
   lod:document.querySelector('#mesh-lod').checked,

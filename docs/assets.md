@@ -152,7 +152,9 @@ playground file importer remains available; it is not migrated into this registr
 timeout, progress, abort, HTTP checks and byte limits, without IndexedDB access.
 Relative URLs resolve against the page; cross-origin URLs follow browser CORS.
 The borrowed response span lasts only through the decoder call. Decoding remains
-synchronous browser-thread work. Size limits reject declared/observed sizes and
+synchronous browser-thread work for this callback adapter. The optional
+`browserDecodedAssetLoader` moves built-in FBX/GLB/image/bundle decoding to isolated
+workers; see [mobile asset pipeline](mobile-assets.md). Size limits reject declared/observed sizes and
 final payloads; browser buffering may allocate before progress arrives.
 
 Native coverage is `tests/asset_tests.cpp` (CTest `assets`): worker publication,

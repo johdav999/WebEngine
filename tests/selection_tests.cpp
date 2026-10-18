@@ -179,6 +179,8 @@ void animatedAndPhysicsBounds() {
     JointPose pose;pose.translation={4,0,0};skeletal.skeleton().setPose({&pose,1});
     auto& selection=scene.selection();
     auto hit=selection.resolveRay({{4,0,5},{0,0,-1}});check(hit&&hit->actor==actor.id(),"Skeletal pose bounds are picked");
+    SelectionQuery precise;precise.geometry=SelectionGeometry::Triangles;precise.occlusion=true;
+    hit=selection.resolveRay({{4,0,5},{0,0,-1}},precise);check(hit&&hit->triangle,"Precise skeletal geometry follows bone palette");
     check(!selection.resolveRay({{0,0,5},{0,0,-1}}),"Skeletal bind location is not picked after deformation");
     actor.enabled=false;
     auto& bodyActor=box(scene,"Physics target");RigidBodySettings settings;settings.gravityFactor=0;settings.linearDamping=0;
@@ -187,12 +189,70 @@ void animatedAndPhysicsBounds() {
     scene.update(0);body.setLinearVelocity({120,0,0});scene.fixedUpdate(1.0/60);
     scene.physics().setInterpolationAlpha(0);
     hit=selection.resolveRay({{0,0,5},{0,0,-1}});check(hit&&hit->actor==bodyActor.id(),"Physics picking matches previous rendered pose at alpha zero");
+    hit=selection.resolveRay({{0,0,5},{0,0,-1}},precise);check(hit&&hit->actor==bodyActor.id()&&hit->triangle,"Precise physics surface uses interpolated pose");
     check(!selection.resolveRay({{2,0,5},{0,0,-1}}),"Authoritative pose does not override rendered interpolation");
     scene.physics().setInterpolationAlpha(1);
     hit=selection.resolveRay({{2,0,5},{0,0,-1}});check(hit&&hit->actor==bodyActor.id(),"Physics picking matches current rendered pose at alpha one");
 }
+void precisePicking() {
+    Scene scene;auto& target=scene.spawn("Triangle");target.addComponent<InteractionComponent>();
+    auto geometry=std::make_shared<Mesh>();
+    geometry->vertices={{{0,0,0},{0,0,1},{0,0}},{{2,0,0},{0,0,1},{1,0}},{{0,2,0},{0,0,1},{0,1}}};
+    geometry->indices={0,1,2};auto& component=target.addComponent<MeshComponent>("Surface",geometry);
+    auto& selection=scene.selection();SelectionQuery query;query.geometry=SelectionGeometry::Triangles;
+    check(bool(selection.resolveRay({{1.5f,1.5f,5},{0,0,-1}})),"Legacy bounds retain conservative picking");
+    check(!selection.resolveRay({{1.5f,1.5f,5},{0,0,-1}},query),"Precise ray misses empty AABB space");
+    auto hit=selection.resolveRay({{0.5f,0.5f,5},{0,0,-7}},query);
+    check(hit&&hit->triangle==0&&close(hit->distance,5)&&close(hit->normal.z,1)
+        &&close(hit->barycentric.x,0.5f)&&close(hit->uv.x,0.25f)&&close(hit->uv.y,0.25f),"Triangle surface details and world distance");
+    hit=selection.resolveRay({{0.5f,0.5f,-5},{0,0,1}},query);check(bool(hit),"Two-sided picking");
+    target.transform.scale={-2,3,1};target.transform.rotation.z=pi/2;
+    hit=selection.resolveRay({{-1.5f,-1,5},{0,0,-1}},query);
+    check(hit&&close(hit->normal.z,-1)&&close(hit->distance,5),"Mirrored rotated nonuniform precise surface");
+    target.transform={};MorphTarget morph;morph.name="Shift";morph.positions.assign(3,{3,0,0});
+    target.transform.scale={0.0001f,0.0001f,1};
+    hit=selection.resolveRay({{0.00005f,0.00005f,5},{0,0,-1}},query);
+    check(hit&&close(hit->normal.z,1),"Small assembly surfaces retain unit normals");target.transform={};
+    geometry=std::make_shared<Mesh>(*geometry);geometry->morphTargets.push_back(morph);component.mesh=geometry;component.setMorphWeight(0,1);
+    check(!selection.resolveRay({{0.5f,0.5f,5},{0,0,-1}},query),"Precise geometry excludes bind location after morph");
+    hit=selection.resolveRay({{3.5f,0.5f,5},{0,0,-1}},query);check(bool(hit),"Precise geometry follows morph");
+    component.resetMorphWeights();geometry->indices.push_back(9);
+    rejects([&] { selection.resolveRay({{0.5f,0.5f,5},{0,0,-1}},query); });geometry->indices.pop_back();
+    geometry->indices[2]=9;rejects([&] { selection.resolveRay({{0.5f,0.5f,5},{0,0,-1}},query); });geometry->indices[2]=2;
+    auto& blocker=scene.spawn("Non-interactive blocker");blocker.transform.position={0,0,2};
+    auto& wall=blocker.addComponent<MeshComponent>("Wall",Mesh::cube());wall.transform.scale={4,4,1};
+    check(bool(selection.resolveRay({{0.5f,0.5f,5},{0,0,-1}},query)),"Occlusion is opt-in");
+    query.occlusion=true;check(!selection.resolveRay({{0.5f,0.5f,5},{0,0,-1}},query),"Nonparticipating triangle geometry occludes target");
+    wall.visibilityMask=2;query.occluderMask=1;
+    check(bool(selection.resolveRay({{0.5f,0.5f,5},{0,0,-1}},query)),"Occluder mask excludes decorations");
+    query.occluderMask=~0u;query.visibilityMask=1;
+    check(bool(selection.resolveRay({{0.5f,0.5f,5},{0,0,-1}},query)),"Hidden geometry cannot occlude");
+    query.visibilityMask=~0u;wall.opacity=0;
+    check(bool(selection.resolveRay({{0.5f,0.5f,5},{0,0,-1}},query)),"Zero-opacity geometry cannot occlude");
+    wall.opacity=1;blocker.enabled=false;
+    check(bool(selection.resolveRay({{0.5f,0.5f,5},{0,0,-1}},query)),"Disabled blocker ignored");
+    blocker.enabled=true;wall.mesh=geometry;wall.transform={};wall.transform.position={-1,-1,0};
+    check(bool(selection.resolveRay({{0.5f,0.5f,5},{0,0,-1}},query)),"Empty space in blocker bounds does not occlude");
+    wall.mesh=Mesh::cube();wall.transform={};wall.transform.position={0.5f,0.5f,0};
+    check(!selection.resolveRay({{0.5f,0.5f,5},{0,0,-1}},query,SelectionKind::Focus),"Focus also observes occlusion");
+    blocker.destroy();check(bool(selection.resolveRay({{0.5f,0.5f,5},{0,0,-1}},query)),"Pending-destroy blocker ignored immediately");
+    auto& ownerless=scene.addChild<MeshComponent>("Scene geometry",Mesh::cube());ownerless.transform.position={0.5f,0.5f,2};
+    check(!selection.resolveRay({{0.5f,0.5f,5},{0,0,-1}},query),"Ownerless visible mesh occludes");ownerless.destroy();
+    CameraComponent camera;camera.transform.position={0.5f,0.5f,5};
+    hit=selection.resolvePointer({400,300},camera,{0,0,800,600},query);
+    check(hit&&hit->triangle,"Pointer resolver forwards precise query policy");
+    auto ranged=query;ranged.maxDistance=4;
+    check(!selection.resolveRay({{0.5f,0.5f,5},{0,0,-1}},ranged),"Triangle query respects finite range");
+    geometry=std::make_shared<Mesh>(*geometry);geometry->indices={0,0,0,0,1,2};geometry->parts={{3,3,0}};component.mesh=geometry;
+    hit=selection.resolveRay({{0.5f,0.5f,5},{0,0,-1}},query);
+    check(hit&&hit->triangle==1,"Triangle identity follows original indexed part range");
+    geometry=std::make_shared<Mesh>(*geometry);geometry->parts={{0,3,0}};component.mesh=geometry;
+    check(!selection.resolveRay({{0.5f,0.5f,5},{0,0,-1}},query),"Excluded index ranges and degenerate faces cannot hit");
+    auto& proxy=*target.getComponent<InteractionComponent>();proxy.proxyBounds=MeshBounds{{0,0,-0.1f},{2,2,0.1f},true};
+    hit=selection.resolveRay({{1.5f,1.5f,5},{0,0,-1}},query);check(hit&&!hit->triangle,"Explicit proxy remains a bound in precise mode");
+}
 }
 int main() {
-    try { picking();boundsAndPointer();eventsAndLifecycle();actions();input();archives();animatedAndPhysicsBounds();std::cout<<"Selection and interaction tests passed\n"; }
+    try { picking();boundsAndPointer();eventsAndLifecycle();actions();input();archives();animatedAndPhysicsBounds();precisePicking();std::cout<<"Selection and interaction tests passed\n"; }
     catch(const std::exception& error) { std::cerr<<error.what()<<'\n';return 1; }
 }

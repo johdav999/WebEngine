@@ -25,7 +25,7 @@ ambiguous or pending-removal identities return null. After loading, resolve the 
 and use its fresh runtime handle for delayed work. Never serialize a runtime handle
 or retain a node pointer across scene replacement. IDs are scoped to the saved scene;
 cross-scene references use `(scene.savedId(), node.savedId())` under application policy.
-Versions 1–3 receive fresh identities once during loading; saving as version 4 retains
+Versions 1–3 receive fresh identities once during loading; saving as version 4 or later retains
 them. Changing an identity requires the application to update its saved references.
 
 ## Custom component codecs
@@ -121,7 +121,7 @@ Migration outputs count against allocation budgets. Existing archive accounting
 excludes object/allocator overhead, callback allocations and GPU/Jolt internals.
 CRC32 detects accidental corruption; it does not authenticate data.
 
-Application envelopes use `WESCENE\0` format version 4, content kind 3, and the same
+Application envelopes write `WESCENE\0` format version 23 (readers also accept versions 4-22), content kind 3, and the same
 length/CRC header as scenes/assets. Application schema version is separate from
 engine format version. Scene and asset readers reject application content and vice
 versa. Store the returned bytes through any host byte adapter; native applications
@@ -187,3 +187,36 @@ Evidence is saved under `build/evidence/persistence/`; mobile viewport checks ar
 Chromium emulation and do not establish physical Android/iOS acceptance.
 See [the recorded validation](persistence-validation.md) for the actual native,
 Wasm, browser and downloaded-file interchange results from this change.
+
+
+## Vehicle foundation and archive v24
+
+See [vehicle contracts](vehicles.md) for the optional four-wheel component,
+COM/inertia and point-force body APIs, typed editor/preset/Play support and supported
+checkpoint state. Current scene/application/effect envelope writer version is 27;
+older formats remain readable. Vehicle configuration/checkpoints and visual saved
+references persist; commands, solver listeners and contact history do not.
+
+
+Archive v25 adds deduplicated physical surfaces, compound collision children, collider
+fallbacks, source triangle/terrain cell maps and retained surface assets. Older
+files default to neutral surfaces. Queries/contact queues remain transient. See
+[physical surface persistence](physical-surfaces.md#editor-and-persistence). Deploy
+matched browser/worker artifacts, including WETP3 physical page support.
+
+
+Archive v26 adds authored CameraFollowSettings and stable target IDs to camera
+records. Older cameras default follow off. Runtime rig history and device/input
+state remain transient; duplicate internal target IDs remap, while external saved
+references stay external. See [camera composition persistence](driving-controls.md#editor-and-persistence).
+
+The driving audio example keeps a separate version-1 `.wedriveaudio` tuning
+document and host localStorage entry. It reconstructs its sounds/mappings from
+application configuration and never restores playback-enabled/device/voice state.
+Scene/application archive formats do not gain audio codecs in this stage. See
+[driving audio persistence](driving-audio.md#editor-tuning-and-persistence).
+
+Stage 5 writes archive envelope v27 with bounded source-only spline/profile/route
+resources and built-in RouteComponent reconstruction. Runtime GPU/derived caches
+are rebuilt, while route-instance source sharing and required child saved IDs
+persist. See [route persistence](splines-routes.md#editor-and-persistence).

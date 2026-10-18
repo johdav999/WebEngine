@@ -9,6 +9,12 @@ OrbitController::OrbitController(CameraComponent& camera,bool preserveCamera) : 
         distance_=std::sqrt(dot(offset,offset));if(!(distance_>0)) distance_=11;
     }
 }
+void OrbitController::adoptCamera(float pivotDistance) {
+    if(!std::isfinite(pivotDistance)||pivotDistance<=0)throw std::invalid_argument("Invalid orbit adoption distance");
+    const auto direction=transformDirection(camera_.transform.matrix(),{0,0,-1});const float length=std::sqrt(dot(direction,direction));
+    if(!std::isfinite(length)||length<1e-7f)throw std::invalid_argument("Invalid adopted camera orientation");const auto forward=direction*(1/length);
+    auto state=snapshot();state.distance=pivotDistance;state.yaw=std::atan2(-forward.x,-forward.z);state.elevation=std::asin(std::clamp(-forward.y,-1.f,1.f));state.target=camera_.transform.position+forward*pivotDistance;state.resetTarget=state.target;restore(state);
+}
 OrbitState OrbitController::snapshot() const { return {target,resetTarget_,yaw_,elevation_,distance_}; }
 void OrbitController::restore(const OrbitState& state) {
     for(auto value:{state.target.x,state.target.y,state.target.z,state.resetTarget.x,state.resetTarget.y,state.resetTarget.z,state.yaw,state.elevation,state.distance})
@@ -23,10 +29,37 @@ void OrbitController::apply() {
     camera_.transform.position=target+Vec3{std::sin(yaw_)*std::cos(elevation_),std::sin(elevation_),std::cos(yaw_)*std::cos(elevation_)}*distance_;
     camera_.transform.rotation={-elevation_,yaw_,0};
 }
-void OrbitController::orbit(float dx,float dy) {
-    yaw_-=dx*0.006f; elevation_=std::clamp(elevation_+dy*0.006f,0.05f,1.45f); apply();
+void OrbitController::applyState(const OrbitState& state) {
+    for(float value:{state.target.x,state.target.y,state.target.z,state.yaw,state.elevation,state.distance})
+        if(!std::isfinite(value)) throw std::invalid_argument("Invalid camera navigation");
+    if(state.distance<=0) throw std::invalid_argument("Invalid camera navigation distance");
+    const auto eye=state.target+Vec3{std::sin(state.yaw)*std::cos(state.elevation),std::sin(state.elevation),std::cos(state.yaw)*std::cos(state.elevation)}*state.distance;
+    for(float value:{eye.x,eye.y,eye.z})if(!std::isfinite(value))throw std::invalid_argument("Camera navigation overflow");
+    restore(state);apply();
 }
-void OrbitController::zoom(float delta) { distance_=std::clamp(distance_*std::exp(delta*0.001f),3.0f,28.0f); apply(); }
+void OrbitController::orbit(float dx,float dy,float minimumElevation,float maximumElevation) {
+    if(!std::isfinite(dx)||!std::isfinite(dy)||!std::isfinite(minimumElevation)||!std::isfinite(maximumElevation)||minimumElevation>maximumElevation)throw std::invalid_argument("Invalid orbit input");
+    auto state=snapshot();state.yaw-=dx*0.006f;state.elevation=std::clamp(state.elevation+dy*0.006f,minimumElevation,maximumElevation);applyState(state);
+}
+void OrbitController::zoom(float delta,float minimumDistance,float maximumDistance) {
+    if(!std::isfinite(delta)||!std::isfinite(minimumDistance)||!std::isfinite(maximumDistance)||minimumDistance<=0||minimumDistance>maximumDistance)throw std::invalid_argument("Invalid zoom input");
+    auto state=snapshot();state.distance=std::clamp(state.distance*std::exp(delta*0.001f),minimumDistance,maximumDistance);applyState(state);
+}
+void OrbitController::look(float dx,float dy) {
+    if(!std::isfinite(dx)||!std::isfinite(dy))throw std::invalid_argument("Invalid look input");
+    auto state=snapshot();state.yaw-=dx*0.006f;state.elevation=std::clamp(state.elevation+dy*0.006f,-1.55f,1.55f);
+    state.target=camera_.transform.position-Vec3{std::sin(state.yaw)*std::cos(state.elevation),std::sin(state.elevation),std::cos(state.yaw)*std::cos(state.elevation)}*state.distance;
+    applyState(state);
+}
+void OrbitController::translate(Vec3 displacement) {
+    const Vec3 right{std::cos(yaw_),0,-std::sin(yaw_)};
+    const Vec3 up{-std::sin(yaw_)*std::sin(elevation_),std::cos(elevation_),-std::cos(yaw_)*std::sin(elevation_)};
+    const Vec3 forward{-std::sin(yaw_)*std::cos(elevation_),-std::sin(elevation_),-std::cos(yaw_)*std::cos(elevation_)};
+    auto state=snapshot();state.target=state.target+right*displacement.x+up*displacement.y+forward*displacement.z;applyState(state);
+}
+void OrbitController::focus(Vec3 parentSpaceTarget,float distance) {
+    auto state=snapshot();state.target=parentSpaceTarget;state.distance=distance;applyState(state);
+}
 void OrbitController::pan(float dx,float dy,float viewportHeight) {
     if(!(viewportHeight>0)||!std::isfinite(viewportHeight)) return;
     // Parent-space axes match the orbit transform; pixel scale follows the lens.

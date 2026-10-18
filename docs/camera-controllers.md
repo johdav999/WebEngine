@@ -181,3 +181,12 @@ Verification on 2026-10-10:
 - Full native snapshot: 30/31 passed. The separate `selection` suite failed
   with `Actor destruction requires an owning scene`.
 - No rendered-browser or physical-device camera acceptance was performed.
+
+
+## Presentation targets and authored follow rigs
+
+[Stage 3](driving-controls.md) adds `CameraTarget::poseSource` (simulation by default),
+read-only physical presentation matrices, bounded `TrackingCameraBehaviour` velocity
+look-ahead and explicit application-owned `CameraFollowRig`. CameraComponent stores
+validated authored settings, with editor history and v26 codecs; the application
+still chooses one writer, update clock, viewport and reset/teardown policy.

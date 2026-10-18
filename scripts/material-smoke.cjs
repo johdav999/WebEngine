@@ -16,6 +16,7 @@ function changed(a,b) {
   const result={url:base,browser:await browser.version(),checks:[],errors:[]};
   try {
     const page=await browser.newPage({viewport:{width:1440,height:1040},deviceScaleFactor:1});
+    await page.route('https://fonts.googleapis.com/**',r=>r.fulfill({status:200,contentType:'text/css',body:''}));
     page.on('pageerror',e=>result.errors.push(String(e)));page.on('console',m=>{if(m.type()==='error')result.errors.push(m.text());});
     await page.addInitScript(()=>{
       const raf=requestAnimationFrame.bind(window);let time=1000;window.__materialStep=0;
@@ -23,9 +24,11 @@ function changed(a,b) {
     });
     await page.goto(`${base}/?scene=materials&gpuTiming=off&materialTest=1`);
     await page.waitForFunction(()=>document.body.dataset.defaultModel==='ready'&&Number(document.body.dataset.frames)>=10);
-    assert.equal(await page.locator('#status').textContent(),'Renderer ready');
+    // Isolate authored IBL edits from the playground's automatic day/night lighting.
+    await page.evaluate(()=>{Module._engine_sky(0,0,1);Module._engine_environment(1,0);});
+    assert.equal(await page.locator('body').getAttribute('data-engine'),'ready',await page.locator('#status').textContent());
     const canvas=page.locator('#viewport');
-    async function picture(name) { await page.waitForTimeout(180);assert.equal(await page.locator('#status').textContent(),'Renderer ready');return canvas.screenshot({path:`${evidence}/${name}.png`}); }
+    async function picture(name) { await page.waitForTimeout(180);assert.equal(await page.locator('body').getAttribute('data-engine'),'ready',await page.locator('#status').textContent());return canvas.screenshot({path:`${evidence}/${name}.png`}); }
     async function select(name) {
       const id=await page.evaluate(name=>window.__materialSnapshot.objects.find(o=>o.name===name).id,name);
       await page.locator('#material-object').selectOption(String(id));
@@ -73,7 +76,7 @@ function changed(a,b) {
     await page.evaluate(()=>window.__materialStep=16);await page.waitForTimeout(700);const animated=await picture('animated');assert(changed(original,animated)>100);
     await page.evaluate(()=>window.__materialStep=0);result.checks.push('Skeletal tangent-space normal mapping and animation render together');
     // Map edits preserve the selected slot; malformed images leave its previous binding intact.
-    await select('Polished copper');await page.locator('summary').filter({hasText:'Texture maps'}).click();
+    await select('Polished copper');await page.locator('.material-panel summary').filter({hasText:'Texture maps'}).click();
     await page.locator('#material-map-file').setInputFiles({name:'broken.png',mimeType:'image/png',buffer:Buffer.from('invalid')});
     await page.waitForFunction(()=>document.body.dataset.materialStatus==='error');const beforeMap=await picture('before-map');
     const blue=new PNG({width:2,height:2});for(let i=0;i<blue.data.length;i+=4){blue.data[i]=20;blue.data[i+1]=40;blue.data[i+2]=240;blue.data[i+3]=255;}

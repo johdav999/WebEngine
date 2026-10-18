@@ -1,5 +1,13 @@
 # Fleet mesh detail and shadow cost
 
+Terrain now generates perimeter-preserving LOD chains consumed by this same
+projected-size selector. Optional `MeshLodPolicy` provides independent instance
+camera/shadow scales or fixed levels, without changing simulation geometry.
+Terrain's source, layered material, edge and archive contracts are in
+[terrain.md](terrain.md); current native/browser evidence is in
+[terrain-detail-validation.md](terrain-detail-validation.md). The fleet measurements
+below retain their original date/scope and are not new terrain performance results.
+
 ## Implementation
 
 `MeshOptimizer::generateLods(Mesh&)` generates three immutable shared static

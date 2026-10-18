@@ -6,10 +6,15 @@
 
 namespace engine {
 enum class QualityProfile { Low, Balanced, High };
+enum class RenderBackend { WebGpu, WebGl2 };
+enum class RenderBackendPreference { Automatic, WebGpu, WebGl2 };
 struct RenderCapabilities {
     std::uint32_t maxTextureDimension2D=4096, maxTextureArrayLayers=256;
     std::uint64_t maxBufferSize=0;
     bool timestampQuery=false, compressionBC=false, compressionETC2=false, compressionASTC=false;
+    RenderBackend backend=RenderBackend::WebGpu;
+    bool shadowMaps=true, pbr=true, instancing=true;
+    bool msaa4x=false; // Actual color/depth attachment support; false before acquisition.
 };
 struct ResolutionBudget {
     float scale=1, maxPixelRatio=2;
@@ -25,8 +30,11 @@ struct RenderQuality {
     ResolutionBudget resolution;
     std::uint32_t shadowResolution=1024, shadowFilterTaps=9, maxShadowMaps=4;
     bool lod=true, shadowLod=true, compressedTextures=true;
+    std::uint32_t msaaSamples=1; // Presentation only: 1 (off) or 4.
     void validate() const {
         resolution.validate();
+        if(msaaSamples!=1&&msaaSamples!=4)
+            throw std::invalid_argument("MSAA requires 1 or 4 samples");
         if((shadowResolution!=256&&shadowResolution!=512&&shadowResolution!=1024&&shadowResolution!=2048)||
            (shadowFilterTaps!=1&&shadowFilterTaps!=9)||maxShadowMaps>4)
             throw std::invalid_argument("Invalid rendering shadow budget");
@@ -43,6 +51,10 @@ struct RenderQuality {
     }
 };
 struct RenderExtent { std::uint32_t width=1,height=1; };
+inline std::uint32_t resolveMsaaSamples(const RenderQuality& quality,const RenderCapabilities& caps) {
+    quality.validate();
+    return quality.msaaSamples==4&&caps.msaa4x ? 4u : 1u;
+}
 // Shrink both axes together, preserving the view's aspect under all budgets.
 inline RenderExtent resolveResolution(double cssWidth,double cssHeight,double pixelRatio,
                                       const ResolutionBudget& budget,const RenderCapabilities& caps) {

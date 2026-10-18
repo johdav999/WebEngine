@@ -38,6 +38,84 @@ per-camera/per-light selection and hysteresis; enabling it does not generate
 geometry or change collision/simulation. See [mesh detail](mesh-detail-validation.md).
 Settings are runtime presentation policy, not scene archive data or saved preferences.
 
+## Optional MSAA
+
+`RenderQuality::msaaSamples` accepts 1 (off) or 4. All profiles default to 1;
+applications opt into 4x independently of resolution or shadow filtering:
+
+```cpp
+auto quality = renderer.quality();
+quality.msaaSamples = 4;
+renderer.setQuality(quality);
+auto samples = renderer.effectiveMsaaSamples();
+```
+
+Invalid counts reject the entire quality candidate. `RenderCapabilities::msaa4x`
+reports attachment-format support after acquisition; `resolveMsaaSamples` selects
+4 only when requested and supported. Unsupported devices retain the requested
+policy and render at 1. Before attachments exist, `effectiveMsaaSamples()` returns
+1; WebGPU applies sample changes at the next render boundary.
+
+WebGPU owns multisampled color and matching `Depth24Plus` at the resolved canvas
+extent. Scene material, skinning, particle, sky and viewport-clear pipelines match
+the sample count. Background/World/Overlay and all camera views store/load the same
+color, preserving ordered composition and independent per-layer depth. A final
+resolve pass loads that color and resolves into the single-sample canvas before
+the GUI. Empty view lists also initialize and resolve color. Shadow maps remain
+single-sampled and material textures retain ordinary sampling. Binding layouts
+remain compatible when scene pipelines change.
+
+WebGL 2 queries RGB8 and DEPTH_COMPONENT24 renderbuffer sample counts. RGB8 matches
+the opaque default canvas framebuffer required by its resolve. If both
+support 4, it renders views/layers into a staged, completeness-checked multisampled
+framebuffer, disables the view scissor, and resolves color with `glBlitFramebuffer`
+before GUI. Unsupported 4x uses the default framebuffer. Allocation failure does
+not publish an incomplete replacement framebuffer or invalid quality candidate.
+
+Resize, sample changes and device/context restoration recreate attachments;
+recovery retains requested quality and reevaluates support. `EngineQuality.snapshot()`
+reports `msaaSamples`, `effectiveMsaaSamples` and `msaa4x`. The playground's
+**Anti-aliasing** control selects Off/4x and marks custom quality. Selecting a profile
+restores its one-sample default.
+
+Performance data counts multisampled color in `gpuTextureBytes` and sample-scaled
+depth in `gpuDepthBytes`; WebGL also estimates its default framebuffer depth.
+MSAA adds one counted resolve pass. WebGPU timestamp totals cover scene/shadow
+passes and exclude resolve and GUI. Storage estimates omit driver padding and
+browser-owned color/swapchain allocations. Four samples increase memory/bandwidth
+without implying a measured fourfold shading cost. Backing-resolution loss,
+texture aliasing and specular shimmer remain separate quality concerns.
+
+`scripts/msaa-smoke.cjs` checks real diagonal partial-coverage pixels at 1:1 backing
+size, 1x/4x switching, invalid settings, public controls, split/loaded/empty views,
+resize, storage estimates, paused recovery, GUI after resolve, skeletal/morph
+deformation, rejected framebuffer publication and controlled unsupported WebGL
+format support. `MSAA_SAMPLES=4` enables MSAA during existing
+`compositing-smoke.cjs`, `sky-smoke.cjs` and `shadow-smoke.cjs` fixture suites.
+Use the README's browser environment setup. Native `render_quality` checks validated counts and capability
+selection. Physical mobile performance and browser/device coverage require
+separate evidence.
+
+### Verified MSAA evidence — 2026-10-14
+
+- Pinned Emscripten 6.0.11 Release build: `build/web-msaa-release`; isolated
+  site `build/msaa-browser-site` served on localhost port 8134 during validation.
+- Native Debug CTest `render_quality` passed in `build/native`.
+- Chrome 155.0.8059.79: `msaa-smoke.cjs` passed both real backends, including
+  skeletal/morph deformation, profile reset, framebuffer rejection and recovery.
+  At 640x480 backing pixels the diagonal fixture had 0 partial-coverage pixels at
+  1x, 564 at WebGPU 4x and 440 at WebGL 2 4x. Backend sample patterns differ.
+- Existing compositing and sky suites passed with `MSAA_SAMPLES=4`; shadow suite
+  passed at both 1x and 4x. The shadow receiver crop now excludes the caster on
+  both sides, and its known map-budget warning accepts the private renderer name.
+- Results/screenshots: `build/evidence/msaa`, `msaa-compositing`, `msaa-sky`,
+  `msaa-shadows-1x` and `msaa-shadows-4x` under `build/evidence/`.
+- Tested Wasm SHA256:
+  `7B2FDF2FC1F74EA6C3036C9AD64CD88D8F2163D356A925CE0A65E3098B4408AA`.
+
+This establishes desktop Chrome correctness, not physical Android/iOS performance
+or acceptance on other browsers. Concurrent checkout work was retained.
+
 ## Capabilities and recovery ownership
 
 `Renderer::capabilities()` reports the active device's maximum 2D texture dimension,
@@ -49,7 +127,7 @@ canvas extent, compressed cache count, GPU generation, recovery attempts, secure
 context and API availability. `capabilitiesAvailable` is false before acquisition;
 initial placeholder limits are not a capability probe. Timestamp availability is
 distinct from the timing sampler's enabled/disabled/readback status in performance
-data. Missing WebGPU/secure context gets an explicit unavailable report.
+data. Backend identity and shadow/PBR/instancing support are also reported. Missing WebGPU or a secure context selects the WebGL 2 fallback in automatic mode; requiring WebGPU explicitly reports acquisition failure.
 
 The renderer borrows the scene, views and GUI for its entire lifetime. Device loss
 stops submission and queues recovery; `serviceRecovery()` must run at host frame
@@ -70,7 +148,7 @@ page, re-import the default model or reconstruct gameplay.
 
 Transient surface timeouts skip a frame; outdated surfaces reconfigure next frame,
 lost surfaces rebuild the backend, and surface errors enter the reported failure
-path. There is no fallback rendering backend.
+path. Initial WebGPU API/adapter/device unavailability can select WebGL 2 before the canvas acquires a context. Once WebGPU has acquired the canvas, loss/exhausted recovery retains explicit WebGPU retry. WebGL 2 handles its own context loss/restoration. See [fallback selection and capabilities](rendering-fallback.md).
 
 ## Browser lifecycle
 
@@ -107,8 +185,10 @@ Encoded CPU payload and actual GPU mip bytes are counted in scoped performance d
 Changing the compression setting invalidates texture/material GPU bindings. GUI
 textures retain their existing RGBA upload path.
 
-There is no KTX2/Basis decoder, runtime block encoder, compressed GLB extension or
-compressed archive codec. Ordinary PNG/JPEG/FBX/GLB loading remains RGBA; applications
+The [mobile asset pipeline](mobile-assets.md) adds a restricted pre-encoded KTX2
+reader, semantic mip export and fallback delivery bundles. There is no Basis
+transcoder, runtime block encoder, compressed GLB extension or compressed archive
+codec. Ordinary PNG/JPEG/FBX/GLB loading remains RGBA; applications
 attach authored variants before publishing immutable textures. Current archives
 save the RGBA fallback and omit these optional derived payloads, as they do LOD
 chains. BC7/ETC2/ASTC require actual device support; none is assumed universal.
@@ -158,3 +238,70 @@ work. It was retained; browser output was staged separately from `dist`. Build
 configuration initially encountered not-yet-created sources, and a broad native
 build encountered an unfinished prefab test. Validation used the explicit targets
 above once their sources were ready.
+
+## Planar water reflection captures
+
+Opt-in `planarReflectionStrength` adds one single-sample World capture per view,
+independent of main 1x/4x MSAA. The first visible requesting plane wins; coplanar
+surfaces share it. Reflection color/depth storage is reported and shrinks to 1x1
+fallbacks when camera-mask preflight finds no requesting water. WebGPU World
+GPU timing includes the reflection pass. Reflection targets rebuild on resize and
+recovery; each ordered view captures and consumes its pixels before the next.
+See [water contracts](water.md) and `scripts/water-planar-smoke.cjs`.
+
+## Water scene-input captures
+
+Opt-in water refraction/foam adds current-view opaque color/depth captures without
+changing requested/effective MSAA counts. WebGPU averages color and selects minimum
+depth for its intermediate single-sample snapshots; WebGL 2 uses matching
+RGB8/DEPTH_COMPONENT24 blits and driver-selected resolved depth. These intermediate
+captures are separate from the one final canvas resolve after ordered views and
+before GUI. At 1x, water uses a private accumulation target and final presentation
+pass. Disabling both effects releases canvas-sized scratch targets and preserves
+the original non-water pass count. Scratch memory is reported; capture/continuation
+are included in WebGPU World timing, while final presentation/resolve and GUI remain
+excluded. See [water contracts](water.md) and `scripts/water-depth-smoke.cjs`.
+
+## Underwater scene composition
+
+`underwaterStrength` opts into per-camera underwater fog/absorption. A containing
+World water footprint is selected before target allocation, independently of
+surface frustum visibility. Submerged views add a completed-World color/depth
+snapshot and a fog composite before Overlay/GUI. Dry views skip both. The existing
+1x/4x capture resolves are reused; fog writes the scene attachment at its current
+sample count and final canvas resolve remains after all views. Pure underwater
+materials also request optional scratch targets, even with refraction/foam off;
+at 1x they need the single final presentation pass. Targets rebuild on resize and
+recovery and shrink when unused. Memory counters include retained scratch storage;
+WebGPU World timing includes both underwater passes. Transparent fog reuses opaque
+depth rather than a separate transparent-depth buffer. See [water contracts](water.md)
+and `scripts/water-underwater-smoke.cjs`.
+
+Animated underwater caustics reuse the same composite and snapshots with no extra
+passes or textures. The private underwater view uniform is 256 bytes; enabled
+animation updates its time, while disabled or paused caustics retain cached values.
+See `scripts/water-caustics-smoke.cjs` for both-backend pixel and cost acceptance.
+
+
+## WebGPU material pipeline specialization
+
+The WebGPU backend specializes its cached vertex/color pipelines for the effective
+material family, alpha mode, layered-material flag, optional map presence and
+reflection pass. Pipeline constants match the same effective material used to
+upload uniforms. Opaque ordinary materials compile without alpha discard or
+reflection clipping; unused water, terrain-layer and absent-map work is removed.
+The cache identity includes every specialization flag, so changing a material
+map or material family chooses the matching variant. Shared textures/materials,
+light/shadow settings, animation and draw order retain their existing owners.
+Shadow vertices use the same material-family constant; masked shadow fragments
+specialize alpha/layer handling. WebGL 2 retains its existing shader path.
+
+This is backend implementation policy and adds no application setting, resource
+format or archive field. Validate PBR, unlit, water, masks, layers, map edits,
+skinned/mirrored draws and device recovery when changing these constants.
+
+Interaction ripples/wakes add no passes or textures. The private WebGPU frame
+payload is 2400 bytes including up to 16 interaction records and per-view active
+count; unchanged paused staging retains the existing upload cache. WebGL 2 uses
+bounded fragment uniforms, without a float-target requirement. See water contracts
+and `scripts/water-interactions-smoke.cjs`; fragment work scales with active sources.

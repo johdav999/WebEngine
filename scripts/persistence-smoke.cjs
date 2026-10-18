@@ -101,7 +101,7 @@ function pixelsEqual(a,b){
       }finally{storage.dispose();}
     });
     await (await downloadEvent).saveAs(path.join(evidence,'checkpoint.wescene'));
-    result.saveBytes=snapshot.length;assert.equal(snapshot.version,4);
+    result.saveBytes=snapshot.length;assert.equal(snapshot.version,6);
     console.log(`Checkpoint saved: ${snapshot.length} bytes.`);
     await page.locator('#restore-demo').click();assert(!PNG.sync.read(await picture()).data.equals(PNG.sync.read(original).data),'Scene changed before restoration');
     await page.locator('#load-progress').click();await page.waitForFunction(()=>document.querySelector('#archive-status').textContent==='Saved progress opened.');

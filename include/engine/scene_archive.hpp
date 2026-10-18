@@ -3,6 +3,7 @@
 #include "engine/render_view.hpp"
 #include "engine/effect_component.hpp"
 #include "engine/collider_component.hpp"
+#include "engine/terrain.hpp"
 #include <span>
 #include <typeindex>
 #ifndef __EMSCRIPTEN__
@@ -17,6 +18,7 @@ struct ArchiveLimits {
     std::uint32_t maxNodes=100000,maxResources=10000,maxDepth=128,maxElements=4000000;
 };
 struct AssetLibrary {
+    std::vector<std::shared_ptr<const PhysicalSurface>> physicalSurfaces;
     std::vector<std::shared_ptr<const Mesh>> meshes;
     std::vector<std::shared_ptr<const Material>> materials;
     std::vector<std::shared_ptr<const Texture>> textures;
@@ -25,6 +27,7 @@ struct AssetLibrary {
     std::vector<std::shared_ptr<const ParticleEmitterDefinition>> emitters;
     std::vector<std::shared_ptr<const EffectAsset>> effects;
     std::vector<std::shared_ptr<const CollisionShape>> collisionShapes;
+    std::vector<std::shared_ptr<const TerrainAsset>> terrains;
 };
 struct SceneDocument {
     std::unique_ptr<Scene> scene;
@@ -60,6 +63,10 @@ public:
     static std::vector<std::byte> saveAssets(const AssetLibrary& assets,const ArchiveLimits& limits={});
     static AssetLibrary loadAssets(std::span<const std::byte> bytes,const ArchiveLimits& limits={});
     static AssetLibrary collectAssets(const Scene& scene);
+    static SceneDocument clone(const Scene& scene,std::span<const RenderView> views={},const AssetLibrary& assets={},const ArchiveLimits& limits={},const ComponentCodecs& codecs={});
+    // Clone built-in subtrees, share immutable assets, regenerate all saved identities.
+    // No callbacks/custom behavior, scene roots or independently protected children.
+    static std::unique_ptr<Node> duplicateSubtree(const Node& node,const ArchiveLimits& limits={});
 #ifndef __EMSCRIPTEN__
     // Write a sibling temporary file and atomically replace the destination.
     static void saveFile(const std::filesystem::path& path,const Scene& scene,std::span<const RenderView> views={},

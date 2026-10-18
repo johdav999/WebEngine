@@ -42,3 +42,43 @@ WebAssembly execution. Applications must route their active camera/view input
 into `processInput`, bind game actions and draw selection feedback as described
 in [the integration guide](selection.md). Browser GUI routing, visual highlights
 and physical touch-device acceptance are application integration checks.
+
+## Precise picking and manipulation extension (2026-10-10)
+
+Fresh validation uses isolated `build/native-precise-selection` (MinGW C++20 Debug)
+and `build/wasm-precise-selection` (repository-local Emscripten 6.0.11 Release).
+Both final selection and manipulation suites pass natively and under Node/Wasm.
+The broader native build passed; its first full CTest run passed 39/40 tests.
+The failure was the concurrently added `physics_joints` hinge-limit assertion
+(`got -0.360652, expected 0.500000`), outside this picking/manipulation change.
+Other checkout work is preserved. The final focused suites were rebuilt and rerun
+after the additional edge cases; the broader run is not a claim that all ongoing
+checkout changes pass. [Native focused log](../build/native-precise-selection/Testing/Temporary/LastTest.log).
+
+Selection coverage adds empty AABB gaps, two-sided/mirrored/scaled triangles,
+small-surface unit normals, barycentric/UV/triangle identity, indexed parts,
+degenerate faces and malformed indices, morph/skinning/interpolation, pointer
+query forwarding and distance limits. Occlusion cases include noninteractive and
+ownerless meshes, blocker/visibility masks, invisible/disabled/pending-destroy
+geometry, gaps inside blocker bounds, focus and explicit proxy compatibility.
+
+Manipulation coverage adds plane/axis translation, picked offsets, normalized
+rays/axes, behind/parallel rays, pivot rotation and angle wrap, transformed/mirrored
+parents, shear rejection, commit/cancel/destructor rollback, competing writes,
+reparenting/parent motion, disable/selectability/surface loss, destroyed/recycled
+and foreign handles, rigid-body/motor ownership and invalid command rejection.
+
+```powershell
+cmake --build build/native-precise-selection --target selection_tests manipulation_tests -j 6
+ctest --test-dir build/native-precise-selection -R '^(selection|manipulation)$' --output-on-failure
+.tools/emsdk/upstream/emscripten/emcmake.exe cmake -S tests/wasm-selection -B build/wasm-precise-selection -G Ninja -DCMAKE_BUILD_TYPE=Release -DFETCHCONTENT_SOURCE_DIR_JOLT=C:/Users/Johan/source/repos/WebEngine/build/dependencies/JoltPhysics-5.3.0
+cmake --build build/wasm-precise-selection --target selection_wasm_tests manipulation_wasm_tests -j 6
+.tools/emsdk/node/24.19.0_64bit/node.exe build/wasm-precise-selection/selection_wasm_tests.js
+.tools/emsdk/node/24.19.0_64bit/node.exe build/wasm-precise-selection/manipulation_wasm_tests.js
+```
+
+No browser adapter, demo input capture or renderer integration was added in this
+extension, and `dist/` was not published. Node/Wasm establishes portable execution
+on the browser ABI; it does not establish an integrated drag/rotate UI, GPU pixel
+agreement, physical touch input or sustained mobile query performance. See the
+[application integration and geometric limits](selection.md).

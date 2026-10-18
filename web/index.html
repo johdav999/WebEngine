@@ -6,8 +6,12 @@
   <title>WebEngine · 3D playground</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="editor.css">
+  <link rel="stylesheet" href="editor-content.css">
+  <link rel="stylesheet" href="editor-layout.css">
   <link rel="stylesheet" href="material-graph.css">
   <link rel="stylesheet" href="audio-system.css">
+  <link rel="stylesheet" href="editor-route.css">
   <script src="performance.js" defer></script>
   <script src="animation.js" defer></script>
   <script src="morphs.js" defer></script>
@@ -15,19 +19,36 @@
   <script src="audio-panel.js" defer></script>
   <script src="audio-system.js" defer></script>
   <script src="audio-system-panel.js" defer></script>
+  <script src="driving-audio.js" defer></script>
   <script src="gui.js" defer></script>
   <script src="input.js" defer></script>
+  <script src="gamepad.js" defer></script>
   <script src="quality.js" defer></script>
   <script src="app.js" defer></script>
   <script src="ship-stress.js" defer></script>
   <script src="fx.js" defer></script>
   <script src="materials.js" defer></script>
+  <script src="sky.js" defer></script>
+  <script src="terrain-storage.js" defer></script>
+  <script src="terrain.js" defer></script>
   <script src="material-graph.js" defer></script>
   <script src="material-graph-editor.js" defer></script>
   <script src="physics.js" defer></script>
   <script src="compositing.js" defer></script>
   <script src="storage.js" defer></script>
   <script src="scene-archive.js" defer></script>
+  <script src="editor.js" defer></script>
+  <script src="editor-content.js" defer></script>
+  <script src="editor-structure.js" defer></script>
+  <script src="editor-terrain.js" defer></script>
+  <script src="editor-fx.js" defer></script>
+  <script src="editor-ai.js" defer></script>
+  <script src="editor-ai-controller.js" defer></script>
+  <script src="editor-layout.js" defer></script>
+  <script src="editor-camera.js" defer></script>
+  <script src="vehicle.js" defer></script>
+  <script src="editor-physics.js" defer></script>
+  <script src="editor-route.js" defer></script>
 </head>
 <body>
   <header><a class="brand" href="./"><span class="brand-icon">W</span> WebEngine <span class="tag">PLAYGROUND / 001</span></a><a href="?gui=1">In-engine GUI demo</a><span class="stack">C++20 <span>→</span> WebAssembly <span>→</span> WebGPU</span></header>
@@ -46,6 +67,7 @@
       <section class="inspector-section" aria-labelledby="quality-heading">
         <h3 id="quality-heading">Rendering quality</h3>
         <label>Profile <select id="quality-profile" disabled><option value="0">Low</option><option value="1" selected>Balanced</option><option value="2">High</option><option value="custom" disabled>Custom</option></select></label>
+        <label>Anti-aliasing <select id="quality-msaa" disabled><option value="1">Off</option><option value="4">4× MSAA</option></select></label>
         <details><summary>Resolution and shadow budgets</summary>
           <form id="quality-form">
             <label>Resolution scale <input id="quality-scale" type="number" min="0.25" max="2" step="0.05" value="1" required disabled></label>
@@ -97,6 +119,21 @@
         </details>
         <p id="ship-stress-status" role="status" aria-live="polite">Choose a count to render the fleet.</p>
       </section>
+      <section class="inspector-section" aria-labelledby="ai-heading">
+        <h3 id="ai-heading">Game AI</h3>
+        <label><span>Static navmesh navigation</span><input id="ai-navmesh" type="checkbox" disabled></label>
+        <label><span>Show baked walkable surface</span><input id="ai-navmesh-debug" type="checkbox" checked disabled></label>
+        <p id="ai-navmesh-status" role="status">Enable navmesh navigation, then click walkable ground to choose a destination.</p>
+        <div class="buttons"><button id="ai-door-close" disabled>Close passage</button><button id="ai-door-open" disabled>Open passage</button></div>
+        <div class="buttons"><button id="ai-floor-remove" disabled>Remove floor bridge</button><button id="ai-floor-restore" disabled>Restore floor bridge</button><button id="ai-navmesh-rebuild" disabled>Rebuild navigation</button></div>
+        <div class="buttons"><button id="ai-open" disabled>Open AI demo</button><button id="ai-return" disabled>Return to scene</button></div>
+        <p>Blue patrols the cyan route. Green follows the pink target. Amber investigates its last known position. Obstacles trigger an alternate route; red means the goal is unreachable.</p>
+        <div class="buttons"><button id="ai-show" disabled>Show target nearby</button><button id="ai-hide" disabled>Hide behind wall</button><button id="ai-away" disabled>Move target away</button></div>
+        <div class="buttons"><button id="ai-remove" disabled>Remove target</button><button id="ai-reset" disabled>Restart patrol</button></div>
+        <div class="buttons"><button id="ai-block" disabled>Block lower route</button><button id="ai-move-blocker" disabled>Move blocker to upper route</button></div>
+        <div class="buttons"><button id="ai-seal" disabled>Seal both exits</button><button id="ai-clear" disabled>Clear obstacles</button><button id="ai-retry" disabled>Retry goal</button></div>
+        <p id="ai-status" role="status" aria-live="polite">Open the demo to watch an autonomous patrol.</p>
+      </section>
       <section class="inspector-section" id="physics-panel" aria-labelledby="physics-heading">
         <h3 id="physics-heading">Physics playground</h3>
         <div class="buttons"><button id="physics-start" disabled>Physics playground</button><button id="physics-return" disabled>Return to scene</button></div>
@@ -109,7 +146,7 @@
       <section class="inspector-section">
         <h3>Camera views</h3>
         <label for="camera-layout">Layout</label>
-        <select id="camera-layout" disabled><option value="0">Single camera</option><option value="1">Split screen</option><option value="2">Overview inset</option></select>
+        <select id="camera-layout" disabled><option value="0">Single camera</option><option value="1">Split screen</option><option value="2">Overview inset</option><option value="3">Oblique inset</option></select>
       </section>
       <section class="inspector-section material-panel" aria-labelledby="material-heading">
         <h3 id="material-heading">Materials · live preview</h3>
@@ -145,7 +182,24 @@
           </details>
           <button id="material-reset">Reset selected slot</button>
         </fieldset>
-        <details class="material-environment" open><summary>Environment lighting</summary>
+          <details class="material-environment" open><summary>Sky background</summary>
+            <label for="sky-mode">Mode</label><select id="sky-mode"><option value="0">Off</option><option value="1">Procedural gradient</option><option value="2">Panorama</option><option value="3" selected>Atmosphere</option></select>
+            <label for="sky-geometry">Geometry</label><select id="sky-geometry"><option value="0">Fullscreen background</option><option value="1" selected>Mesh sky sphere</option></select>
+            <label for="sky-brightness">Brightness</label><input id="sky-brightness" type="range" min="0" max="5" step="0.05" value="1">
+            <label for="sky-rotation">Rotation</label><input id="sky-rotation" type="range" min="-180" max="180" step="1" value="0">
+            <button id="sky-load" type="button">Choose sky panorama</button><input id="sky-file" type="file" accept="image/png,image/jpeg,.tga,.bmp" hidden>
+            <label for="sky-clouds">Clouds <input id="sky-clouds" type="checkbox" checked></label>
+            <label for="sky-coverage">Cloud coverage</label><input id="sky-coverage" type="range" min="0" max="1" step="0.01" value="0.58">
+            <label for="sky-density">Cloud density</label><input id="sky-density" type="range" min="0" max="5" step="0.05" value="1">
+            <label for="sky-rayleigh">Rayleigh scattering</label><input id="sky-rayleigh" type="range" min="0.01" max="5" step="0.01" value="1">
+            <label for="sky-mie">Mie haze</label><input id="sky-mie" type="range" min="0" max="5" step="0.01" value="1">
+            <label for="sky-cycle">Day/night lighting <input id="sky-cycle" type="checkbox" checked></label>
+            <label for="sky-running">Run cycle <input id="sky-running" type="checkbox" checked></label>
+            <label for="sky-hour">Time of day <output id="sky-hour-value">09:00</output></label><input id="sky-hour" type="range" min="0" max="24" step="0.05" value="9">
+            <label for="sky-day-seconds">Seconds per day</label><input id="sky-day-seconds" type="number" min="1" max="1000000000" value="180">
+            <p id="sky-status" role="status">Use a 2:1 panorama. Rotation turns the panorama; brightness adjusts either mode.</p>
+          </details>
+          <details class="material-environment" open><summary>Environment lighting</summary>
           <label for="environment-intensity">Intensity <output></output></label><input id="environment-intensity" type="range" min="0" max="5" step="0.05" value="1" disabled>
           <label for="environment-rotation">Rotation <output></output></label><input id="environment-rotation" type="range" min="-180" max="180" step="1" value="0" disabled>
           <div class="buttons"><button id="environment-load" disabled>Choose panorama</button><button id="environment-reset" disabled>Studio sky</button></div>
@@ -166,6 +220,7 @@
         <div class="buttons"><button id="sound-enable">Enable audio</button><button id="sound-shot">Play emitter</button><button id="sound-loop">Loop music</button></div>
         <div class="buttons"><button id="sound-fade">Fade out music</button><button id="sound-stop">Stop all voices</button><button id="sound-import">Import shared sound</button></div>
         <input id="sound-file" type="file" accept=".mp3,.wav" hidden>
+        <label for="sound-rate">Playback rate (pitch and speed)</label><input id="sound-rate" type="range" min="0.125" max="8" step="0.125" value="1">
         <label for="sound-master">Master volume</label><input id="sound-master" type="range" min="0" max="1" step="0.01" value="1">
         <label><input id="sound-mute" type="checkbox"> Mute all buses</label>
         <label for="sound-effects">Effects bus volume</label><input id="sound-effects" type="range" min="0" max="1" step="0.01" value="1">
@@ -243,7 +298,60 @@
       </details>
       <section class="inspector-section"><h3>Scene graph</h3><ul class="tree"><li>Demo scene<ul><li>Camera <span>perspective</span></li><li>Sun <span>directional</span></li><li>Ground &amp; grid</li><li id="assembly-node">Rotating assembly<ul><li>Core cube<ul><li>Nested crown</li></ul></li><li>4 satellite actors</li></ul></li><li id="imported-node" hidden><span id="imported-name">Imported model</span><ul id="imported-components"><li>Mesh component</li></ul></li><li>Moving light rig<ul><li>Point light<ul><li>Mesh marker</li></ul></li></ul></li><li>Overlay axes</li></ul></li></ul></section>
       <section class="inspector-section"><h3>Render layers</h3><div class="layer"><span>01</span> Background <small>clear</small></div><div class="layer"><span>02</span> World <small>depth tested</small></div><div class="layer"><span>03</span> Overlay <small>above world</small></div></section>
-      <section class="inspector-section controls"><h3>Scene controls</h3><label><span>Directional light</span><input id="sun" type="checkbox" checked disabled></label><label><span>Sun shadows</span><input id="shadows" type="checkbox" checked disabled></label><label><span>Moving point light</span><input id="point" type="checkbox" checked disabled></label><div class="buttons"><button id="pause" disabled>Pause motion</button><button id="reset" disabled>Reset camera</button></div></section>
+      <section class="inspector-section controls"><h3>Terrain demo</h3>
+        <p>Chunked hills with a tiled grass surface and solid ground. Click the ground to place a query marker; drag to orbit.</p>
+        <div class="buttons"><button id="terrain-open">Open terrain</button><button id="terrain-return">Return to demo</button><button id="terrain-reset">Reset terrain</button></div>
+        <div class="buttons"><button id="terrain-drop">Drop ball</button><button id="terrain-load">Load heightmap</button></div>
+        <label>Surface <select id="terrain-surface"><option value="0">Normals, height blend and triplanar</option><option value="1">Grass only</option><option value="2">Sand only</option><option value="3">Rock only</option><option value="4">Soil only</option><option value="5">Show blend weights</option><option value="6">Single texture</option><option value="7">Zero weights (grass fallback)</option><option value="8">Equal weights</option><option value="9">Geometry coverage</option><option value="10">Linear blend / mesh UVs</option><option value="11">Normal maps / mesh UVs</option><option value="12">Height blend / mesh UVs</option><option value="13">Triplanar / linear blend</option></select></label>
+        <label>Terrain view <select id="terrain-view"><option value="0">Perspective</option><option value="1">Overhead inspection</option></select></label>
+        <label>Camera detail <select id="terrain-camera-detail"><option value="-1">Automatic</option><option value="0">Full</option><option value="1">LOD 1</option><option value="2">LOD 2</option><option value="3">LOD 3</option><option value="4">Mixed neighboring chunks</option></select></label>
+        <label>Camera detail scale <input id="terrain-camera-scale" type="number" min="0.05" max="64" step="0.25" value="1"></label>
+        <label>Shadow detail <select id="terrain-shadow-detail"><option value="-1">Automatic (light texels)</option><option value="0">Full</option><option value="1">LOD 1</option><option value="2">LOD 2</option><option value="3">LOD 3</option><option value="4">Mixed neighboring chunks</option></select></label>
+        <label>Shadow detail scale <input id="terrain-shadow-scale" type="number" min="0.05" max="64" step="0.25" value="1"></label>
+        <p id="terrain-detail-reading" role="status">LOD keeps every shared edge vertex. Shadows use independent light-space detail.</p>
+        <label>Ground tool <select id="terrain-tool"><option value="0">Navigate / query</option><option value="1">Raise</option><option value="2">Lower</option><option value="3">Flatten</option><option value="4">Smooth</option><option value="5">Paint layer</option></select></label>
+        <label>Brush radius (m) <input id="terrain-radius" type="number" min="0.1" max="48" step="0.5" value="3"></label>
+        <label>Strength (height delta or 0–1 blend) <input id="terrain-strength" type="number" min="0" max="1" step="0.1" value="0.5"></label>
+        <label>Flatten height (m) <input id="terrain-flatten" type="number" min="-100" max="100" step="0.5" value="2"></label>
+        <label>Paint layer <select id="terrain-layer"><option value="0">Grass</option><option value="1">Sand</option><option value="2">Rock</option><option value="3">Soil</option></select></label>
+        <p>Choose a tool, then click or drag on the ground. Switch to Navigate to move the camera. Each brush stamp is one undo step (up to 16).</p>
+        <div class="buttons"><button id="terrain-stamp">Apply at Ground X/Z</button><button id="terrain-undo">Undo stamp</button><button id="terrain-redo">Redo stamp</button></div>
+        <p id="terrain-edit-reading" role="status"></p>
+        <label><input id="terrain-stream" type="checkbox"> Stream chunks around a chosen focus</label>
+        <label>Chunk radius <input id="terrain-stream-radius" type="number" min="0" max="32" value="1"></label>
+        <label>Resident chunk limit <input id="terrain-stream-limit" type="number" min="1" max="256" value="9"></label>
+        <label>Builds per frame <input id="terrain-stream-builds" type="number" min="1" max="64" value="2"></label>
+        <div class="buttons"><button id="terrain-stream-apply">Apply streaming settings</button><button id="terrain-stream-focus">Move focus to Ground X/Z</button></div>
+        <p id="terrain-stream-reading" role="status">Source samples remain available; only resident chunks render and collide. Keep gameplay inside the resident region.</p>
+        <p>Source paging · 512 × 512 m sample world. Sculpt or paint resident ground; brush neighbors load before a stamp applies. Edited pages save together in this browser, including shared borders. Dirty pages stay resident until saved.</p>
+        <label>Pending page limit <input id="terrain-page-flight" type="number" min="1" max="8" value="2"></label>
+        <label>Resident source budget (KiB) <input id="terrain-page-budget" type="number" min="7" max="65536" value="64"></label>
+        <div class="buttons"><button id="terrain-page-open">Open paged world / apply budgets</button><button id="terrain-page-frame">Frame resident focus</button><button id="terrain-page-return">Return to editable hills</button><button id="terrain-page-retry">Retry failed pages</button></div>
+        <p id="terrain-page-reading" role="status"></p>
+        <div class="buttons"><button id="terrain-page-save">Save dirty pages / retry writeback</button><button id="terrain-page-discard">Discard unsaved page edits</button><button id="terrain-page-clear">Clear saved page edits (outside paged world)</button></div>
+        <p id="terrain-page-write-reading" role="status"></p>
+        <input id="terrain-file" type="file" accept=".png,.jpg,.jpeg,.bmp,.tga" hidden>
+        <p>Heightmap: 2–257 pixels per side; red maps to 0–8 metres. Files stay local.</p>
+        <label>Ground X <input id="terrain-x" type="number" value="0" step="0.5"></label>
+        <label>Ground Z <input id="terrain-z" type="number" value="0" step="0.5"></label>
+        <button id="terrain-probe">Query ground</button><p id="terrain-status" role="status">Open terrain to explore the hills.</p><p id="terrain-reading" role="status"></p>
+        <p>Use Scenes &amp; assets below to save or reopen the terrain scene, including collision and balls.</p>
+      </section>
+      <section class="inspector-section controls"><h3>Height fog</h3>
+        <label><span>Enable fog</span><input id="fog-enabled" type="checkbox"></label>
+        <label><span>Density</span><input id="fog-density" type="number" min="0" max="100" step="0.01" value="0.04"></label>
+        <label><span>Start distance</span><input id="fog-start" type="number" min="0" max="1000000" value="0"></label>
+        <label><span>Base height</span><input id="fog-base" type="number" min="-1000000" max="1000000" value="0"></label>
+        <label><span>Height falloff</span><input id="fog-falloff" type="number" min="0" max="100" step="0.05" value="0.15"></label>
+        <label><span>Haze color</span><input id="fog-color" type="color" value="#d3e1ed"></label>
+        <p id="fog-status" role="status">Zero falloff gives uniform distance fog. Fog is saved with the scene.</p>
+      </section>
+      <section class="inspector-section controls"><h3>Water demo</h3><p>Reflections, refraction and foam above water; animated caustics, depth fog and absorption below.</p>
+        <div class="buttons"><button id="water-open">Open water demo</button><button id="water-return">Return to demo</button></div>
+        <label><span>View</span><select id="water-view"><option value="0">Above water</option><option value="1">Underwater</option><option value="2">Deep underwater</option></select></label>
+        <label><span>Object interactions</span><select id="water-interactions"><option value="1">Ripples and wakes</option><option value="2">Contact ripples</option><option value="3">Moving wake</option><option value="0">Off</option></select></label>
+        <label><span>Water surface</span><select id="water-preset"><option value="0">Animated lake</option><option value="1">Still water</option><option value="29">Calm interaction pool</option><option value="2">Reflections off</option><option value="3">Environment reflections (WebGPU)</option><option value="25">Caustics off</option><option value="26">Still caustics</option><option value="19">Underwater effects off</option><option value="20">Underwater absorption off</option><option value="21">Underwater fog off</option><option value="14">Planar reflections off</option><option value="15">Still planar mirror</option><option value="8">Refraction off</option><option value="9">Shoreline foam off</option><option value="10">Reflective surface only</option></select></label>
+      </section><section class="inspector-section controls"><h3>Scene controls</h3><label><span>Directional light</span><input id="sun" type="checkbox" checked disabled></label><label><span>Sun shadows</span><input id="shadows" type="checkbox" checked disabled></label><label><span>Moving point light</span><input id="point" type="checkbox" checked disabled></label><div class="buttons"><button id="pause" disabled>Pause motion</button><button id="reset" disabled>Reset camera</button></div></section>
       <section class="inspector-section importer"><h3>3D model</h3><div class="buttons"><button id="import-fbx" disabled>Import FBX / GLB</button><button id="restore-demo" disabled>Restore demo</button></div><input id="fbx-file" type="file" accept=".fbx,.glb,.png,.jpg,.jpeg,.tga,.bmp" multiple hidden disabled><p id="import-status" role="status">Select an FBX or GLB with companion images · 32 MB each</p><p id="texture-info" role="status">Embedded base-color textures load automatically.</p><button id="apply-texture" disabled>Override texture</button><input id="texture-file" type="file" accept=".png,.jpg,.jpeg,.tga,.bmp" hidden disabled></section>
       <section class="inspector-section animation-panel"><h3>Skeletal animation</h3><button id="skeletal-demo" disabled>Load animated FBX demo</button><p id="animation-info">Import a skeletal FBX or GLB with animation clips.</p>
         <div id="animation-controls">
@@ -258,7 +366,7 @@
         </div><p id="animation-state" role="status">Stopped · bind pose</p>
       </section>
       <section id="fx-panel" class="inspector-section animation-panel"><h3>Visual effects</h3>
-        <label for="fx-preset">Effect preset</label><select id="fx-preset" disabled><option value="0">Campfire</option><option value="1">Explosion</option></select>
+        <label for="fx-preset">Effect preset</label><select id="fx-preset" disabled><option value="0">Campfire</option><option value="1">Explosion</option><option value="2">Fountain and mist</option></select>
         <div class="buttons"><button id="fx-play" disabled>Play / restart</button><button id="fx-pause" disabled>Pause</button></div>
         <div class="buttons"><button id="fx-stop" disabled>Stop emission</button><button id="fx-clear" disabled>Clear</button></div>
         <p id="fx-status" role="status">Stopped · 0 particles</p>

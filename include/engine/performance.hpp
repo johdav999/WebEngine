@@ -14,6 +14,8 @@ struct FrameTiming {
 struct FrameCounters {
     std::uint64_t culledMeshes=0,visibleMeshes=0;
     std::uint64_t guiDrawCalls=0,guiTriangles=0,guiUploadCalls=0,guiUploadBytes=0,guiTextureBytes=0,guiBufferBytes=0;
+    std::uint64_t trailSegments=0,trailDrawCalls=0,trailUploadBytes=0;
+    std::uint64_t meshParticles=0; // Draws/uploads use existing mesh counters.
     std::uint64_t particles=0,particleDrawCalls=0,transparentMeshDraws=0,particleUploadCalls=0,particleUploadBytes=0,particleBufferGrowths=0;
     std::uint64_t meshes=0,lights=0,passes=0,drawCalls=0,triangles=0;
     std::uint64_t shadowPasses=0,shadowDrawCalls=0,shadowInstances=0;
@@ -21,6 +23,7 @@ struct FrameCounters {
     std::uint32_t shadowMapResolution=1024,shadowFilterTaps=9;
     std::uint64_t submittedInstances=0,instancedDrawCalls=0,maxInstancesPerDraw=0;
     std::uint64_t skinnedInstances=0,cachedSkeletons=0,gpuSkinBytes=0,boneUploadCalls=0,boneUploadBytes=0;
+    std::uint64_t assetUploadBytes=0,assetUploadResources=0,deferredAssetUploads=0,deferredAssetDraws=0;
     std::uint64_t uploadCalls=0,uploadBytes=0,newMeshes=0,newTextures=0;
     std::uint64_t cachedMaterials=0,cachedMaterialPipelines=0,materialUploadCalls=0,materialUploadBytes=0;
     std::uint64_t frameStorageBytes=0,frameStorageGrowths=0,objectBufferGrowths=0;

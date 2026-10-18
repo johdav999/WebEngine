@@ -13,6 +13,7 @@ public:
     bool playing(std::uint32_t) const noexcept override;
     void gain(std::uint32_t,float) noexcept override;
     void position(std::uint32_t,Vec3) noexcept override;
+    bool playbackRate(std::uint32_t,float) noexcept override;
     void listener(const AudioListenerPose&) noexcept override;
     bool active() const noexcept override;
     void activate() noexcept override;

@@ -40,6 +40,7 @@ struct AudioPlayOptions {
     double offsetSeconds=0;
     Vec3 position{};
     float referenceDistance=1,maxDistance=10000,rolloff=1;
+    float playbackRate=1; // Finite [0.125,8]; source seconds per device second.
 };
 class AudioEmitterComponent : public Component {
 public:
@@ -62,6 +63,8 @@ public:
     virtual bool playing(std::uint32_t voice) const noexcept=0;
     virtual void gain(std::uint32_t voice,float value) noexcept=0;
     virtual void position(std::uint32_t voice,Vec3 value) noexcept=0;
+    // Failure preserves the previous rate and voice. Must not restart playback.
+    virtual bool playbackRate(std::uint32_t voice,float value) noexcept=0;
     virtual void listener(const AudioListenerPose&) noexcept=0;
     virtual bool active() const noexcept=0;
     virtual void activate() noexcept=0; // Initiate activation in a platform gesture.
@@ -90,6 +93,8 @@ public:
     bool setVoiceMuted(AudioVoiceId,bool);
     bool fadeVoice(AudioVoiceId,float target,double seconds);
     bool setVoicePosition(AudioVoiceId,Vec3);
+    bool setVoicePlaybackRate(AudioVoiceId,float);
+    float voicePlaybackRate(AudioVoiceId) const;
     bool isPlaying(AudioVoiceId) const;
     float voiceVolume(AudioVoiceId) const;
     std::size_t voiceCount() const { return voices_.size(); }

@@ -24,11 +24,14 @@ void useLod(MeshDraw& draw,std::size_t level) {
     draw.mesh=mesh;
 }
 }
-std::size_t RenderFrame::chooseLod(const MeshDraw& draw,LodState& state,const DetailView* detail) {
+std::size_t RenderFrame::chooseLod(const MeshDraw& draw,LodState& state,const DetailView* detail,bool shadow) {
     if(state.component!=draw.component || state.source.lock()!=draw.sourceMesh) state={draw.component,draw.sourceMesh,0};
     state.level=detail && !draw.skinPose && !draw.morphPose && !draw.sourceMesh->skeleton
         && draw.sourceMesh->skin.empty() && draw.sourceMesh->morphTargets.empty() && !draw.sourceMesh->lods.empty()
-        ? selectMeshLod(*draw.sourceMesh,projectedMeshPixels(draw.sourceBounds,draw.model,detail->viewProjection,detail->width,detail->height),state.level) : 0;
+        ? selectMeshLod(*draw.sourceMesh,projectedMeshPixels(draw.sourceBounds,draw.model,detail->viewProjection,detail->width,detail->height)*(shadow ? draw.lodPolicy.shadowScale : draw.lodPolicy.cameraScale),state.level) : 0;
+    const int fixed=shadow ? draw.lodPolicy.shadowLevel : draw.lodPolicy.cameraLevel;
+    if(detail&&fixed>=0&&draw.sourceBounds.valid&&!draw.skinPose&&!draw.morphPose&&!draw.sourceMesh->skeleton&&draw.sourceMesh->skin.empty()&&draw.sourceMesh->morphTargets.empty())
+        state.level=std::min(std::size_t(fixed),draw.sourceMesh->lods.size());
     return state.level;
 }
 void RenderFrame::collect(const Scene& scene,bool instancing,std::uint32_t visibilityMask,const Frustum* frustum,const DetailView* detail) {
@@ -144,7 +147,7 @@ void RenderFrame::prepareShadow(std::size_t light,const DetailView& detail,bool 
             auto draw=original;draw.mesh=draw.sourceMesh;
             if(draw.mesh->parts.empty()) { draw.firstIndex=0;draw.indexCount=std::uint32_t(draw.mesh->indices.size()); }
             else { const auto& part=draw.mesh->parts.at(draw.part);draw.firstIndex=part.firstIndex;draw.indexCount=part.indexCount; }
-            const auto level=chooseLod(draw,state.levels[instanceSource(slot)],lod ? &detail : nullptr);
+            const auto level=chooseLod(draw,state.levels[instanceSource(slot)],lod ? &detail : nullptr,true);
             shadowLodParts_+=bool(level);useLod(draw,level);
             if(inRun && state.batches.back().mesh==draw.mesh && state.batches.back().firstIndex==draw.firstIndex && state.batches.back().indexCount==draw.indexCount)
                 ++state.batches.back().instances.instanceCount;
@@ -178,7 +181,7 @@ void RenderFrame::prepareObjects() {
     uploads_.clear();changedObjects_=0;
     for(std::size_t i=0;i<count;++i) {
         const auto& draw=instanceDraw(i);
-        const ObjectUniform object{draw.model,draw.normal,{draw.color.x,draw.color.y,draw.color.z,draw.opacity},{draw.receivesShadow ? 1.0f : 0.0f,0,0,0}};
+        const ObjectUniform object{draw.model,draw.normal,{draw.color.x,draw.color.y,draw.color.z,draw.opacity},{draw.receivesShadow ? 1.0f : 0.0f,draw.layer==RenderLayer::World&&draw.material.shader==MaterialShader::Water&&draw.material.water.usesSceneInputs() ? 1.0f : 0.0f,draw.layer==RenderLayer::World&&draw.material.shader==MaterialShader::Water ? 1.0f : 0.0f,draw.layer==RenderLayer::World ? (draw.blend==BlendMode::Additive ? 2.0f : 1.0f) : 0.0f}};
         const auto offset=i*objectStride;
         const bool changed=i>=previousCount || std::memcmp(objects_.data()+offset,&object,sizeof(object));
         if(changed) std::memcpy(objects_.data()+offset,&object,sizeof(object));

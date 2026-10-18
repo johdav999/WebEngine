@@ -17,7 +17,7 @@ public:
     struct Record { const SoundAsset* sound;AudioPlayOptions options;float gain;Vec3 position; };
     std::map<std::uint32_t,Record> records;
     AudioListenerPose pose;
-    bool running=true,fail=false,throwStart=false;
+    bool running=true,fail=false,throwStart=false,failRate=false;
     std::size_t stops=0;
     bool start(std::uint32_t id,const SoundAsset& sound,const AudioPlayOptions& o,float g) override {
         if(throwStart) throw std::runtime_error("device failure");
@@ -27,6 +27,9 @@ public:
     void stop(std::uint32_t id) noexcept override { records.erase(id);++stops; }
     bool playing(std::uint32_t id) const noexcept override { return records.contains(id); }
     void gain(std::uint32_t id,float g) noexcept override { if(records.contains(id)) records.at(id).gain=g; }
+    bool playbackRate(std::uint32_t id,float value) noexcept override {
+        if(failRate||!records.contains(id)) return false;records.at(id).options.playbackRate=value;return true;
+    }
     void position(std::uint32_t id,Vec3 p) noexcept override { if(records.contains(id)) records.at(id).position=p; }
     void listener(const AudioListenerPose& p) noexcept override { pose=p; }
     bool active() const noexcept override { return running; }
@@ -47,7 +50,7 @@ void assetsAndVoices() {
     check(!audio.play(s),"Voice budget was exceeded");
     AudioSystem other(std::make_unique<Device>());check(!other.stop(v),"Foreign voice resolved");
     audio.stop(v);check(!audio.stop(v)&&audio.isPlaying(w),"Stopping one voice affected another");
-    d.records.erase(w.value);check(!audio.isPlaying(w),"Natural completion did not resolve");audio.update(0);
+    d.records.erase(w.value);check(!audio.setVoicePlaybackRate(w,2),"Completed backend voice accepted rate");check(!audio.isPlaying(w),"Natural completion did not resolve");audio.update(0);
     check(audio.voiceCount()==0,"Completed voice retained state");
     d.fail=true;check(!audio.play(s)&&audio.voiceCount()==0,"Failed voice published partial state");d.fail=false;
     d.throwStart=true;try { audio.play(s); } catch(const std::runtime_error&) {}
@@ -55,6 +58,16 @@ void assetsAndVoices() {
     AudioPlayOptions o;o.loop=true;o.offsetSeconds=0.25;
     auto loop=audio.play(s,o);check(d.records.at(loop.value).options.loop,"Loop setting was lost");
     near(float(d.records.at(loop.value).options.offsetSeconds),0.25f);
+    near(audio.voicePlaybackRate(loop),1);check(audio.setVoicePlaybackRate(loop,2),"Rate control failed");
+    near(d.records.at(loop.value).options.playbackRate,2);
+    d.failRate=true;check(!audio.setVoicePlaybackRate(loop,3),"Backend rejection lost");near(audio.voicePlaybackRate(loop),2);d.failRate=false;
+    for(float bad: {0.f,-1.f,0.124f,8.01f,std::numeric_limits<float>::infinity(),std::numeric_limits<float>::quiet_NaN()}) {
+        invalid([&]{audio.setVoicePlaybackRate(loop,bad);});o.playbackRate=bad;invalid([&]{audio.play(s,o);});
+    }
+    near(audio.voicePlaybackRate(loop),2);o.playbackRate=0.125f;auto slow=audio.play(s,o);check(bool(slow),"Minimum rate rejected");audio.stop(slow);
+    check(!other.setVoicePlaybackRate(loop,1),"Foreign rate changed");near(other.voicePlaybackRate(loop),0);
+    d.running=false;check(audio.setVoicePlaybackRate(loop,8),"Suspended rate rejected");near(audio.voicePlaybackRate(loop),8);d.running=true;
+    o.playbackRate=1;
     o.offsetSeconds=1;invalid([&]{audio.play(s,o);});
     o.offsetSeconds=0;o.referenceDistance=0;invalid([&]{audio.play(s,o);});
     auto weak=std::weak_ptr<const SoundAsset>(s);s.reset();check(!weak.expired(),"Active voice lost shared resource");

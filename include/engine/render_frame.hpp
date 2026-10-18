@@ -48,7 +48,7 @@ private:
     std::vector<LodState> cameraLevels_;
     std::array<ShadowState,4> shadows_;
     std::size_t cameraLodParts_=0,shadowLodParts_=0,shadowCulledParts_=0;
-    std::size_t chooseLod(const MeshDraw& draw,LodState& state,const DetailView* detail);
+    std::size_t chooseLod(const MeshDraw& draw,LodState& state,const DetailView* detail,bool shadow=false);
     std::vector<std::uint32_t> instanceSources_;
     std::array<std::vector<InstanceBatch>,static_cast<std::size_t>(RenderLayer::Count)> batches_;
     std::array<std::vector<InstanceBatch>,static_cast<std::size_t>(RenderLayer::Count)> cameraBatches_;

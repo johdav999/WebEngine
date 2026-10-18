@@ -26,6 +26,16 @@ struct Frustum {
     bool intersectsAabb(Vec3 minimum,Vec3 maximum) const;
     bool intersectsTransformedAabb(Vec3 minimum,Vec3 maximum,const Mat4& model) const;
 };
+// Authored composition data only. CameraFollowRig is an explicit application-owned writer.
+struct CameraFollowSettings {
+    bool enabled=false,presentationPose=true,localOffset=true,collision=true;
+    std::string target; // Scene-local saved actor/component identity; empty is unbound.
+    Vec3 focusOffset{0,1,0},offset{0,3,-8};
+    float lookAheadSeconds=.3f,maxLookAhead=4,positionHalfLife=.12f,rotationHalfLife=.1f;
+    float collisionRadius=.3f,clearance=.05f;
+    std::uint16_t layers=0xffff;
+    void validate() const;
+};
 class CameraComponent : public Component {
 public:
     explicit CameraComponent(std::string name = "Node");
@@ -43,6 +53,8 @@ public:
     PixelViewport pixelViewport(float targetWidth,float targetHeight) const;
     void setVisibilityMask(std::uint32_t mask);
     std::uint32_t visibilityMask() const { return visibilityMask_; }
+    const CameraFollowSettings& follow() const { return follow_; }
+    void setFollow(CameraFollowSettings settings);
     bool active() const; // Includes inherited enabled state.
     std::uint64_t revision() const; // Refreshes direct lens/transform/ancestor changes.
     const Mat4& view() const;
@@ -63,6 +75,7 @@ public:
 private:
     void synchronize() const;
     void invalidateProjection();
+    CameraFollowSettings follow_;
     ProjectionMode projectionMode_=ProjectionMode::Perspective;
     float orthographicHeight_=10;
     Viewport viewport_;

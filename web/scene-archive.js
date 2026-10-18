@@ -2,7 +2,7 @@
 (() => {
   const $=id=>document.getElementById(id),maxBytes=512*1024*1024;
   const encoder=new TextEncoder(),decoder=new TextDecoder('utf-8',{fatal:true});
-  const demoControls='#physics-panel button,#physics-panel input,#ship-stress-form button,#ship-stress-form input,#camera-layout,#sun,#point,#import-fbx,#restore-demo,#apply-texture,#skeletal-demo,#material-showcase,#material-return,#fx-panel button,#fx-panel input,#fx-panel select';
+  const demoControls='#water-open,#water-return,#water-preset,#water-view,#water-interactions,#physics-panel button,#physics-panel input,#ship-stress-form button,#ship-stress-form input,#camera-layout,#sun,#point,#import-fbx,#restore-demo,#apply-texture,#skeletal-demo,#material-showcase,#material-return,#fx-panel button,#fx-panel input,#fx-panel select';
   let busy=false,checkpointBusy=false,capturing=false,opened=false,playgroundPause=false,playgroundAudio=null;
   const progressStorage=new window.EngineStorage.IndexedDBStorage({namespace:'playground'});
   const playgroundTree=document.querySelector('.tree'),savedTree=document.createElement('ul');
@@ -59,7 +59,7 @@
     Module._engine_archive_snapshot();
     const track=window.EngineAudio?.archiveData();
     const audio=track?.bytes.length?{name:track.name,position:track.position,state:track.state}:null;
-    const json=encoder.encode(JSON.stringify({format:'WebEnginePlayground',version:1,orbit:window.engineArchiveOrbit,audio}));
+    const json=encoder.encode(JSON.stringify({format:'WebEnginePlayground',version:1,orbit:window.engineArchiveOrbit,audio,editor:window.EngineEditorContent?.metadata?.()||null}));
     const result=new Uint8Array(4+json.length+(audio?track.bytes.length:0));
     new DataView(result.buffer).setUint32(0,json.length,true);result.set(json,4);
     if(audio) result.set(track.bytes,4+json.length);
@@ -97,6 +97,7 @@
       busy=true;capturing=!download;refresh();
       const data=assets?new Uint8Array(0):metadata();
       if(withBytes(data,(pointer,count)=>Module._engine_archive_save(Number(assets),pointer,count))!==1) throw new Error($('archive-status').textContent);
+      if(!assets&&download) Module._engine_editor_saved?.();
       return window.__lastArchive.slice();
     } catch(error) { window.engineArchiveMessage(error.message||String(error),true); }
     finally { busy=false;capturing=false;window.engineStatus($('status').textContent,false);refresh(); }
@@ -127,6 +128,7 @@
       committed=true;
       if(!assets) {
         window.EngineAudio.commitArchive(audio);
+        window.EngineEditorContent?.restoreMetadata?.(data.editor);
         if(data.audio?.state==='playing') window.engineArchiveMessage('Scene opened. Press Play to resume saved audio.');
       }
       document.body.dataset.archiveFile=file.name;return true;

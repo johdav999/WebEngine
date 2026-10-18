@@ -1,4 +1,7 @@
+#include "engine/route.hpp"
 #include "engine/scene_archive.hpp"
+#include "engine/decal.hpp"
+#include "engine/vehicle_component.hpp"
 #include "engine/persistence.hpp"
 #include "engine/skeletal_mesh_component.hpp"
 #include "engine/physics.hpp"
@@ -27,7 +30,7 @@ std::uint32_t checksum(std::span<const std::byte> bytes) {
     for(auto byte:bytes) crc=(crc>>8)^table[(crc^std::to_integer<unsigned char>(byte))&255];
     return ~crc;
 }
-enum class Kind : std::uint32_t { Node,Scene,Actor,Component,Mesh,SkeletalMesh,Camera,Light,Skeleton,Animation,Emitter,Effect,Collider,Body,Motor,Interaction,Custom };
+enum class Kind : std::uint32_t { Node,Scene,Actor,Component,Mesh,SkeletalMesh,Camera,Light,Skeleton,Animation,Emitter,Effect,Collider,Body,Motor,Interaction,Custom,Terrain,Decal,Vehicle,Route };
 }
 
 // Field-by-field little-endian encoding; no struct padding, pointers, size_t ABI
@@ -37,7 +40,9 @@ public:
     explicit ArchiveCodec(const ArchiveLimits& limits):limits(limits) {}
     ArchiveCodec(std::span<const std::byte> input,const ArchiveLimits& limits):reading(true),input(input),limits(limits) {}
     bool reading=false;
-    std::uint32_t version=4;
+    std::uint32_t collisionDepth=0;
+    bool referencesOnly=false; // In-memory duplication transport; never a persisted format.
+    std::uint32_t version=27;
     std::span<const std::byte> input;
     std::vector<std::byte> output;
     ArchiveLimits limits;
@@ -127,6 +132,7 @@ public:
                 id=static_cast<std::uint32_t>(resourceIds.size()+1);resourceIds.emplace(value.get(),id);fresh=true;
             }
         }
+        if(referencesOnly&&!reading&&fresh) { resources.push_back({typeid(T),value});fresh=false; }
         io(id);if(!id) { if(reading) value.reset();return; }io(fresh);
         if(reading) {
             if(fresh) {
@@ -142,25 +148,58 @@ public:
         } else if(fresh) writeResource(*value);
     }
     template<class T> std::shared_ptr<const T> readResource() {
-        if constexpr(std::is_same_v<T,CollisionShape>) {
+        if constexpr(std::is_same_v<T,SplineAsset>) {
+            SplineData data;io(data);allocation((data.points.size()*(std::size_t(data.samplesPerSegment)+1))*sizeof(double));return SplineAsset::create(std::move(data));
+        } else if constexpr(std::is_same_v<T,SweepProfile>) {
+            SweepProfileData data;boundedSource(data.points,32);fields(data.closed,data.material,data.surface);return SweepProfile::create(std::move(data));
+        } else if constexpr(std::is_same_v<T,RouteAsset>) {
+            RouteData data;fields(data.spline,data.profile,data.spacing,data.textureMeters,data.collision,data.maxRings);data.validate();allocation(data.derivedBytes());return RouteAsset::create(std::move(data));
+        } else if constexpr(std::is_same_v<T,TerrainAsset>) {
+            TerrainData data;io(data);bool eager=true;if(version>=14) io(eager);
+            std::optional<TerrainPatch> patch;if(version>=15) io(patch);
+            if(eager) allocation(data.derivedBytes());
+            return patch ? TerrainAsset::createPatch(std::move(data),*patch,eager) : TerrainAsset::create(std::move(data),eager);
+        } else if constexpr(std::is_same_v<T,CollisionShape>) {
+            struct Depth {std::uint32_t& n;explicit Depth(std::uint32_t& value):n(value){if(++n>9)throw std::invalid_argument("Collision resource depth exceeds 9");}~Depth(){--n;}} depth(collisionDepth);
             CollisionShapeType type{};Vec3 dimensions;std::vector<Vec3> vertices;std::vector<std::uint32_t> indices;
-            fields(type,dimensions,vertices,indices);
-            switch(type) {
-                case CollisionShapeType::Box:return CollisionShape::box(dimensions);
-                case CollisionShapeType::Sphere:return CollisionShape::sphere(dimensions.x);
-                case CollisionShapeType::Capsule:return CollisionShape::capsule(dimensions.y,dimensions.x);
-                case CollisionShapeType::ConvexHull:return CollisionShape::convexHull(vertices);
-                case CollisionShapeType::TriangleMesh:return CollisionShape::triangleMesh(vertices,indices);
+            fields(type,dimensions,vertices,indices);std::shared_ptr<const PhysicalSurface> surface;std::vector<std::shared_ptr<const PhysicalSurface>> triangles;std::vector<CompoundChild> children;
+            if(version>=25)fields(surface,triangles,children);
+            std::shared_ptr<const CollisionShape> result;
+            switch(type){
+                case CollisionShapeType::Box:result=CollisionShape::box(dimensions);break;
+                case CollisionShapeType::Sphere:result=CollisionShape::sphere(dimensions.x);break;
+                case CollisionShapeType::Capsule:result=CollisionShape::capsule(dimensions.y,dimensions.x);break;
+                case CollisionShapeType::ConvexHull:result=CollisionShape::convexHull(vertices);break;
+                case CollisionShapeType::TriangleMesh:result=CollisionShape::triangleMesh(vertices,indices);break;
+                case CollisionShapeType::Compound:require(version>=25,"Invalid compound version");result=CollisionShape::compound(children);break;
             }
+            if(result){require(type==CollisionShapeType::Compound||children.empty(),"Children on a noncompound shape");return result->withSurfaces(std::move(surface),std::move(triangles));}
             invalid("Unknown collision shape type");
         } else { auto value=std::make_shared<T>();io(*value);return value; }
     }
     template<class T> void writeResource(const T& value) {
-        if constexpr(std::is_same_v<T,CollisionShape>) {
+        if constexpr(std::is_same_v<T,SplineAsset>) {
+            auto data=value.data();io(data);
+        } else if constexpr(std::is_same_v<T,SweepProfile>) {
+            auto data=value.data();boundedSource(data.points,32);fields(data.closed,data.material,data.surface);
+        } else if constexpr(std::is_same_v<T,RouteAsset>) {
+            auto data=value.data();fields(data.spline,data.profile,data.spacing,data.textureMeters,data.collision,data.maxRings);
+        } else if constexpr(std::is_same_v<T,TerrainAsset>) {
+            io(const_cast<TerrainData&>(value.data()));if(version>=14) {bool eager=value.eager();io(eager);}if(version>=15) {auto patch=value.patch();io(patch);}
+        } else if constexpr(std::is_same_v<T,CollisionShape>) {
             auto type=value.type();auto dimensions=value.halfExtents();io(type);io(dimensions);
             io(const_cast<std::vector<Vec3>&>(value.vertices()));io(const_cast<std::vector<std::uint32_t>&>(value.indices()));
+            if(version>=25){auto surface=value.surface();auto triangles=value.triangleSurfaces();auto children=value.children();fields(surface,triangles,children);}
         } else io(const_cast<T&>(value));
     }
+    template<class T>void boundedSource(std::vector<T>& values,unsigned maximum){
+        unsigned count=values.size();io(count);require(count<=maximum&&count<=limits.maxElements,"Spline/profile source limit exceeded");if(reading){allocation(std::size_t(count)*sizeof(T));values.resize(count);}for(auto& value:values)io(value);
+    }
+    void io(SplinePoint& p){fields(p.position,p.tangent,p.bank);}
+    void io(SplineData& d){boundedSource(d.points,256);fields(d.closed,d.samplesPerSegment);d.validate();}
+    void io(PhysicalSurface& v){fields(v.id,v.friction,v.restitution,v.tyreGrip,v.rollingResistance);v.validate();}
+    void io(CompoundChild& v){fields(v.shape,v.transform,v.surface);require(bool(v.shape),"Missing compound child shape");}
+    void io(std::vector<CompoundChild>& children){std::uint32_t count=children.size();io(count);require(count<=32,"Compound child budget exceeded");if(reading){allocation(count*sizeof(CompoundChild));children.resize(count);}for(auto& c:children)io(c);}
     void io(Vec2& v) { fields(v.x,v.y); }
     void io(Vec3& v) { fields(v.x,v.y,v.z); }
     void io(Mat4& v) { io(v.m); }
@@ -186,6 +225,16 @@ public:
     void io(AnimationEvent& v) { index(v.clip);index(v.marker);fields(v.name,v.payload,v.time,v.weight); }
     void io(Skeleton& v) { fields(v.joints,v.bindings,v.clips);v.validate(); }
     void io(Vertex& v) { fields(v.position,v.normal,v.uv,v.tangent); }
+    void io(TerrainPatch& v) {fields(v.x,v.z,v.cellsX,v.cellsZ,v.offsetX,v.offsetZ,v.page);}
+    void io(TerrainData& v) {
+        fields(v.samplesX,v.samplesZ,v.chunkCells,v.spacing,v.textureMeters,v.heights,v.material);
+        if(version>=12) fields(v.lodLevels,v.lodPixels);else if(reading) v.lodLevels=0;
+        if(version>=25)fields(v.physicalSurface,v.cellSurfaces);
+        v.validate();
+    }
+    void io(MaterialLayer& v) {fields(v.texture,v.color,v.roughness,v.uvScale,v.uvOffset);if(version>=23)fields(v.normalHeightTexture,v.normalScale,v.heightScale,v.heightBias);}
+    void io(MaterialLayers& v) {fields(v.enabled,v.layers,v.weights,v.weightScale,v.weightOffset);if(version>=23)fields(v.heightBlend,v.triplanar,v.triplanarScale,v.triplanarSharpness);v.validate();}
+    void io(MeshLodPolicy& v) {fields(v.cameraScale,v.shadowScale,v.cameraLevel,v.shadowLevel);v.validate();}
     void io(SkinVertex& v) { fields(v.joints,v.weights); }
     void io(MeshPart& v) { fields(v.firstIndex,v.indexCount,v.materialIndex); }
     void io(MorphTarget& v) { fields(v.name,v.positions,v.normals,v.tangents,v.defaultWeight); }
@@ -194,13 +243,24 @@ public:
         require(v.width&&v.height&&v.width<=4096&&v.height<=4096&&v.pixels.size()==std::uint64_t(v.width)*v.height*4,"Invalid archive texture dimensions");
         require(v.wrapU<=TextureWrap::Clamp&&v.wrapV<=TextureWrap::Clamp,"Invalid archive texture wrap");
     }
+    void io(WaterSettings& v) {
+        fields(v.amplitude,v.wavelength,v.speed,v.steepness,v.direction,v.rippleScale,v.rippleStrength,v.reflectionStrength,v.horizon,v.zenith);
+        if(version>=8) fields(v.refractionStrength,v.refractionDistortion,v.foamStrength,v.foamWidth,v.absorption,v.foamScale,v.foamColor);if(version>=9) fields(v.planarReflectionStrength);
+        if(version>=11) fields(v.underwaterStrength,v.underwaterFogDensity,v.underwaterMaxDistance,v.underwaterColor);
+        if(version>=13) fields(v.causticsStrength,v.causticsScale,v.causticsSpeed,v.causticsDepth);
+        v.validate();
+    }
     void io(Material& v) {
         fields(v.name,v.baseColor,v.baseColorTexture,v.texturePath,v.opacity,v.roughness,v.metallic,v.normalScale,v.occlusionStrength,v.emissive,
-            v.metallicRoughnessTexture,v.normalTexture,v.occlusionTexture,v.emissiveTexture,v.alphaMode,v.alphaCutoff,v.doubleSided,v.shader,v.uvScale,v.uvOffset);v.validate();
+            v.metallicRoughnessTexture,v.normalTexture,v.occlusionTexture,v.emissiveTexture,v.alphaMode,v.alphaCutoff,v.doubleSided,v.shader,v.uvScale,v.uvOffset);
+        if(version>=7) io(v.water);else require(v.shader<=MaterialShader::Unlit,"Invalid legacy material shader");
+        if(version>=12) io(v.layers);v.validate();
     }
     void io(MaterialInstance& v) {
         fields(v.material,v.tint,v.opacity,v.uvScale,v.uvOffset,v.roughness,v.metallic,v.normalScale,v.occlusionStrength,v.alphaCutoff,v.emissive,
-            v.alphaMode,v.doubleSided,v.shader,v.baseColorTexture,v.metallicRoughnessTexture,v.normalTexture,v.occlusionTexture,v.emissiveTexture);v.resolve().validate();
+            v.alphaMode,v.doubleSided,v.shader,v.baseColorTexture,v.metallicRoughnessTexture,v.normalTexture,v.occlusionTexture,v.emissiveTexture);
+        if(version>=7) io(v.water);else require(!v.shader||*v.shader<=MaterialShader::Unlit,"Invalid legacy material override");
+        if(version>=12) io(v.layers);v.resolve().validate();
     }
     void io(Mesh& v) {
         fields(v.vertices,v.morphTargets,v.skin,v.skeleton,v.indices,v.materials,v.parts,v.warnings);
@@ -224,28 +284,50 @@ public:
     void io(Environment& v) { fields(v.name,v.specular,v.diffuse,v.lutSize,v.brdf);v.validate(); }
     void io(Color4& v) { fields(v.r,v.g,v.b,v.a); }
     void io(SizeKey& v) { fields(v.time,v.value); }
+    void io(VectorKey& v) { fields(v.time,v.value); }
     void io(ColorKey& v) { fields(v.time,v.value); }
     void io(ParticleBurst& v) { fields(v.time,v.count); }
     void io(Flipbook& v) { fields(v.columns,v.rows,v.frames,v.cycles); }
     void io(ParticleEmitterDefinition& v) {
         fields(v.name,v.texture,v.blend,v.space,v.maxParticles,v.seed,v.spawnRate,v.duration,v.looping,v.lifetimeMin,v.lifetimeMax,
-            v.positionMin,v.positionMax,v.velocityMin,v.velocityMax,v.gravity,v.rotationMin,v.rotationMax,v.angularVelocity,v.bursts,v.size,v.color,v.flipbook);v.validate();
+            v.positionMin,v.positionMax,v.velocityMin,v.velocityMax,v.gravity,v.rotationMin,v.rotationMax,v.angularVelocity,v.bursts,v.size,v.color,v.flipbook);
+        if(version>=17) fields(v.shape,v.radius,v.coneAngle,v.speedMin,v.speedMax,v.surfaceOnly,v.emissionMesh,
+            v.drag,v.wind,v.turbulence,v.turbulenceFrequency,v.velocityOverLife,v.forceOverLife,v.alignment,v.stretch,v.softDistance);
+        if(version>=18) io(v.startDelay);
+        if(version>=19)fields(v.renderMode,v.trailMaxPoints,v.trailLifetime,v.trailMinDistance,v.trailBreakDistance,v.trailTextureLength);
+        if(version>=20)fields(v.planeNormal,v.surfaceOffset);
+        if(version>=21)fields(v.particleMesh,v.meshRotationMin,v.meshRotationMax,v.meshAngularVelocity,v.meshTextureOverride);
+        if(version>=22){auto& c=v.collision;fields(c.enabled,c.response,c.radius,c.restitution,c.friction,c.settleSpeed,c.layers,c.maxQueries,c.maxImpacts,c.excludeOwner);}
+        v.validate();
     }
     void io(EffectEmitter& v) { fields(v.definition,v.transform); }
     void io(EffectAsset& v) { fields(v.name,v.emitters);v.validate(); }
-    void io(Particle& v) { fields(v.position,v.velocity,v.age,v.lifetime,v.rotation,v.sizeScale);require(v.age>=0&&v.lifetime>v.age&&v.sizeScale>=0,"Invalid saved particle"); }
+    void io(TrailPoint& v){fields(v.position,v.birth,v.distance,v.scale,v.breakBefore);require(v.birth>=0&&v.distance>=0&&v.scale>=0,"Invalid trail point");}
+    void io(Particle& v) { fields(v.position,v.velocity,v.age,v.lifetime,v.rotation,v.sizeScale);if(version>=17) io(v.turbulencePhase);if(version>=20){io(v.planeNormal);require(dot(v.planeNormal,v.planeNormal)>.5f&&dot(v.planeNormal,v.planeNormal)<1.5f,"Invalid particle plane normal");}if(version>=21){fields(v.meshRotation,v.meshBasis);require(v.meshBasis.m[3]==0&&v.meshBasis.m[7]==0&&v.meshBasis.m[11]==0&&v.meshBasis.m[15]==1&&v.meshBasis.m[12]==0&&v.meshBasis.m[13]==0&&v.meshBasis.m[14]==0,"Invalid mesh particle birth basis");}if(version>=22)io(v.settled);require(v.age>=0&&v.lifetime>v.age&&v.sizeScale>=0,"Invalid saved particle"); }
     void io(BoneUniform& v) { fields(v.transform,v.normal); }
     void io(ShadowSettings& v) { fields(v.enabled,v.center,v.halfExtent,v.halfDepth,v.depthBias,v.normalBias);v.validate(); }
     void io(RigidBodySettings& v) {
         fields(v.motion,v.mass,v.friction,v.restitution,v.gravityFactor,v.linearDamping,v.angularDamping,v.collisionLayer,v.continuousCollision);
         if(version>=2) io(v.isSensor);else if(reading) v.isSensor=false;
+        if(version>=24)fields(v.centerOfMassOffset,v.inertiaScale);
         v.validate();
     }
+    void io(VehicleWheelSettings& w) {fields(w.position,w.radius,w.width,w.suspensionMin,w.suspensionMax,w.suspensionFrequency,w.suspensionDamping,w.maxSteerAngle,w.brakeTorque,w.handBrakeTorque,w.friction);}
+    void io(VehicleDefinition& v) {fields(v.wheels,v.engineTorque,v.minRPM,v.maxRPM,v.forwardRatios,v.reverseRatio,v.differentialRatio,v.frontTorqueFraction,v.shiftUpRPM,v.shiftDownRPM,v.antiRollStiffness);v.validate();}
     void io(CharacterMotorSettings& v) {
         fields(v.collisionAware,v.radius,v.halfHeight,v.maxSlopeAngle,v.stepHeight,v.groundSnapDistance,
             v.jumpSpeed,v.gravity,v.padding,v.maxPushForce,v.mass,v.collisionLayer);v.validate();
     }
-    void io(AssetLibrary& v) { fields(v.meshes,v.materials,v.textures,v.skeletons,v.environments,v.emitters,v.effects,v.collisionShapes); }
+    void io(AssetLibrary& v) { fields(v.meshes,v.materials,v.textures,v.skeletons,v.environments,v.emitters,v.effects,v.collisionShapes);if(version>=10) io(v.terrains);if(version>=25)io(v.physicalSurfaces); }
+    void io(FogSettings& v) { fields(v.color,v.density,v.startDistance,v.baseHeight,v.heightFalloff);v.validate(); }
+    void io(SkyBackground& v) {
+        fields(v.mode,v.panorama,v.horizon,v.zenith,v.nadir,v.rotation,v.brightness);
+        if(version>=6) fields(v.geometry,v.clouds.enabled,v.clouds.coverage,v.clouds.density,v.clouds.scale,
+            v.clouds.wind,v.clouds.offset,v.atmosphere.sunDirection,v.atmosphere.solarIntensity,v.atmosphere.rayleigh,
+            v.atmosphere.mie,v.atmosphere.anisotropy,v.atmosphere.altitude,v.dayNight.enabled,v.dayNight.running,
+            v.dayNight.hour,v.dayNight.daySeconds,v.dayNight.azimuth,v.dayNight.sunIntensity,v.dayNight.moonIntensity);
+        v.validate();
+    }
 
     Kind kind(const Node& node) {
         const auto& t=typeid(node);
@@ -254,6 +336,8 @@ public:
         if(t==typeid(Actor)) return Kind::Actor;
         if(t==typeid(Component)) return Kind::Component;
         if(t==typeid(MeshComponent)) return Kind::Mesh;
+        if(t==typeid(RouteComponent)) return Kind::Route;
+        if(t==typeid(TerrainComponent)) return Kind::Terrain;
         if(t==typeid(SkeletalMeshComponent)) return Kind::SkeletalMesh;
         if(t==typeid(CameraComponent)) return Kind::Camera;
         if(t==typeid(LightComponent)) return Kind::Light;
@@ -261,15 +345,35 @@ public:
         if(t==typeid(AnimationComponent)) return Kind::Animation;
         if(t==typeid(ParticleEmitterComponent)) return Kind::Emitter;
         if(t==typeid(EffectComponent)) return Kind::Effect;
+        if(t==typeid(DecalComponent)) return Kind::Decal;
         if(t==typeid(ColliderComponent)) return Kind::Collider;
+        if(t==typeid(VehicleComponent)) return Kind::Vehicle;
         if(t==typeid(RigidBodyComponent)) return Kind::Body;
         if(t==typeid(InteractionComponent)) return Kind::Interaction;
         if(t==typeid(CharacterMotorComponent)) return Kind::Motor;
         if(dynamic_cast<const Component*>(&node)&&customType(t)) return Kind::Custom;
         invalid("Custom node types require an application serializer; refusing to lose their behavior");
     }
+    static std::unique_ptr<Node> duplicate(const Node& source,const ArchiveLimits& limits) {
+        source.requireIdle();
+        require(!dynamic_cast<const Scene*>(&source)&&!source.isProtectedChild(),"Cannot duplicate a scene root or protected implementation child");
+        Node::TraversalGuard guard(*const_cast<Node*>(&source));
+        ArchiveCodec writer(limits);writer.referencesOnly=true;
+        writer.indexNodes(source);writer.writeNode(*const_cast<Node*>(&source));
+        ArchiveCodec reader(writer.output,limits);reader.resources=writer.resources;
+        auto clone=reader.readNode();
+        require(reader.offset==reader.input.size(),"Unexpected duplication data");
+        std::unordered_map<std::string,std::string> remapped;
+        for(auto* node:reader.nodes) {Node identity;remapped.emplace(node->savedId_,identity.savedId());node->savedId_=identity.savedId();}
+        for(auto* node:reader.nodes)if(auto* v=dynamic_cast<VehicleComponent*>(node)){auto ids=v->visuals();for(auto& id:ids)if(!id.empty()){const auto found=remapped.find(id);require(found!=remapped.end(),"Wheel reference outside duplicated subtree");id=found->second;}v->setVisuals(std::move(ids));}
+        for(auto* node:reader.nodes)if(auto* camera=dynamic_cast<CameraComponent*>(node)){auto follow=camera->follow();if(auto found=remapped.find(follow.target);found!=remapped.end())follow.target=found->second;camera->setFollow(std::move(follow));}
+        return clone;
+    }
     void emitterCapacity(const ParticleEmitterDefinition& definition) {
+        if(definition.renderMode==ParticleRenderMode::Ribbon)allocation(std::size_t(definition.trailMaxPoints)*sizeof(TrailPoint));
         allocation(std::size_t(definition.maxParticles)*(sizeof(Particle)+sizeof(double)));
+        if(definition.shape==ParticleShape::MeshSurface)
+            allocation(definition.emissionMesh->indices.size()/3*sizeof(double));
     }
     void skeletonCapacity(const std::shared_ptr<const Skeleton>& skeleton) {
         if(skeleton) allocation(skeleton->joints.size()*(sizeof(Mat4)+sizeof(JointPose))+skeleton->bindings.size()*sizeof(BoneUniform)*2);
@@ -302,6 +406,8 @@ public:
         if(!reading&&v.mesh) for(std::size_t i=0;i<v.mesh->morphTargets.size();++i) weights.push_back(v.morphWeight(i));
         io(weights);require(weights.size()==(v.mesh ? v.mesh->morphTargets.size() : 0),"Morph weight count mismatch");
         if(reading) for(std::size_t i=0;i<weights.size();++i) v.setMorphWeight(i,weights[i]);
+        if(version>=12) io(v.lodPolicy);
+        if(version>=22) io(v.receivesDecals);
     }
     void index(std::size_t& value) {
         std::uint64_t encoded=value;io(encoded);require(encoded<=std::numeric_limits<std::size_t>::max(),"Archive index overflow");if(reading) value=static_cast<std::size_t>(encoded);
@@ -347,6 +453,13 @@ public:
         fields(v.burstCycle_,v.dropped_,v.random_,v.emitting_,v.paused_);
         index(v.burstIndex_);
         require(v.time_>=0&&rate>=0&&v.burstIndex_<=v.definition_->bursts.size()&&v.particles_.size()<=v.definition_->maxParticles&&v.deaths_.size()<=v.definition_->maxParticles,"Invalid emitter playback state");
+        if(version>=19){
+            fields(v.trail_,v.trailSource_,v.trailCarry_,v.trailDistance_,v.trailSourceValid_);index(v.trailHead_);index(v.trailCount_);
+            require(v.trail_.size()==(v.definition_->renderMode==ParticleRenderMode::Ribbon?v.definition_->trailMaxPoints:0)
+                &&v.trailCount_<=v.trail_.size()&&(v.trail_.empty()?v.trailHead_==0:v.trailHead_<v.trail_.size())
+                &&v.trailCarry_>=0&&v.trailCarry_<v.definition_->trailMinDistance&&v.trailDistance_>=0,"Invalid saved trail ring");
+            for(std::size_t i=0;i<v.trailCount_;++i){const auto& p=v.trailPoint(i);require(p.birth<=v.time_&&(i==0||v.trailPoint(i-1).birth<=p.birth),"Invalid trail chronology");}
+        }
         require(std::is_heap(v.deaths_.begin(),v.deaths_.end(),std::greater<double>{}),"Invalid particle death heap");
     }
     void sceneState(Scene& v) {
@@ -380,8 +493,19 @@ public:
         std::shared_ptr<const ParticleEmitterDefinition> emitter;
         std::shared_ptr<const EffectAsset> effect;
         std::shared_ptr<const CollisionShape> shape;
+        std::shared_ptr<const TerrainAsset> terrain;
         std::uint32_t target=0;
         switch(type) {
+            case Kind::Route: {
+                require(version>=27&&!existing,"Invalid route component record");std::shared_ptr<const RouteAsset> asset;io(asset);require(bool(asset),"Missing route asset");result=std::make_unique<RouteComponent>("",std::move(asset));break;
+            }
+            case Kind::Terrain: {
+                require(version>=10&&!existing,"Invalid terrain component record");
+                std::uint32_t chunk=0;fields(terrain,chunk);
+                require(terrain&&chunk<terrain->chunkCount(),"Invalid terrain chunk reference");
+                if(!terrain->eager()) allocation(terrain->data().chunkDerivedBytes());
+                result=std::make_unique<TerrainComponent>("",terrain,chunk);break;
+            }
             case Kind::Custom: {
                 require(version>=4&&!existing&&!protectedChild,"Invalid custom component record");
                 std::string key;std::uint32_t schema=0;std::vector<std::byte> data;
@@ -403,6 +527,7 @@ public:
                     if(type==Kind::Mesh) result=std::make_unique<MeshComponent>("",mesh);
                     else result=std::make_unique<SkeletalMeshComponent>("",mesh);
                 } break;
+            case Kind::Decal:require(version>=22,"Invalid decal version");if(!existing)result=std::make_unique<DecalComponent>();break;
             case Kind::Camera:if(!existing) result=std::make_unique<CameraComponent>();break;
             case Kind::Light:if(!existing) result=std::make_unique<LightComponent>("",LightType::Directional);break;
             case Kind::Skeleton:io(skeleton);if(!existing) skeletonCapacity(skeleton);if(!existing) result=std::make_unique<SkeletonComponent>();break;
@@ -412,7 +537,8 @@ public:
                 break;
             case Kind::Emitter:io(emitter);require(emitter!=nullptr,"Missing emitter asset");if(!existing) emitterCapacity(*emitter);if(!existing) result=std::make_unique<ParticleEmitterComponent>("",emitter);break;
             case Kind::Effect:io(effect);require(effect!=nullptr,"Missing effect asset");if(!existing) for(const auto& entry:effect->emitters) emitterCapacity(*entry.definition);if(!existing) result=std::make_unique<EffectComponent>("",effect);break;
-            case Kind::Collider:io(shape);require(shape!=nullptr,"Missing collision shape");if(!existing) result=std::make_unique<ColliderComponent>("",shape);break;
+            case Kind::Collider:if(existing&&dynamic_cast<RouteComponent*>(existing->parent()))shape=static_cast<ColliderComponent*>(existing)->shape();else io(shape);require(shape!=nullptr,"Missing collision shape");if(!existing) result=std::make_unique<ColliderComponent>("",shape);break;
+            case Kind::Vehicle:require(version>=24,"Invalid vehicle version");if(!existing)result=std::make_unique<VehicleComponent>();break;
             case Kind::Body:if(!existing) result=std::make_unique<RigidBodyComponent>();break;
             case Kind::Interaction:if(!existing) result=std::make_unique<InteractionComponent>();break;
             case Kind::Motor:if(!existing) result=std::make_unique<CharacterMotorComponent>();break;
@@ -431,6 +557,8 @@ public:
             if(i<required) readNode(node.children()[i].get(),depth+1);
             else node.adoptChild(readNode(nullptr,depth+1));
         }
+        if(type==Kind::Route) static_cast<RouteComponent&>(node).validate();
+        if(type==Kind::Vehicle) static_cast<VehicleComponent&>(node).validate();
         if(type==Kind::Body) static_cast<RigidBodyComponent&>(node).validate();
         if(type==Kind::Collider) static_cast<ColliderComponent&>(node).validate();
         if(type==Kind::Motor) static_cast<CharacterMotorComponent&>(node).validate();
@@ -439,6 +567,10 @@ public:
     void writeNode(Node& node) {
         auto type=kind(node);io(type);io(node.protectedChild_);
         switch(type) {
+            case Kind::Route:{auto asset=static_cast<RouteComponent&>(node).asset();static_cast<RouteComponent&>(node).validate();io(asset);break;}
+            case Kind::Terrain: {
+                const auto& t=static_cast<const TerrainComponent&>(node);auto asset=t.asset();auto chunk=t.chunk();fields(asset,chunk);break;
+            }
             case Kind::Custom: {
                 const auto* codec=customType(typeid(node));
                 auto key=codec->key;auto schema=codec->version;
@@ -450,7 +582,7 @@ public:
             case Kind::Animation:{ auto target=nodeId(&static_cast<AnimationComponent&>(node).target_);io(target);break; }
             case Kind::Emitter:io(static_cast<ParticleEmitterComponent&>(node).definition_);break;
             case Kind::Effect:io(static_cast<EffectComponent&>(node).asset_);break;
-            case Kind::Collider:{ auto shape=static_cast<ColliderComponent&>(node).shape();io(shape);break; }
+            case Kind::Collider:{if(!dynamic_cast<RouteComponent*>(node.parent())){auto shape=static_cast<ColliderComponent&>(node).shape();io(shape);}break; }
             default:break;
         }
         common(node);body(node,type);
@@ -478,13 +610,15 @@ public:
                 }
                 v.validate();break;
             }
+            case Kind::Decal:{auto& v=static_cast<DecalComponent&>(node);auto s=v.settings();fields(s.texture,s.color,s.opacity,s.normalOffset,s.normalThreshold,s.blend,s.receiverMask,s.maxSourceTriangles,s.maxTriangles,v.visibilityMask);s.validate();if(reading)v.setSettings(std::move(s));break;}
             case Kind::Scene:sceneState(static_cast<Scene&>(node));break;
-            case Kind::Mesh:case Kind::SkeletalMesh:meshState(static_cast<MeshComponent&>(node));break;
+            case Kind::Mesh:case Kind::SkeletalMesh:case Kind::Terrain:case Kind::Route:meshState(static_cast<MeshComponent&>(node));break;
             case Kind::Camera: {
                 auto& v=static_cast<CameraComponent&>(node);auto projection=v.projectionMode();auto height=v.orthographicHeight();auto viewport=v.viewport();auto mask=v.visibilityMask();
                 fields(projection,v.fieldOfView,v.nearPlane,v.farPlane,height,viewport.x,viewport.y,viewport.width,viewport.height,mask);
                 require(projection<=ProjectionMode::Orthographic,"Invalid camera projection");
                 if(reading) { if(projection==ProjectionMode::Perspective) v.setPerspective(v.fieldOfView,v.nearPlane,v.farPlane);else v.setOrthographic(height,v.nearPlane,v.farPlane);v.setViewport(viewport);v.setVisibilityMask(mask); }
+                if(version>=26){auto follow=v.follow();fields(follow.enabled,follow.presentationPose,follow.localOffset,follow.collision,follow.target,follow.focusOffset,follow.offset,follow.lookAheadSeconds,follow.maxLookAhead,follow.positionHalfLife,follow.rotationHalfLife,follow.collisionRadius,follow.clearance,follow.layers);follow.validate();if(reading)v.setFollow(std::move(follow));}
                 v.projection(1);break;
             }
             case Kind::Light: {
@@ -499,6 +633,12 @@ public:
             }
             case Kind::Animation:animationState(static_cast<AnimationComponent&>(node));break;
             case Kind::Emitter:emitterState(static_cast<ParticleEmitterComponent&>(node));break;
+            case Kind::Collider: {auto& c=static_cast<ColliderComponent&>(node);auto surface=c.surface();if(version>=25)io(surface);if(reading)c.setSurface(std::move(surface));break;}
+            case Kind::Vehicle: {
+                auto& v=static_cast<VehicleComponent&>(node);if(!reading){v.validate();v.validateVisualBindings();}auto definition=v.definition();auto visuals=v.visuals();auto checkpoint=v.checkpoint();
+                fields(definition,visuals,checkpoint.rpm,checkpoint.gear,checkpoint.rotation,checkpoint.angularVelocity);
+                if(reading){v.configure(std::move(definition));v.setVisuals(std::move(visuals));v.restore(checkpoint);}break;
+            }
             case Kind::Motor: {
                 auto& v=static_cast<CharacterMotorComponent&>(node);auto settings=v.settings();io(settings);
                 auto command=v.movementCommand();io(command.velocity);
@@ -519,6 +659,8 @@ public:
         if(reading) values.resize(count);
         for(auto& value:values) {
             std::uint32_t camera=reading ? 0 : nodeId(value.camera);io(camera);io(value.clearColor);
+            if(version>=5) io(value.skyEnabled);
+            if(version>=16) io(value.fogEnabled);
             if(reading) { require(camera<nodes.size(),"Invalid view camera ID");value.camera=dynamic_cast<CameraComponent*>(nodes[camera]);require(value.camera!=nullptr,"View target is not a camera"); }
         }
         RenderViews validation;validation.set(values);
@@ -528,36 +670,45 @@ public:
         std::unordered_map<const void*,bool> seen;
         auto add=[&](auto& list,const auto& asset) { if(asset&&seen.emplace(asset.get(),true).second) list.push_back(asset); };
         add(result.environments,scene.environment);
+        if(scene.sky()&&scene.sky()->mode==SkyMode::Panorama) add(result.textures,scene.sky()->panorama);
         auto texture=[&](const auto& t) { add(result.textures,t); };
         auto material=[&](const auto& m) {
             if(!m) return;
             add(result.materials,m);
+            for(const auto& layer:m->layers.layers) {texture(layer.texture);texture(layer.normalHeightTexture);}texture(m->layers.weights);
             texture(m->baseColorTexture);texture(m->metallicRoughnessTexture);texture(m->normalTexture);texture(m->occlusionTexture);texture(m->emissiveTexture);
         };
-        auto definition=[&](const auto& d) { if(d) { add(result.emitters,d);texture(d->texture); } };
+        auto definition=[&](const auto& d) { if(d) { add(result.emitters,d);texture(d->texture);if(d->emissionMesh) add(result.meshes,d->emissionMesh);if(d->particleMesh){add(result.meshes,d->particleMesh);for(const auto& m:d->particleMesh->materials)material(m);} } };
         auto walk=[&](auto&& self,const Node& node)->void {
             if(node.isPendingRemoval()) return;
             if(const auto* m=dynamic_cast<const MeshComponent*>(&node)) {
-                if(m->mesh) { add(result.meshes,m->mesh);add(result.skeletons,m->mesh->skeleton);for(const auto& asset:m->mesh->materials) material(asset); }
+                if(const auto* t=dynamic_cast<const TerrainComponent*>(m)) add(result.terrains,t->asset());
+                if(m->mesh) { if(!dynamic_cast<const TerrainComponent*>(m)&&!dynamic_cast<const RouteComponent*>(m)) add(result.meshes,m->mesh);add(result.skeletons,m->mesh->skeleton);for(const auto& asset:m->mesh->materials) material(asset); }
                 texture(m->texture);
                 for(const auto& override:m->materialOverrides) if(override) {
                     material(override->material);
+                    if(override->layers) {for(const auto& layer:override->layers->layers) {texture(layer.texture);texture(layer.normalHeightTexture);}texture(override->layers->weights);}
                     for(const auto* map:{&override->baseColorTexture,&override->metallicRoughnessTexture,&override->normalTexture,&override->occlusionTexture,&override->emissiveTexture}) if(*map) texture(**map);
                 }
             }
             if(const auto* s=dynamic_cast<const SkeletonComponent*>(&node)) add(result.skeletons,s->skeleton());
             if(const auto* e=dynamic_cast<const EffectComponent*>(&node)) { add(result.effects,e->asset_);for(const auto& emitter:e->asset().emitters) definition(emitter.definition); }
             if(const auto* e=dynamic_cast<const ParticleEmitterComponent*>(&node)) definition(e->definition_);
-            if(const auto* c=dynamic_cast<const ColliderComponent*>(&node)) add(result.collisionShapes,c->shape());
+            if(const auto* d=dynamic_cast<const DecalComponent*>(&node))texture(d->settings().texture);
+            if(const auto* c=dynamic_cast<const ColliderComponent*>(&node);c&&!dynamic_cast<const RouteComponent*>(c->parent())) add(result.collisionShapes,c->shape());
             for(const auto& child:node.children()) self(self,*child);
         };
-        walk(walk,scene);return result;
+        walk(walk,scene);
+        auto shapeSurfaces=[&](auto&& self,const CollisionShape& shape)->void{add(result.physicalSurfaces,shape.surface());for(const auto& surface:shape.triangleSurfaces())add(result.physicalSurfaces,surface);for(const auto& child:shape.children()){add(result.physicalSurfaces,child.surface);self(self,*child.shape);}};
+        auto physical=[&](auto&& self,const Node& node)->void{if(node.isPendingRemoval())return;if(auto* c=dynamic_cast<const ColliderComponent*>(&node)){add(result.physicalSurfaces,c->surface());shapeSurfaces(shapeSurfaces,*c->shape());}if(auto* r=dynamic_cast<const RouteComponent*>(&node))add(result.physicalSurfaces,r->asset()->data().profile->data().surface);if(auto* t=dynamic_cast<const TerrainComponent*>(&node)){add(result.physicalSurfaces,t->asset()->data().physicalSurface);for(const auto& s:t->asset()->data().cellSurfaces)add(result.physicalSurfaces,s);}for(const auto& child:node.children())self(self,*child);};physical(physical,scene);return result;
     }
     SceneDocument readScene() {
         std::uint32_t type=0;io(type);require(type==1,"Expected a scene archive");
         auto root=readNode();auto* scene=dynamic_cast<Scene*>(root.get());require(scene!=nullptr,"Archive root is not a scene");
         SceneDocument result;root.release();result.scene.reset(scene);
         views(result.views);io(result.assets);io(result.applicationData);
+        if(version>=5) { std::optional<SkyBackground> sky;io(sky);result.scene->setSky(std::move(sky)); }
+        if(version>=16) { std::optional<FogSettings> fog;io(fog);result.scene->setFog(std::move(fog)); }
         require(offset==input.size(),"Unexpected archive payload data");
         {
             Node::TraversalGuard guard(*scene);
@@ -567,6 +718,7 @@ public:
         // Resolvers may bind references and callbacks, never mutate the hierarchy.
         std::vector<Node*> before=std::move(nodes);nodes.clear();indexNodes(*scene);
         require(nodes==before,"Custom resolver changed the staged hierarchy");
+        for(auto* node:nodes){if(auto* vehicle=dynamic_cast<VehicleComponent*>(node))vehicle->validateVisualBindings();if(auto* route=dynamic_cast<RouteComponent*>(node))route->validate();}
         scene->synchronize(); // Restore ownership/resources without executing a variable tick.
         for(const auto& velocity:velocities) {
             require(velocity.body->hasBody(),"Saved active body could not be recreated");
@@ -581,6 +733,7 @@ public:
         std::uint32_t type=1;io(type);indexNodes(scene);writeNode(*const_cast<Scene*>(&scene));
         std::vector<RenderView> savedViews(renderViews.begin(),renderViews.end());views(savedViews);
         io(const_cast<AssetLibrary&>(assets));std::vector<std::byte> metadata(data.begin(),data.end());io(metadata);
+        auto sky=scene.sky();io(sky);auto fog=scene.fog();io(fog);
     }
 };
 
@@ -588,13 +741,13 @@ namespace {
 constexpr std::array<std::byte,8> magic={std::byte{'W'},std::byte{'E'},std::byte{'S'},std::byte{'C'},std::byte{'E'},std::byte{'N'},std::byte{'E'},std::byte{0}};
 std::vector<std::byte> envelope(std::vector<std::byte> payload,const ArchiveLimits& limits) {
     ArchiveCodec header(limits);auto signature=magic;header.bytes(signature.data(),signature.size());
-    std::uint32_t version=4,crc=checksum(payload);std::uint64_t size=payload.size();header.fields(version,size,crc);header.bytes(payload.data(),payload.size());return std::move(header.output);
+    std::uint32_t version=27,crc=checksum(payload);std::uint64_t size=payload.size();header.fields(version,size,crc);header.bytes(payload.data(),payload.size());return std::move(header.output);
 }
 std::span<const std::byte> open(std::span<const std::byte> bytes,const ArchiveLimits& limits,std::uint32_t& version) {
     require(bytes.size()<=limits.maxBytes,"Archive size limit exceeded");ArchiveCodec header(bytes,limits);
     std::array<std::byte,8> signature{};header.bytes(signature.data(),signature.size());require(signature==magic,"This is not a WebEngine archive");
     std::uint32_t crc=0;std::uint64_t size=0;header.fields(version,size,crc);
-    require(version>=1&&version<=4,"Unsupported WebEngine archive version");require(size==bytes.size()-header.offset,"Truncated archive or trailing data");
+    require(version>=1&&version<=27,"Unsupported WebEngine archive version");require(size==bytes.size()-header.offset,"Truncated archive or trailing data");
     const auto payload=bytes.subspan(header.offset);require(checksum(payload)==crc,"Archive checksum mismatch");return payload;
 }
 }
@@ -602,6 +755,10 @@ std::vector<std::byte> SceneArchive::save(const Scene& scene,std::span<const Ren
     ArchiveCodec codec(limits);codec.custom=codecs.entries();
     codec.writeScene(scene,views,assets,data);
     return envelope(std::move(codec.output),limits);
+}
+SceneDocument SceneArchive::clone(const Scene& scene,std::span<const RenderView> views,const AssetLibrary& assets,const ArchiveLimits& limits,const ComponentCodecs& codecs) {
+    ArchiveCodec writer(limits);writer.referencesOnly=true;writer.custom=codecs.entries();writer.writeScene(scene,views,assets,{});
+    ArchiveCodec reader(writer.output,limits);reader.custom=codecs.entries();reader.resources=std::move(writer.resources);return reader.readScene();
 }
 SceneDocument SceneArchive::load(std::span<const std::byte> bytes,const ArchiveLimits& limits,const ComponentCodecs& codecs) {
     std::uint32_t version=0;ArchiveCodec codec(open(bytes,limits,version),limits);codec.version=version;
@@ -616,12 +773,13 @@ AssetLibrary SceneArchive::loadAssets(std::span<const std::byte> bytes,const Arc
     AssetLibrary result;codec.io(result);require(codec.offset==codec.input.size(),"Unexpected archive payload data");return result;
 }
 AssetLibrary SceneArchive::collectAssets(const Scene& scene) { return ArchiveCodec::collect(scene); }
+std::unique_ptr<Node> SceneArchive::duplicateSubtree(const Node& node,const ArchiveLimits& limits) { return ArchiveCodec::duplicate(node,limits); }
 void ComponentCodecs::add(ComponentCodec codec) {
     require(Node::validSavedId(codec.key)&&codec.version>0&&codec.encode&&codec.decode,"Invalid custom component codec");
-    const std::type_index builtins[]={typeid(Component),typeid(MeshComponent),typeid(SkeletalMeshComponent),
+    const std::type_index builtins[]={typeid(Component),typeid(MeshComponent),typeid(SkeletalMeshComponent),typeid(TerrainComponent),
         typeid(CameraComponent),typeid(LightComponent),typeid(SkeletonComponent),typeid(AnimationComponent),
         typeid(ParticleEmitterComponent),typeid(EffectComponent),typeid(ColliderComponent),typeid(RigidBodyComponent),
-        typeid(CharacterMotorComponent),typeid(InteractionComponent)};
+        typeid(VehicleComponent),typeid(CharacterMotorComponent),typeid(InteractionComponent)};
     for(auto type:builtins) require(codec.type!=type,"Cannot replace a built-in component codec");
     for(const auto& entry:entries_) require(entry.key!=codec.key&&entry.type!=codec.type,"Duplicate component codec key or type");
     entries_.push_back(std::move(codec));

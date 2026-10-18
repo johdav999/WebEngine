@@ -55,8 +55,29 @@ morphs and skeletal poses. Meshes use the same interpolated physics transforms a
 rendering. A zero-scale or nonfinite transform is skipped. A ray starting inside
 a bound hits at distance zero. Equal-distance ties retain hierarchy traversal order.
 
-Bounds picking is conservative: gaps inside a mesh AABB can hit. It is not a
-triangle/GPU-ID query. Nonparticipating geometry does not occlude targets. Child
+Bounds picking is the compatible default: gaps inside a mesh AABB can hit.
+Set `SelectionQuery::geometry=SelectionGeometry::Triangles` for CPU triangle
+picking of original mesh index ranges, including morph deformation, skinning and
+the same interpolated model matrix as rendering. Triangle picking is two-sided,
+skips degenerate faces, and returns a surface point, world geometric normal,
+index-buffer triangle offset (`triangle`), barycentric weights and interpolated UV.
+Bounds/proxy hits have no triangle and zero surface attributes. A ray inside a
+closed mesh hits its exit surface in triangle mode. Mesh parts restrict tested
+indices; LOD does not alter the query geometry.
+
+Set `SelectionQuery::occlusion=true` to reject a target hidden behind nearer visible
+mesh triangles, including meshes without interaction providers or actor owners.
+Occlusion is independent of selection/focus eligibility and selection masks;
+query/camera visibility masks and the additional `occluderMask` visibility-group
+filter apply to blockers. The picked actor's own geometry does not occlude it.
+Proxies remain bounds even in triangle mode and do not themselves block rays.
+Nonzero-opacity translucent meshes block geometrically; texture alpha, shader
+displacement, material culling and ordered render-layer depth composition are not
+evaluated. This is a geometric CPU query, not GPU-ID/pixel-accurate picking.
+
+Both options are per-query and off by default; no archive migration is required.
+Triangle testing is linear in candidate geometry after bounds rejection, with no
+BVH cache; applications choose when to repick and their mesh budgets. Child
 actors require their own interaction provider; nested components belong to their
 nearest actor. Mesh visibility and query/camera visibility masks apply; meshes with
 zero opacity and disabled subtrees are ignored. LOD and shadow detail never change
@@ -84,6 +105,59 @@ motion updates focus. The browser input adapter decides which GUI/drag/touch eve
 become scene packets. Call this consumer only for the active input context/view;
 clear focus on view changes, pointer leave or GUI capture when the host emits no
 cancellation packet. Ray/gameplay controllers can set focus explicitly.
+
+## Dragging and rotating objects
+
+`engine/manipulation.hpp` supplies an optional application-owned
+`ManipulationController`. It borrows a scene which must outlive it, uses actor and
+component handles, and owns one session without callbacks/subscriptions. It writes
+authoritative actor transforms through the existing validated TRS API. Rendering
+interpolation, LOD, culling and picking never become simulation movement policy.
+
+```cpp
+#include "engine/manipulation.hpp"
+
+engine::ManipulationController drag(scene); // Keep alive across input frames.
+engine::SelectionQuery query;
+query.geometry = engine::SelectionGeometry::Triangles;
+query.occlusion = true;
+// On the application's drag-start command, using its active camera/backing viewport:
+const auto ray = camera.screenPointToRay(pointerPixels, viewport);
+if (const auto hit = scene.selection().resolvePointer(pointerPixels, camera, viewport, query)) {
+    engine::ManipulationSettings settings;
+    settings.direction = {0, 0, 1}; // World plane normal chosen by the application.
+    drag.begin(*hit, ray, settings);
+}
+// On move: drag.update(camera.screenPointToRay(nextPixels, viewport));
+// On accepted release: drag.commit();
+// On Escape, pointer cancellation, GUI capture or view change: drag.cancel();
+```
+
+Plane translation preserves the original picked offset. Axis translation uses
+the closest points of the pointer ray and the world axis through the picked point.
+Set `mode=ManipulationMode::AxisTranslation` and `direction` to that axis.
+For rotation, set `mode=ManipulationMode::AxisRotation`, a world `direction` axis
+and world `pivot`; ray/plane samples accumulate signed angles across wraparound.
+Each rotation sample must advance less than half a turn; a ray at the pivot or
+parallel to the constraint cannot update. Directions are normalized. Malformed
+rays/settings throw `invalid_argument` before changing a valid session.
+
+`begin`, `update`, `commit` and `cancel` return success; failed start never acquires
+ownership. A second start requires explicit commit/cancel of the first session.
+Applications assign one controller/writer per actor; there is no global lock registry.
+An update miss or a candidate requiring local shear leaves the last valid pose
+and session intact. Commit retains that pose and ends the session. Cancel restores
+the exact initial local transform; destruction cancels an uncommitted session.
+
+Target/provider/surface removal, disable, provider selectability changes,
+reparenting, parent movement or an external local transform write invalidates
+ownership. `target()` immediately hides invalid sessions. The next update,
+commit or cancel releases the stale session without rollback or overwriting the
+new owner's work. The controller rejects actors with rigid-body/character-motor
+components, including controlled ancestors, so it never bypasses physics pose
+ownership or creates a physics world. Physics grab/joint policy is a separate
+consumer of physics commands. Applications own input capture, feedback, snapping,
+move legality, history and release/cancellation routing; sessions are not archived.
 
 ## Actions and events
 
@@ -125,5 +199,9 @@ ownership, masks, viewport offsets, perspective/orthographic cameras, state chan
 deferred destruction, slot recycling, ordered reentrancy, action eligibility,
 replacement/self-removal, exception results, instigator isolation, backing-pixel
 input, stationary pointer repicking, cancellation and archive round trips.
+Precise regressions cover empty bounds space, hit attributes, two-sided/mirrored
+triangles, morph/skinning/interpolation and noninteractive occlusion filters.
+`manipulation_tests` covers plane/axis dragging, pivot rotation, wraparound,
+transformed parents, shear rejection, commit/cancel, ownership loss and stale handles.
 
 See [validation results and commands](selection-validation.md).

@@ -6,7 +6,7 @@
   for(const [id,action] of Object.entries(buttons)) $(id).addEventListener('click',()=>{
     if(action===1||action===2) command(0);command(action);
   });
-  for(const [id,action] of Object.entries({'sound-master':5,'sound-effects':6,'sound-music':7,'sound-x':9}))
+  for(const [id,action] of Object.entries({'sound-master':5,'sound-effects':6,'sound-music':7,'sound-x':9,'sound-rate':11}))
     $(id).addEventListener('input',()=>command(action,Number($(id).value)));
   $('sound-mute').addEventListener('change',()=>command(8,Number($('sound-mute').checked)));
   let latest={},revision=0,pending=null,loadError='';

@@ -6,6 +6,9 @@
 #include "engine/render_layer.hpp"
 #include "engine/particle_emitter_component.hpp"
 #include "engine/environment.hpp"
+#include "engine/sky.hpp"
+#include "engine/fog.hpp"
+#include <optional>
 #include <array>
 
 namespace engine {
@@ -32,15 +35,19 @@ struct MeshDraw {
     MeshBounds sourceBounds;
     ComponentId component;
     std::uint32_t part=0;
+    MeshLodPolicy lodPolicy;
+    bool receivesDecals=true;
+    std::uint32_t visibilityMask=1;
 };
 struct SceneLight { LightType type; Vec3 position, direction, color; float intensity, range; ShadowSettings shadow; Vec3 shadowCenter; };
 struct SceneFrame {
     std::vector<MeshDraw> meshes;
     std::vector<SceneLight> lights;
     std::vector<ParticleDraw> particles;
+    std::vector<RibbonDraw> ribbons;
     // Indices into meshes, in traversal order within each layer.
     std::array<std::vector<std::uint32_t>,static_cast<std::size_t>(RenderLayer::Count)> layerDraws;
-    std::size_t meshCount=0,storageGrowths=0,culledMeshes=0;
+    std::size_t meshCount=0,meshParticleCount=0,decalCount=0,storageGrowths=0,culledMeshes=0;
     TransformCacheStats transformRebuilds;
     void clear(); // Releases draw references, retains all vector capacities.
     std::size_t storageBytes() const; // Reserved vector payload, excludes assets.
@@ -53,6 +60,10 @@ public:
     Vec3 ambient{0.14f,0.17f,0.23f};
     std::shared_ptr<const Environment> environment=Environment::studio();
     float environmentIntensity=1,environmentRotation=0; // Rotation radians about world Y.
+    void setFog(std::optional<FogSettings> fog) { if(fog) fog->validate();fog_=std::move(fog); }
+    const std::optional<FogSettings>& fog() const { return fog_; }
+    void setSky(std::optional<SkyBackground> sky) { if(sky) sky->validate();sky_=std::move(sky); }
+    const std::optional<SkyBackground>& sky() const { return sky_; }
     template<class T=Actor,class... Args> T& spawn(Args&&... args) {
         static_assert(std::is_base_of_v<Actor,T>);
         return addChild<T>(std::forward<Args>(args)...);
@@ -84,6 +95,8 @@ protected:
     virtual void onPause() noexcept {}
     virtual void onResume() noexcept {}
 private:
+    std::optional<SkyBackground> sky_;
+    std::optional<FogSettings> fog_;
     friend class Application;
     SceneLifecycleState lifecycleState_=SceneLifecycleState::Detached;
     friend class Node;

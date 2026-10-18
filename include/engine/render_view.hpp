@@ -10,6 +10,8 @@ namespace engine {
 struct RenderView {
     CameraComponent* camera=nullptr;
     std::optional<std::array<float,4>> clearColor=std::array<float,4>{0.018f,0.026f,0.042f,1};
+    bool skyEnabled=true; // Explicitly disable for views preserving earlier background color.
+    bool fogEnabled=true; // World materials, particles and sky; never Overlay/GUI.
 };
 struct ResolvedRenderView {
     std::size_t index=0;

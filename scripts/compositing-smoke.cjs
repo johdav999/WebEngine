@@ -19,6 +19,8 @@ function blue(p,x,y) {const c=pixel(p,x,y);assert(c[2]>40&&c[0]<10&&c[1]<10,`Exp
     page.on('console',m=>{if(m.type()==='error') result.errors.push(m.text());});
     await page.goto(`${base}/?compositingTest=1`);
     await page.waitForFunction(()=>document.body.dataset.defaultModel==='ready'||document.body.dataset.engine==='error');
+    const samples=Number(process.env.MSAA_SAMPLES||1);
+    assert.equal(await page.evaluate(n=>Module._engine_msaa(n),samples),1);
     const capture=async(mode,name)=>{
       const frame=await page.evaluate(mode=>{const ready=Module._engine_compositing_fixture(mode);if(ready!==1) throw Error('Fixture failed');return Number(document.body.dataset.frames||0);},mode);
       await page.waitForFunction(f=>Number(document.body.dataset.frames)>f+5,frame);
@@ -60,9 +62,10 @@ function blue(p,x,y) {const c=pixel(p,x,y);assert(c[2]>40&&c[0]<10&&c[1]<10,`Exp
     await page.locator('#camera-layout').selectOption('0');
     result.checks.push('Public layout controls');
     await page.goto(`${base}/?gui=1`);await page.waitForFunction(()=>document.body.dataset.defaultModel==='ready');
+    assert.equal(await page.evaluate(n=>Module._engine_msaa(n),samples),1);
     await page.evaluate(()=>Module._engine_view_mode(1));await page.waitForTimeout(450);
     const gui=await page.evaluate(()=>EnginePerformance.snapshot().latest.current);
-    assert(gui.guiDrawCalls>0);assert.equal(gui.passes-(gui.shadowPasses||0),7,'Two views plus exactly one GUI pass');
+    assert(gui.guiDrawCalls>0);assert.equal(gui.passes-(gui.shadowPasses||0),samples===4?8:7,'Two views, optional resolve, exactly one GUI pass');
     await page.locator('#viewport').screenshot({path:`${evidence}/gui-over-compositor.png`});
     result.checks.push('GUI renders once after both cameras');
     assert.deepEqual(result.errors,[]);result.checks.push('No browser/GPU validation errors');

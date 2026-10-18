@@ -2,8 +2,10 @@
 #include "engine/fx_frame.hpp"
 #include "engine/render_frame.hpp"
 #include "engine/mesh_component.hpp"
+#include "engine/scene_archive.hpp"
 #include <iostream>
 #include <cstring>
+#include <filesystem>
 using namespace engine;
 namespace {
 void check(bool value,const char* message) { if(!value) throw std::runtime_error(message); }
@@ -84,6 +86,53 @@ int main() {
         effect.enabled=true;effect.setVisibilityMask(4);scene.update(0.3);check(effect.particleCount()>0&&scene.collect(4).particles.size()==effect.particleCount(),"Composite visibility settings reach all emitters");
         auto& explosion=scene.addChild<EffectComponent>("Explosion",explosionEffect());scene.update(0);check(explosion.particleCount()==52,"Explosion combines burst emitters");
         scene.update(4);check(explosion.particleCount()==0&&!explosion.playing(),"Composite explosion drains to completion");
+
+        const auto legacy=SceneArchive::loadFile(std::filesystem::path(__FILE__).parent_path()/"fixtures/fx_v16.wescene");
+        std::size_t legacyParticles=0;legacy.scene->visit([&](const Node& node,const Mat4&) {
+            if(const auto* emitter=dynamic_cast<const ParticleEmitterComponent*>(&node)) {
+                check(emitter->definition().shape==ParticleShape::Box&&emitter->definition().drag==0&&emitter->definition().softDistance==0&&emitter->definition().alignment==ParticleAlignment::Camera,"Real v16 particles retain legacy defaults");
+                legacyParticles+=emitter->particles().size();
+            }
+        });check(legacyParticles==2,"Real v16 fixture preserves live particles");
+        // Opt-in shape samplers: bounds, shell, cone direction and triangle-area weighting.
+        Scene shaped;auto shape=constant();shape->gravity={};shape->velocityMin=shape->velocityMax={};
+        shape->bursts={{0,4096}};shape->maxParticles=4096;shape->radius=2;shape->shape=ParticleShape::Sphere;
+        auto& sh=shaped.addChild<ParticleEmitterComponent>("Shapes",shape);shaped.update(0);
+        float meanRadius=0;for(const auto& p:sh.particles()) {const auto r=std::sqrt(dot(p.position,p.position));check(r<=2.0001f,"Sphere volume bounds");meanRadius+=r;}
+        check(meanRadius/4096>1.45f&&meanRadius/4096<1.55f,"Sphere volume distribution");
+        shape=std::make_shared<ParticleEmitterDefinition>(*shape);shape->surfaceOnly=true;sh.setDefinition(shape);shaped.update(0);
+        for(const auto& p:sh.particles()) check(near(dot(p.position,p.position),4),"Sphere surface radius");
+        shape=std::make_shared<ParticleEmitterDefinition>(*shape);shape->shape=ParticleShape::Cone;shape->speedMin=shape->speedMax=3;sh.setDefinition(shape);shaped.update(0);
+        for(const auto& p:sh.particles()) check(p.position.y==0&&p.velocity.y>=3*std::cos(shape->coneAngle)-.0001f&&near(dot(p.velocity,p.velocity),9),"Cone disc and solid-angle velocity bounds");
+        auto surface=std::make_shared<Mesh>();surface->vertices.resize(6);
+        surface->vertices[0].position={0,0,0};surface->vertices[1].position={1,0,0};surface->vertices[2].position={0,0,1};
+        surface->vertices[3].position={10,0,0};surface->vertices[4].position={12,0,0};surface->vertices[5].position={10,0,2};surface->indices={0,2,1,3,5,4};
+        shape=std::make_shared<ParticleEmitterDefinition>(*shape);shape->shape=ParticleShape::MeshSurface;shape->emissionMesh=surface;sh.setDefinition(shape);shaped.update(0);
+        int large=0;for(const auto& p:sh.particles()) {large+=p.position.x>=10;check(p.position.y==0&&p.velocity.y>2.99f,"Mesh surface samples and face normals");}
+        check(large>3100&&large<3450,"Mesh surface sampling is area weighted");
+        auto badSurface=std::make_shared<ParticleEmitterDefinition>(*shape);auto degenerate=std::make_shared<Mesh>();degenerate->vertices.resize(3);degenerate->indices={0,1,2};badSurface->emissionMesh=degenerate;rejects([&]{sh.setDefinition(badSurface);});
+        check(sh.particles().size()==4096,"Invalid surface preserves live state");
+        auto motion=constant();motion->gravity={};motion->velocityMin=motion->velocityMax={4,0,0};motion->drag=2;motion->wind={1,0,0};
+        sh.setDefinition(motion);shaped.update(1);check(near(sh.particles()[0].velocity.x,1+3*std::exp(-2.0f))&&near(sh.particles()[0].position.x,1+1.5f*(1-std::exp(-2.0f))),"Analytic drag approaches wind velocity");
+        motion=constant();motion->drag=1e-30f;sh.setDefinition(motion);shaped.update(.5);
+        check(near(sh.particles()[0].position.y,.75f)&&near(sh.particles()[0].velocity.y,1),"Near-zero drag remains finite and approaches ballistic motion");
+        motion=constant();motion->velocityMin=motion->velocityMax={};motion->gravity={};motion->velocityOverLife={{0,{1,0,0}}};motion->forceOverLife={{0,{0,2,0}}};
+        motion->softDistance=.5f;motion->alignment=ParticleAlignment::Velocity;motion->stretch=.2f;sh.setDefinition(motion);shaped.update(1);
+        check(near(sh.particles()[0].position.x,1)&&near(sh.particles()[0].position.y,1)&&near(sh.particles()[0].velocity.y,2),"Velocity and force curves compose independently");
+        check(softParticlesRequired(shaped,1)&&!softParticlesRequired(shaped,2),"Soft depth preflight respects masks");sh.enabled=false;check(!softParticlesRequired(shaped,1),"Disabled hierarchy requests no depth");sh.enabled=true;
+        auto archive=SceneArchive::save(shaped);auto restored=SceneArchive::load(archive);
+        auto& restoredEmitter=dynamic_cast<ParticleEmitterComponent&>(*restored.scene->children()[0]);
+        check(restoredEmitter.definition().softDistance==.5f&&restoredEmitter.definition().forceOverLife.size()==1,"Archive retains new FX definition");
+        shaped.update(.2);restored.scene->update(.2);check(near(sh.particles()[0].position.y,restoredEmitter.particles()[0].position.y),"FX archive continuation");
+        motion=std::make_shared<ParticleEmitterDefinition>(*shape);motion->turbulence={.4f,.2f,.3f};motion->drag=.4f;sh.setDefinition(motion);shaped.update(.3);
+        archive=SceneArchive::save(shaped);restored=SceneArchive::load(archive);shaped.update(.2);restored.scene->update(.2);
+        const auto& resumed=dynamic_cast<ParticleEmitterComponent&>(*restored.scene->children()[0]);
+        check(near(sh.particles()[0].position.x,resumed.particles()[0].position.x)&&resumed.definition().emissionMesh!=nullptr,"Surface CDF and turbulence restore without divergence");
+        sh.play();shaped.update(.5);const auto deterministic=sh.particles()[0].position;sh.play();shaped.update(.5);check(near(deterministic.x,sh.particles()[0].position.x),"Seeded turbulence restarts repeatably");
+        SceneFrame staging;ParticleDraw draw;draw.velocity={3,0,0};draw.size=1;draw.stretch=.5f;draw.softDistance=.2f;draw.alignment=ParticleAlignment::Velocity;staging.particles.push_back(draw);
+        fx.prepare(staging,Mat4::identity());check(near(fx.instances()[0].ageRotation[1],-pi*.5f)&&near(fx.instances()[0].ageRotation[3],1.5f)&&near(fx.instances()[0].parameters[0],.2f),"Velocity alignment, stretch and soft interval reach GPU payload");
+        draw.velocity={0,0,3};staging.particles[0]=draw;fx.prepare(staging,Mat4::identity());check(fx.instances()[0].ageRotation[3]==0,"Camera-parallel velocity keeps a stable square");
+        motion=constant();motion->drag=-1;rejects([&]{motion->validate();});motion=constant();motion->forceOverLife={{0,{}},{0,{}}};rejects([&]{motion->validate();});
         std::cout<<"FX runtime, pooling, curves, flipbooks, ordering and shared assets passed\n";
     } catch(const std::exception& error) { std::cerr<<error.what()<<'\n';return 1; }
 }

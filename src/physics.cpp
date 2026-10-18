@@ -1,4 +1,10 @@
 #include "engine/physics.hpp"
+#include "engine/vehicle_component.hpp"
+#include <Jolt/Jolt.h>
+#include <Jolt/Physics/Vehicle/VehicleConstraint.h>
+#include <Jolt/Physics/Vehicle/WheeledVehicleController.h>
+#include <Jolt/Physics/Vehicle/VehicleCollisionTester.h>
+#include <Jolt/Physics/Collision/Shape/OffsetCenterOfMassShape.h>
 #include "engine/collider_component.hpp"
 #include "engine/scene.hpp"
 #include "engine/character_motor_component.hpp"
@@ -10,12 +16,19 @@
 #include <Jolt/Physics/PhysicsSystem.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Body/BodyLock.h>
+#include <Jolt/Physics/Body/BodyLockMulti.h>
+#include <Jolt/Physics/Constraints/HingeConstraint.h>
+#include <Jolt/Physics/Constraints/SliderConstraint.h>
+#include <Jolt/Physics/Constraints/DistanceConstraint.h>
+#include <Jolt/Physics/Constraints/PointConstraint.h>
 #include <Jolt/Physics/Character/CharacterVirtual.h>
 #include <Jolt/Physics/Collision/RayCast.h>
 #include <Jolt/Physics/Collision/CastResult.h>
 #include <Jolt/Physics/Collision/ShapeCast.h>
 #include <Jolt/Physics/Collision/CollisionCollectorImpl.h>
+#include <Jolt/Physics/Collision/TransformedShape.h>
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
+#include <Jolt/Physics/Collision/Shape/StaticCompoundShape.h>
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
 #include <Jolt/Physics/Collision/Shape/ConvexHullShape.h>
@@ -26,14 +39,39 @@
 #include <cstdio>
 #include <tuple>
 #include <algorithm>
+#include <atomic>
 
 namespace engine {
 namespace {
+// Required static collision may live under one identity-local component container.
+// Dynamic bodies retain the direct-actor contract; no intermediate transforms enter solver poses.
+bool bodyLayout(const RigidBodyComponent& body,const Actor& actor){
+    if(body.parent()==&actor)return true;
+    const auto* container=dynamic_cast<const Component*>(body.parent());
+    return body.settings().motion==BodyMotion::Static&&body.isProtectedChild()&&container&&container->parent()==&actor&&container->transform.matrix().m==Mat4::identity().m;
+}
+bool colliderLayout(const ColliderComponent& collider,const RigidBodyComponent& body,const Actor& actor){
+    return collider.parent()==body.parent()&&bodyLayout(body,actor)&&(collider.parent()==&actor||collider.isProtectedChild());
+}
 constexpr std::size_t maxBodies=4096,maxEvents=8192;
+constexpr std::size_t maxJoints=4096;
+std::atomic<std::uint64_t> nextJointWorld{1};
 JPH::Vec3 jvec(Vec3 v) { return {v.x,v.y,v.z}; }
 Vec3 vec(JPH::Vec3Arg v) { return {v.GetX(),v.GetY(),v.GetZ()}; }
 bool finite(Vec3 v) { return std::isfinite(v.x)&&std::isfinite(v.y)&&std::isfinite(v.z); }
 void checkVector(Vec3 v) { if(!finite(v)) throw std::invalid_argument("Nonfinite physics vector"); }
+Vec3 jointAxis(Vec3 axis) {
+    checkVector(axis);const auto squared=dot(axis,axis);
+    if(!std::isfinite(squared)||squared<1e-12f) throw std::invalid_argument("Invalid joint axis");
+    return normalized(axis);
+}
+Vec3 jointNormal(Vec3 axis) { return normalized(cross(axis,std::abs(axis.x)<0.9f ? Vec3{1,0,0} : Vec3{0,1,0})); }
+void checkNonnegative(float value) {
+    if(!std::isfinite(value)||value<0) throw std::invalid_argument("Invalid joint scalar");
+}
+void checkLimits(float low,float high) {
+    if(!std::isfinite(low)||!std::isfinite(high)||low>0||high<0) throw std::invalid_argument("Joint limits must contain zero");
+}
 void checkPose(const Transform& pose) {
     checkVector(pose.position);checkVector(pose.rotation);
     if(pose.scale.x!=1||pose.scale.y!=1||pose.scale.z!=1) throw std::invalid_argument("Physics poses require unit scale");
@@ -73,36 +111,42 @@ Pose poseOf(const Mat4& matrix) {
     JPH::Mat44 rotation(JPH::Vec4(x.x,x.y,x.z,0),JPH::Vec4(y.x,y.y,y.z,0),JPH::Vec4(z.x,z.y,z.z,0),JPH::Vec4(0,0,0,1));
     return {{matrix.m[12],matrix.m[13],matrix.m[14]},rotation.GetQuaternion().Normalized()};
 }
-struct CookedShape { JPH::RefConst<JPH::Shape> body,geometry; };
-CookedShape makeShape(const CollisionShape& shape,const Transform& local) {
-    JPH::ShapeSettings::ShapeResult result;
-    switch(shape.type()) {
-        case CollisionShapeType::Box: {
-            const auto h=shape.halfExtents();result=JPH::BoxShapeSettings(jvec(h),std::min({0.05f,h.x*0.1f,h.y*0.1f,h.z*0.1f})).Create();break;
+struct CookedShape { JPH::RefConst<JPH::Shape> body,geometry;std::shared_ptr<const std::vector<PhysicsSurfaceHit>> features; };
+CookedShape makeShape(const CollisionShape& root,const Transform& local) {
+    auto features=std::make_shared<std::vector<PhysicsSurfaceHit>>();
+    auto build=[&](auto&& self,const CollisionShape& shape,CollisionFeature feature,std::shared_ptr<const PhysicalSurface> inherited,bool explicitOverride)->JPH::Ref<JPH::Shape> {
+        auto surface=explicitOverride?inherited:(shape.surface()?shape.surface():inherited);
+        JPH::ShapeSettings::ShapeResult result;
+        const auto base=features->size();
+        switch(shape.type()) {
+            case CollisionShapeType::Box:{auto h=shape.halfExtents();result=JPH::BoxShapeSettings(jvec(h),std::min({.05f,h.x*.1f,h.y*.1f,h.z*.1f})).Create();break;}
+            case CollisionShapeType::Sphere:result=JPH::SphereShapeSettings(shape.radius()).Create();break;
+            case CollisionShapeType::Capsule:result=JPH::CapsuleShapeSettings(shape.halfHeight(),shape.radius()).Create();break;
+            case CollisionShapeType::ConvexHull:{JPH::Array<JPH::Vec3> points;for(auto v:shape.vertices())points.push_back(jvec(v));result=JPH::ConvexHullShapeSettings(points).Create();break;}
+            case CollisionShapeType::TriangleMesh:{
+                JPH::TriangleList triangles;const auto& v=shape.vertices();const auto& indices=shape.indices();
+                for(std::size_t i=0;i<indices.size();i+=3){triangles.emplace_back(jvec(v[indices[i]]),jvec(v[indices[i+1]]),jvec(v[indices[i+2]]),0,JPH::uint32(i/3));auto f=feature;f.triangle=i/3;auto mapped=shape.triangleSurfaces().empty()?nullptr:shape.triangleSurfaces()[i/3];features->push_back({mapped?mapped:surface,f});}
+                JPH::MeshShapeSettings settings(triangles);settings.mPerTriangleUserData=true;result=settings.Create();break;
+            }
+            case CollisionShapeType::Compound:{
+                JPH::StaticCompoundShapeSettings settings;for(std::size_t i=0;i<shape.children().size();++i){const auto& child=shape.children()[i];auto f=feature;f.children[f.depth++]=i;
+                    auto node=self(self,*child.shape,f,child.surface?child.surface:surface,bool(child.surface));settings.AddShape(jvec(child.transform.position),JPH::Quat::sEulerAngles(jvec(child.transform.rotation)),node);}
+                result=settings.Create();break;
+            }
         }
-        case CollisionShapeType::Sphere: result=JPH::SphereShapeSettings(shape.radius()).Create();break;
-        case CollisionShapeType::Capsule: result=JPH::CapsuleShapeSettings(shape.halfHeight(),shape.radius()).Create();break;
-        case CollisionShapeType::ConvexHull: {
-            JPH::Array<JPH::Vec3> points;for(auto point:shape.vertices()) points.push_back(jvec(point));
-            result=JPH::ConvexHullShapeSettings(points).Create();break;
-        }
-        case CollisionShapeType::TriangleMesh: {
-            JPH::TriangleList triangles;const auto& v=shape.vertices();const auto& indices=shape.indices();
-            for(std::size_t i=0;i<indices.size();i+=3) triangles.emplace_back(jvec(v[indices[i]]),jvec(v[indices[i+1]]),jvec(v[indices[i+2]]));
-            result=JPH::MeshShapeSettings(triangles).Create();break;
-        }
-    }
-    if(result.HasError()) throw std::invalid_argument(std::string("Invalid collision shape: ")+result.GetError().c_str());
-    auto value=result.Get();
-    result=JPH::RotatedTranslatedShapeSettings(jvec(local.position),JPH::Quat::sEulerAngles(jvec(local.rotation)),value).Create();
-    if(result.HasError()) throw std::invalid_argument(result.GetError().c_str());
-    return {result.Get(),value};
+        if(result.HasError())throw std::invalid_argument(std::string("Invalid collision shape: ")+result.GetError().c_str());
+        auto value=result.Get();if(shape.type()!=CollisionShapeType::Compound){value->SetUserData(base);if(shape.type()!=CollisionShapeType::TriangleMesh)features->push_back({surface,feature});}return value;
+    };
+    auto geometry=build(build,root,{},nullptr,false);
+    auto wrapped=JPH::RotatedTranslatedShapeSettings(jvec(local.position),JPH::Quat::sEulerAngles(jvec(local.rotation)),geometry).Create();
+    if(wrapped.HasError())throw std::invalid_argument(wrapped.GetError().c_str());
+    return {wrapped.Get(),geometry,std::move(features)};
 }
 bool sameTransform(const Transform& a,const Transform& b) { return a.matrix().m==b.matrix().m; }
 auto handleKey(ComponentId id) { return std::tuple{id.scene,id.index,id.generation}; }
 void checkQueryShape(const CollisionShape& shape,const Transform& pose) {
     checkPose(pose);
-    if(shape.type()==CollisionShapeType::TriangleMesh) throw std::invalid_argument("Spatial query geometry must be convex");
+    if(shape.containsMesh()) throw std::invalid_argument("Spatial query geometry must be convex");
 }
 Vec3 queryDisplacement(Vec3 direction,float distance) {
     checkVector(direction);
@@ -143,8 +187,34 @@ struct PhysicsWorld::Impl {
         Transform colliderTransform;
         Pose previous,current;
         std::optional<Pose> target;
+        std::shared_ptr<const std::vector<PhysicsSurfaceHit>> features;
+        std::shared_ptr<const PhysicalSurface> surface;
     };
     std::vector<Entry> entries;
+    struct VehicleEntry {
+        ComponentId component,body;
+        std::shared_ptr<const VehicleDefinition> definition;
+        JPH::Ref<JPH::VehicleConstraint> constraint;
+        JPH::Ref<JPH::VehicleCollisionTester> tester;
+        std::array<Pose,4> previous,current;
+    };
+    std::vector<VehicleEntry> vehicles;
+    void removeVehicle(std::size_t index) noexcept {
+        system.RemoveStepListener(vehicles[index].constraint);
+        system.RemoveConstraint(vehicles[index].constraint);
+        if(auto* c=dynamic_cast<VehicleComponent*>(scene.findComponent(vehicles[index].component))) {c->cancel();c->state_={};c->pending_.reset();}
+        vehicles.erase(vehicles.begin()+index);
+    }
+    enum class JointType { Hinge,Slider,Spring,Grab };
+    struct JointEntry {
+        PhysicsJointId id;
+        PhysicsJointBodies bodies;
+        JointType type;
+        JPH::Ref<JPH::TwoBodyConstraint> constraint;
+    };
+    std::vector<JointEntry> joints;
+    const std::uint64_t jointWorld=nextJointWorld.fetch_add(1);
+    std::uint64_t nextJoint=1;
     struct CharacterEntry {
         ComponentId component;
         ActorId actor;
@@ -163,22 +233,41 @@ struct PhysicsWorld::Impl {
     std::vector<PhysicsDebugLine> debug;
     PhysicsStats statistics;
     bool stepping=false,dispatching=false;
+    PhysicsSurfaceHit surfaceHit(const Entry& entry,const JPH::Shape& shape,const JPH::SubShapeID& subShape) const {
+        JPH::SubShapeID remainder;const auto* leaf=shape.GetLeafShape(subShape,remainder);if(!leaf)return {};
+        auto index=leaf->GetUserData();if(leaf->GetSubType()==JPH::EShapeSubType::Mesh)index+=static_cast<const JPH::MeshShape*>(leaf)->GetTriangleUserData(remainder);
+        PhysicsSurfaceHit result;if(entry.features&&index<entry.features->size())result=(*entry.features)[index];if(!result.surface)result.surface=entry.surface;return result;
+    }
     struct Listener final : JPH::ContactListener {
         Impl& impl;
         explicit Listener(Impl& impl):impl(impl) {}
+        JPH::ValidateResult OnContactValidate(const JPH::Body& a,const JPH::Body& b,JPH::RVec3Arg,const JPH::CollideShapeResult&) override {
+            const auto* first=impl.byBody(a.GetID());const auto* second=impl.byBody(b.GetID());
+            if(first&&second) for(const auto& joint:impl.joints) if(!joint.bodies.collideConnected
+                &&((joint.bodies.first==first->component&&joint.bodies.second==second->component)
+                ||(joint.bodies.second==first->component&&joint.bodies.first==second->component)))
+                return JPH::ValidateResult::RejectAllContactsForThisBodyPair;
+            return JPH::ValidateResult::AcceptAllContactsForThisBodyPair;
+        }
         void push(CollisionPhase phase,JPH::BodyID a,JPH::BodyID b,Vec3 point={},Vec3 normal={}) {
             const auto* first=impl.byBody(a);const auto* second=impl.byBody(b);
             if(!first||!second) return;
             if(first->settings.isSensor||second->settings.isSensor) return;
             if(impl.events.size()==maxEvents) { ++impl.statistics.droppedEvents;return; }
-            impl.events.push_back({phase,first->actor,second->actor,first->component,second->component,point,normal});
+            impl.events.push_back({phase,first->actor,second->actor,first->component,second->component,point,normal,{},{},{},0,false});
         }
-        void OnContactAdded(const JPH::Body& a,const JPH::Body& b,const JPH::ContactManifold& manifold,JPH::ContactSettings&) override {
-            push(CollisionPhase::Begin,a.GetID(),b.GetID(),vec(manifold.GetWorldSpaceContactPointOn1(0)),vec(manifold.mWorldSpaceNormal));
+        void contact(CollisionPhase phase,const JPH::Body& a,const JPH::Body& b,const JPH::ContactManifold& manifold,JPH::ContactSettings& settings) {
+            const auto* first=impl.byBody(a.GetID());const auto* second=impl.byBody(b.GetID());if(!first||!second||first->settings.isSensor||second->settings.isSensor)return;
+            auto one=impl.surfaceHit(*first,*a.GetShape(),manifold.mSubShapeID1),two=impl.surfaceHit(*second,*b.GetShape(),manifold.mSubShapeID2);
+            auto friction=[](const auto& e,const auto& hit){return e.settings.friction*(hit.surface?hit.surface->friction:1.f);};
+            settings.mCombinedFriction=std::sqrt(friction(*first,one)*friction(*second,two));
+            settings.mCombinedRestitution=std::max({first->settings.restitution,second->settings.restitution,one.surface?one.surface->restitution:0.f,two.surface?two.surface->restitution:0.f});
+            if(impl.events.size()==maxEvents){++impl.statistics.droppedEvents;return;}
+            const auto point=manifold.GetWorldSpaceContactPointOn1(0);CollisionEvent e{phase,first->actor,second->actor,first->component,second->component,vec(point),vec(manifold.mWorldSpaceNormal),{},{},{},0,false};
+            e.firstSurface=std::move(one);e.secondSurface=std::move(two);e.relativeVelocity=vec(b.GetPointVelocity(point)-a.GetPointVelocity(point));e.closingSpeed=std::max(0.f,-dot(e.relativeVelocity,e.normal));e.impactValid=true;impl.events.push_back(std::move(e));
         }
-        void OnContactPersisted(const JPH::Body& a,const JPH::Body& b,const JPH::ContactManifold& manifold,JPH::ContactSettings&) override {
-            push(CollisionPhase::Stay,a.GetID(),b.GetID(),vec(manifold.GetWorldSpaceContactPointOn1(0)),vec(manifold.mWorldSpaceNormal));
-        }
+        void OnContactAdded(const JPH::Body& a,const JPH::Body& b,const JPH::ContactManifold& manifold,JPH::ContactSettings& settings) override {contact(CollisionPhase::Begin,a,b,manifold,settings);}
+        void OnContactPersisted(const JPH::Body& a,const JPH::Body& b,const JPH::ContactManifold& manifold,JPH::ContactSettings& settings) override {contact(CollisionPhase::Stay,a,b,manifold,settings);}
         void OnContactRemoved(const JPH::SubShapeIDPair& pair) override { push(CollisionPhase::End,pair.GetBody1ID(),pair.GetBody2ID()); }
     } listener{*this};
     JPH::TempAllocatorImplWithMallocFallback temporary{8*1024*1024};
@@ -193,9 +282,9 @@ struct PhysicsWorld::Impl {
     const Entry* find(ComponentId id) const { for(const auto& entry:entries) if(entry.component==id) return &entry;return nullptr; }
     const Entry* byBody(JPH::BodyID id) const { for(const auto& entry:entries) if(entry.body==id) return &entry;return nullptr; }
     bool live(const Entry& entry) const {
-        const auto* body=scene.findComponent(entry.component);const auto* collider=scene.findComponent(entry.collider);
+        const auto* body=dynamic_cast<const RigidBodyComponent*>(scene.findComponent(entry.component));const auto* collider=dynamic_cast<const ColliderComponent*>(scene.findComponent(entry.collider));
         const auto* actor=scene.findActor(entry.actor);
-        return body&&collider&&actor&&body->parent()==actor&&collider->parent()==actor&&actor->parent()==&scene
+        return body&&collider&&actor&&colliderLayout(*collider,*body,*actor)&&actor->parent()==&scene
             &&body->isActiveInHierarchy()&&collider->isActiveInHierarchy();
     }
     struct QueryFilter final : JPH::BodyFilter {
@@ -223,7 +312,7 @@ struct PhysicsWorld::Impl {
         std::vector<PhysicsOverlapHit> result;result.reserve(collector.mHits.size());
         for(const auto& hit:collector.mHits) if(const auto* entry=byBody(hit.mBodyID2)) {
             result.push_back({entry->actor,entry->component,vec(offset+hit.mContactPointOn2),
-                vec(-hit.mPenetrationAxis.NormalizedOr(JPH::Vec3::sZero())),std::max(0.0f,hit.mPenetrationDepth)});
+                vec(-hit.mPenetrationAxis.NormalizedOr(JPH::Vec3::sZero())),std::max(0.0f,hit.mPenetrationDepth),surfaceHit(*entry,*system.GetBodyInterface().GetShape(entry->body),hit.mSubShapeID2)});
         }
         std::sort(result.begin(),result.end(),[](const auto& a,const auto& b) { return handleKey(a.body)<handleKey(b.body); });
         return result;
@@ -269,7 +358,73 @@ struct PhysicsWorld::Impl {
     Entry& require(ComponentId id) {
         auto* entry=find(id);if(!entry||!live(*entry)) throw std::logic_error("Rigid body is inactive");return *entry;
     }
+    bool jointBodyLive(ComponentId id) const {
+        const auto* entry=find(id);if(!entry||!live(*entry)) return false;
+        const auto* body=static_cast<const RigidBodyComponent*>(scene.findComponent(id));
+        const auto* collider=static_cast<const ColliderComponent*>(scene.findComponent(entry->collider));
+        return body->settings()==entry->settings&&collider->shape()==entry->shape&&sameTransform(collider->transform,entry->colliderTransform);
+    }
+    bool live(const JointEntry& joint) const {
+        return jointBodyLive(joint.bodies.first)&&(joint.bodies.second==ComponentId{}||jointBodyLive(joint.bodies.second));
+    }
+    JointEntry* findJoint(PhysicsJointId id) {
+        for(auto& joint:joints) if(joint.id==id) return &joint;
+        return nullptr;
+    }
+    JointEntry& requireJoint(PhysicsJointId id,JointType type) {
+        auto* joint=findJoint(id);
+        if(!joint||!live(*joint)||joint->type!=type) throw std::invalid_argument("Stale, foreign or wrong-type physics joint");
+        return *joint;
+    }
+    void refreshJointBodies(const PhysicsJointBodies& endpoints) {
+        auto& bodies=system.GetBodyInterface();
+        for(const auto id:{endpoints.first,endpoints.second}) if(const auto* entry=find(id)) {
+            bodies.InvalidateContactCache(entry->body);
+            if(entry->settings.motion!=BodyMotion::Static) bodies.ActivateBody(entry->body);
+        }
+    }
+    void removeJoint(std::size_t index) noexcept {
+        const auto endpoints=joints[index].bodies;
+        system.RemoveConstraint(joints[index].constraint);
+        joints.erase(joints.begin()+index);
+        refreshJointBodies(endpoints);
+    }
+    PhysicsJointId createJoint(const PhysicsJointBodies& endpoints,JointType type,const JPH::TwoBodyConstraintSettings& settings) {
+        if(stepping) throw std::logic_error("Cannot create a joint during the solver step");
+        if(!jointBodyLive(endpoints.first)||(endpoints.second!=ComponentId{}&&!jointBodyLive(endpoints.second)))
+            throw std::invalid_argument("Joint endpoints require current registered bodies; synchronize the scene first");
+        const auto& first=require(endpoints.first);
+        const auto* second=endpoints.second==ComponentId{} ? nullptr : &require(endpoints.second);
+        if((second&&first.component==second->component)||first.settings.isSensor||(second&&second->settings.isSensor)
+            ||(first.settings.motion!=BodyMotion::Dynamic&&(!second||second->settings.motion!=BodyMotion::Dynamic)))
+            throw std::invalid_argument("Joint requires distinct solid bodies and at least one dynamic endpoint");
+        for(const auto* entry:{&first,second}) if(entry) {
+            scene.findComponent(entry->component)->validate();scene.findComponent(entry->collider)->validate();
+            (void)poseOf(scene.findActor(entry->actor)->worldMatrix());
+        }
+        if(joints.size()==maxJoints) throw std::length_error("Physics joint limit exceeded (4096)");
+        if(nextJoint==0||jointWorld==0) throw std::overflow_error("Physics joint identity exhausted");
+        // Reserve before publishing into Jolt so allocation failure cannot leave an orphan.
+        if(joints.size()==joints.capacity()) joints.reserve(std::min(maxJoints,std::max<std::size_t>(16,joints.size()*2)));
+        JPH::Ref<JPH::TwoBodyConstraint> constraint;
+        {
+            // The reference/world endpoint is body 1; the first public endpoint is body 2.
+            const JPH::BodyID ids[]={second ? second->body : JPH::BodyID{},first.body};
+            JPH::BodyLockMultiWrite lock(system.GetBodyLockInterface(),ids,2);
+            auto* a=second ? lock.GetBody(0) : &JPH::Body::sFixedToWorld;auto* b=lock.GetBody(1);
+            if(!a||!b) throw std::logic_error("Joint solver body disappeared");
+            constraint=settings.Create(*a,*b);
+        }
+        const PhysicsJointId id{jointWorld,nextJoint++};
+        system.AddConstraint(constraint);
+        joints.push_back({id,endpoints,type,std::move(constraint)});
+        refreshJointBodies(endpoints);return id;
+    }
     void remove(std::size_t index) noexcept {
+        const auto id=entries[index].component;
+        for(std::size_t i=0;i<vehicles.size();) if(vehicles[i].body==id)removeVehicle(i);else ++i;
+        // Constraints hold Jolt body references: release before destroying either body.
+        for(std::size_t i=0;i<joints.size();) if(joints[i].bodies.first==id||joints[i].bodies.second==id) removeJoint(i);else ++i;
         auto& bodies=system.GetBodyInterface();bodies.RemoveBody(entries[index].body);bodies.DestroyBody(entries[index].body);
         entries.erase(entries.begin()+index);
     }
@@ -277,6 +432,8 @@ struct PhysicsWorld::Impl {
         return {entry.previous.position+(entry.current.position-entry.previous.position)*alpha,entry.previous.rotation.SLERP(entry.current.rotation,alpha)};
     }
 };
+
+#include "physics_vehicle.inc"
 
 PhysicsWorld::PhysicsWorld(Scene& scene):impl_(std::make_unique<Impl>(scene)) {}
 PhysicsWorld::~PhysicsWorld() {
@@ -286,6 +443,63 @@ PhysicsWorld::~PhysicsWorld() {
 }
 void PhysicsWorld::setGravity(Vec3 gravity) { checkVector(gravity);impl_->system.SetGravity(jvec(gravity)); }
 Vec3 PhysicsWorld::gravity() const { return vec(impl_->system.GetGravity()); }
+PhysicsJointId PhysicsWorld::createHinge(const HingeJointSettings& settings) {
+    checkVector(settings.anchor);const auto axis=jointAxis(settings.axis);const auto normal=jointNormal(axis);
+    checkLimits(settings.minAngle,settings.maxAngle);checkNonnegative(settings.frictionTorque);
+    constexpr float pi=3.14159265358979323846f;
+    if(settings.minAngle< -pi||settings.maxAngle>pi) throw std::invalid_argument("Hinge limits require [-pi,pi]");
+    JPH::HingeConstraintSettings create;
+    create.mPoint1=create.mPoint2=jvec(settings.anchor);
+    create.mHingeAxis1=create.mHingeAxis2=jvec(axis);create.mNormalAxis1=create.mNormalAxis2=jvec(normal);
+    create.mLimitsMin=settings.minAngle;create.mLimitsMax=settings.maxAngle;create.mMaxFrictionTorque=settings.frictionTorque;
+    return impl_->createJoint(settings.bodies,Impl::JointType::Hinge,create);
+}
+PhysicsJointId PhysicsWorld::createSlider(const SliderJointSettings& settings) {
+    checkVector(settings.anchor);const auto axis=jointAxis(settings.axis);const auto normal=jointNormal(axis);
+    checkLimits(settings.minDistance,settings.maxDistance);checkNonnegative(settings.frictionForce);
+    JPH::SliderConstraintSettings create;
+    create.mPoint1=create.mPoint2=jvec(settings.anchor);
+    create.mSliderAxis1=create.mSliderAxis2=jvec(axis);create.mNormalAxis1=create.mNormalAxis2=jvec(normal);
+    create.mLimitsMin=settings.minDistance;create.mLimitsMax=settings.maxDistance;create.mMaxFrictionForce=settings.frictionForce;
+    return impl_->createJoint(settings.bodies,Impl::JointType::Slider,create);
+}
+PhysicsJointId PhysicsWorld::createSpring(const SpringJointSettings& settings) {
+    checkVector(settings.firstAnchor);checkVector(settings.secondAnchor);
+    checkNonnegative(settings.restLength);checkNonnegative(settings.frequency);checkNonnegative(settings.dampingRatio);
+    if(settings.dampingRatio>1) throw std::invalid_argument("Spring damping ratio requires [0,1]");
+    JPH::DistanceConstraintSettings create;
+    create.mPoint1=jvec(settings.secondAnchor);create.mPoint2=jvec(settings.firstAnchor);
+    create.mMinDistance=create.mMaxDistance=settings.restLength;
+    create.mLimitsSpringSettings={JPH::ESpringMode::FrequencyAndDamping,settings.frequency,settings.dampingRatio};
+    return impl_->createJoint(settings.bodies,Impl::JointType::Spring,create);
+}
+PhysicsJointId PhysicsWorld::createGrab(const GrabJointSettings& settings) {
+    checkVector(settings.anchor);checkVector(settings.target);
+    JPH::PointConstraintSettings create;create.mPoint1=jvec(settings.target);create.mPoint2=jvec(settings.anchor);
+    return impl_->createJoint({settings.body,{},false},Impl::JointType::Grab,create);
+}
+bool PhysicsWorld::hasJoint(PhysicsJointId id) const {
+    const auto* joint=impl_->findJoint(id);return joint&&impl_->live(*joint);
+}
+bool PhysicsWorld::removeJoint(PhysicsJointId id) {
+    if(impl_->stepping) throw std::logic_error("Cannot remove a joint during the solver step");
+    for(std::size_t i=0;i<impl_->joints.size();++i) if(impl_->joints[i].id==id) { impl_->removeJoint(i);return true; }
+    return false;
+}
+void PhysicsWorld::setGrabTarget(PhysicsJointId id,Vec3 target) {
+    if(impl_->stepping) throw std::logic_error("Cannot retarget a joint during the solver step");
+    checkVector(target);auto& joint=impl_->requireJoint(id,Impl::JointType::Grab);
+    static_cast<JPH::PointConstraint*>(joint.constraint.GetPtr())->SetPoint1(JPH::EConstraintSpace::WorldSpace,jvec(target));
+    joint.constraint->ResetWarmStart();impl_->refreshJointBodies(joint.bodies);
+}
+float PhysicsWorld::hingeAngle(PhysicsJointId id) const {
+    const auto& joint=impl_->requireJoint(id,Impl::JointType::Hinge);
+    return static_cast<const JPH::HingeConstraint*>(joint.constraint.GetPtr())->GetCurrentAngle();
+}
+float PhysicsWorld::sliderPosition(PhysicsJointId id) const {
+    const auto& joint=impl_->requireJoint(id,Impl::JointType::Slider);
+    return static_cast<const JPH::SliderConstraint*>(joint.constraint.GetPtr())->GetCurrentPosition();
+}
 bool PhysicsWorld::layerCollision(std::uint8_t a,std::uint8_t b) const {
     if(a>=16||b>=16) throw std::invalid_argument("Collision layer must be 0..15");
     return (impl_->pairFilter.masks[a] & (1u<<b))!=0;
@@ -315,12 +529,13 @@ void PhysicsWorld::synchronize() {
     auto& p=*impl_;
     for(std::size_t i=0;i<p.entries.size();) {
         if(!p.live(p.entries[i])) { p.remove(i);continue; }
-        const auto& entry=p.entries[i];
+        auto& entry=p.entries[i];
         const auto* body=static_cast<const RigidBodyComponent*>(p.scene.findComponent(entry.component));
         const auto* collider=static_cast<const ColliderComponent*>(p.scene.findComponent(entry.collider));
         if(body->owner()->id()!=entry.actor||body->settings()!=entry.settings||collider->shape()!=entry.shape||!sameTransform(collider->transform,entry.colliderTransform)) {
             p.remove(i);continue;
         }
+        if(entry.surface!=collider->surface()){entry.surface=collider->surface();p.system.GetBodyInterface().InvalidateContactCache(entry.body);for(const auto& other:p.entries)if(other.settings.motion==BodyMotion::Dynamic)p.system.GetBodyInterface().ActivateBody(other.body);}
         body->validate();collider->validate();(void)poseOf(body->owner()->worldMatrix());++i;
     }
     // Registration order is independent of the order in which components were added.
@@ -328,15 +543,12 @@ void PhysicsWorld::synchronize() {
         auto* body=dynamic_cast<RigidBodyComponent*>(slot.component);
         if(!body||!body->isInitialized()||!body->isActiveInHierarchy()) continue;
         auto* actor=body->owner();
-        if(!actor||actor->parent()!=&p.scene||body->parent()!=actor) throw std::invalid_argument("Physics bodies must be direct components of scene-root actors");
+        if(!actor||actor->parent()!=&p.scene||!bodyLayout(*body,*actor)) throw std::invalid_argument("Physics bodies require scene-root actors and direct or protected identity-local static containers");
         body->validate();
         std::size_t bodyCount=0;ColliderComponent* collider=nullptr;
-        for(const auto& child:actor->children()) {
-            if(auto* candidate=dynamic_cast<RigidBodyComponent*>(child.get());candidate&&candidate->isActiveInHierarchy()) ++bodyCount;
-            if(auto* candidate=dynamic_cast<ColliderComponent*>(child.get());candidate&&candidate->isInitialized()&&candidate->isActiveInHierarchy()) {
-                if(collider) throw std::invalid_argument("A physics actor currently supports one active collider");
-                collider=candidate;
-            }
+        for(auto* candidate:actor->getComponents<RigidBodyComponent>())if(bodyLayout(*candidate,*actor)&&candidate->isActiveInHierarchy())++bodyCount;
+        for(auto* candidate:actor->getComponents<ColliderComponent>())if(colliderLayout(*candidate,*body,*actor)&&candidate->isInitialized()&&candidate->isActiveInHierarchy()){
+            if(collider)throw std::invalid_argument("A physics actor currently supports one active collider");collider=candidate;
         }
         if(bodyCount!=1) throw std::invalid_argument("A physics actor supports one active rigid body");
         if(!collider) continue; // Removed/disabled/missing collider makes the body inactive.
@@ -345,28 +557,36 @@ void PhysicsWorld::synchronize() {
         if(p.find(body->id())) continue;
         if(p.entries.size()==maxBodies) throw std::length_error("Physics body limit exceeded (4096)");
         const auto& settings=body->settings();
-        if(settings.motion!=BodyMotion::Static&&collider->shape()->type()==CollisionShapeType::TriangleMesh)
+        if(settings.motion!=BodyMotion::Static&&collider->shape()->containsMesh())
             throw std::invalid_argument("Triangle mesh collision is restricted to static bodies; use a convex hull");
-        if(settings.isSensor&&collider->shape()->type()==CollisionShapeType::TriangleMesh)
+        if(settings.isSensor&&collider->shape()->containsMesh())
             throw std::invalid_argument("Sensor geometry must be convex");
         CookedShape shape;
-        for(const auto& existing:p.entries) if(existing.shape==collider->shape()&&sameTransform(existing.colliderTransform,collider->transform)) {
-            shape={p.system.GetBodyInterface().GetShape(existing.body),existing.geometry};break;
+        for(const auto& existing:p.entries) if(dot(existing.settings.centerOfMassOffset-settings.centerOfMassOffset,existing.settings.centerOfMassOffset-settings.centerOfMassOffset)==0&&existing.shape==collider->shape()&&sameTransform(existing.colliderTransform,collider->transform)) {
+            shape={p.system.GetBodyInterface().GetShape(existing.body),existing.geometry,existing.features};break;
         }
-        if(!shape.body) shape=makeShape(*collider->shape(),collider->transform);
+        if(!shape.body) {
+            shape=makeShape(*collider->shape(),collider->transform);
+            if(dot(settings.centerOfMassOffset,settings.centerOfMassOffset)!=0) shape.body=new JPH::OffsetCenterOfMassShape(shape.body,jvec(settings.centerOfMassOffset));
+        }
         const auto motion=settings.motion==BodyMotion::Dynamic ? JPH::EMotionType::Dynamic : settings.motion==BodyMotion::Kinematic ? JPH::EMotionType::Kinematic : JPH::EMotionType::Static;
         JPH::BodyCreationSettings create(shape.body,world.position,world.rotation,motion,JPH::ObjectLayer(settings.collisionLayer+(settings.motion==BodyMotion::Static ? 0 : 16)));
         create.mFriction=settings.friction;create.mRestitution=settings.restitution;create.mGravityFactor=settings.gravityFactor;
         create.mLinearDamping=settings.linearDamping;create.mAngularDamping=settings.angularDamping;
         create.mMotionQuality=settings.continuousCollision ? JPH::EMotionQuality::LinearCast : JPH::EMotionQuality::Discrete;
+        create.mUseManifoldReduction=std::none_of(shape.features->begin(),shape.features->end(),[](const auto& f){return bool(f.surface);});
         create.mIsSensor=settings.isSensor;
         create.mCollideKinematicVsNonDynamic=settings.isSensor;
-        if(settings.motion!=BodyMotion::Static) { create.mOverrideMassProperties=JPH::EOverrideMassProperties::CalculateInertia;create.mMassPropertiesOverride.mMass=settings.mass; }
+        if(settings.motion!=BodyMotion::Static) { create.mOverrideMassProperties=JPH::EOverrideMassProperties::MassAndInertiaProvided;
+            auto mp=shape.body->GetMassProperties();mp.ScaleToMass(settings.mass);
+            auto scale=JPH::Mat44::sScale(jvec({std::sqrt(settings.inertiaScale.x),std::sqrt(settings.inertiaScale.y),std::sqrt(settings.inertiaScale.z)}));
+            mp.mInertia=scale*mp.mInertia*scale;create.mMassPropertiesOverride=mp; }
         const auto id=p.system.GetBodyInterface().CreateAndAddBody(create,motion==JPH::EMotionType::Static ? JPH::EActivation::DontActivate : JPH::EActivation::Activate);
         if(id.IsInvalid()) throw std::runtime_error("Jolt could not allocate a physics body");
-        p.entries.push_back({body->id(),collider->id(),actor->id(),id,settings,collider->shape(),shape.geometry,collider->transform,world,world,{}});
+        p.entries.push_back({body->id(),collider->id(),actor->id(),id,settings,collider->shape(),shape.geometry,collider->transform,world,world,{},shape.features,collider->surface()});
     }
     synchronizeCharacters();
+    synchronizeVehicles();
 }
 void PhysicsWorld::synchronizeCharacters() {
     auto& p=*impl_;
@@ -475,6 +695,7 @@ void PhysicsWorld::step(double seconds) {
             bodies.MoveKinematic(entry.body,pose.position,pose.rotation,static_cast<float>(seconds));entry.target.reset();
         }
     }
+    stepVehicles(false,seconds);
     const auto start=std::chrono::steady_clock::now();p.stepping=true;
     const auto result=p.system.Update(static_cast<float>(seconds),1,&p.temporary,&p.jobs);p.stepping=false;
     p.statistics.lastStepMilliseconds=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();++p.statistics.steps;
@@ -483,6 +704,7 @@ void PhysicsWorld::step(double seconds) {
         bodies.GetPositionAndRotation(entry.body,entry.current.position,entry.current.rotation);
         if(entry.settings.motion!=BodyMotion::Static) if(auto* actor=p.scene.findActor(entry.actor)) actor->setWorldTransform(entry.current.matrix());
     }
+    stepVehicles(true);
     stepCharacters(seconds);
     try {
         const auto triggers=p.sampleTriggers();p.dispatching=true;
@@ -503,6 +725,7 @@ void PhysicsWorld::step(double seconds) {
 PhysicsStats PhysicsWorld::stats() const {
     auto result=impl_->statistics;result.bodies=0;result.activeBodies=0;
     for(const auto& entry:impl_->entries) if(impl_->live(entry)) { ++result.bodies;result.activeBodies+=impl_->system.GetBodyInterface().IsActive(entry.body); }
+    for(const auto& joint:impl_->joints) if(impl_->live(joint)) ++result.joints;
     return result;
 }
 Vec3 PhysicsWorld::velocity(ComponentId id,bool angular) const {
@@ -518,6 +741,7 @@ void PhysicsWorld::command(ComponentId id,Vec3 value,int command) {
         case 1: bodies.SetAngularVelocity(entry.body,jvec(value));break;
         case 2: bodies.AddForce(entry.body,jvec(value));break;
         case 3: bodies.AddImpulse(entry.body,jvec(value));break;
+        case 4: bodies.AddTorque(entry.body,jvec(value));break;
     }
     bodies.ActivateBody(entry.body);
 }
@@ -526,6 +750,7 @@ void PhysicsWorld::teleport(ComponentId id,const Transform& pose,bool clearVeloc
     bodies.SetPositionAndRotation(entry.body,world.position,world.rotation,entry.settings.motion==BodyMotion::Static ? JPH::EActivation::DontActivate : JPH::EActivation::Activate);
     if(clearVelocity&&entry.settings.motion!=BodyMotion::Static) bodies.SetLinearAndAngularVelocity(entry.body,JPH::Vec3::sZero(),JPH::Vec3::sZero());
     entry.previous=entry.current=world;entry.target.reset();impl_->scene.findActor(entry.actor)->setWorldTransform(pose);
+    for(std::size_t i=0;i<impl_->vehicles.size();)if(impl_->vehicles[i].body==id)impl_->removeVehicle(i);else ++i;
 }
 void PhysicsWorld::moveKinematic(ComponentId id,const Transform& pose) {
     checkPose(pose);auto& entry=impl_->require(id);
@@ -544,13 +769,42 @@ std::optional<PhysicsRayHit> PhysicsWorld::raycast(Vec3 origin,Vec3 direction,fl
     const auto point=ray.GetPointOnRay(hit.mFraction);
     JPH::BodyLockRead lock(impl_->system.GetBodyLockInterface(),hit.mBodyID);
     if(!lock.Succeeded()) return {};
-    return PhysicsRayHit{entry->actor,entry->component,vec(point),vec(lock.GetBody().GetWorldSpaceSurfaceNormal(hit.mSubShapeID2,point)),hit.mFraction*distance};
+    return PhysicsRayHit{entry->actor,entry->component,vec(point),vec(lock.GetBody().GetWorldSpaceSurfaceNormal(hit.mSubShapeID2,point)),hit.mFraction*distance,impl_->surfaceHit(*entry,*lock.GetBody().GetShape(),hit.mSubShapeID2)};
 }
 std::vector<PhysicsOverlapHit> PhysicsWorld::overlap(const CollisionShape& shape,const Transform& worldPose,const PhysicsQueryFilter& filter) const {
     checkQueryShape(shape,worldPose);const auto cooked=makeShape(shape,{}).geometry;
     const auto pose=poseOf(worldPose.matrix());
     const auto center=JPH::RMat44::sRotationTranslation(pose.rotation,pose.position).PreTranslated(cooked->GetCenterOfMass());
     return impl_->overlaps(cooked,center,filter);
+}
+PhysicsGeometry PhysicsWorld::triangleGeometry(const PhysicsQueryFilter& options,std::size_t triangleLimit) const {
+    if(triangleLimit==0||triangleLimit>100000) throw std::invalid_argument("Invalid collision geometry triangle limit");
+    if(impl_->stepping) throw std::logic_error("Cannot snapshot collision geometry during a solver step");
+    PhysicsGeometry result;Impl::QueryFilter filter(*impl_,options);
+    constexpr int batch=JPH::Shape::cGetTrianglesMinTrianglesRequested;
+    JPH::Float3 vertices[batch*3];
+    for(const auto& entry:impl_->entries) {
+        if(!filter.ShouldCollide(entry.body)) continue;
+        JPH::BodyLockRead lock(impl_->system.GetBodyLockInterface(),entry.body);if(!lock.Succeeded()) continue;
+        const auto& body=lock.GetBody();
+        JPH::AllHitCollisionCollector<JPH::TransformedShapeCollector> leaves;
+        body.GetTransformedShape().CollectTransformedShapes(body.GetWorldSpaceBounds(),leaves);
+        bool included=false;
+        for(const auto& leaf:leaves.mHits) {
+        JPH::Shape::GetTrianglesContext context;
+        leaf.GetTrianglesStart(context,body.GetWorldSpaceBounds(),JPH::RVec3::sZero());
+        while(const auto count=leaf.GetTrianglesNext(context,batch,vertices)) {
+            if(result.indices.size()/3+std::size_t(count)>triangleLimit) throw std::length_error("Collision geometry triangle limit exceeded");
+            for(int i=0;i<count*3;++i) {
+                const Vec3 point{vertices[i].x,vertices[i].y,vertices[i].z};checkVector(point);
+                result.indices.push_back(std::uint32_t(result.vertices.size()));result.vertices.push_back(point);
+            }
+            included=true;
+        }
+        }
+        if(included) result.bodies.push_back(entry.component);
+    }
+    return result;
 }
 std::optional<PhysicsSweepHit> PhysicsWorld::sweep(const CollisionShape& shape,const Transform& worldPose,Vec3 direction,float distance,const PhysicsQueryFilter& options) const {
     checkQueryShape(shape,worldPose);const auto displacement=queryDisplacement(direction,distance);
@@ -565,13 +819,24 @@ std::optional<PhysicsSweepHit> PhysicsWorld::sweep(const CollisionShape& shape,c
     const auto& hit=collector.mHit;const auto* entry=impl_->byBody(hit.mBodyID2);if(!entry) return {};
     return PhysicsSweepHit{entry->actor,entry->component,vec(pose.position+hit.mContactPointOn2),
         vec(-hit.mPenetrationAxis.NormalizedOr(JPH::Vec3::sZero())),hit.mFraction*distance,hit.mFraction,
-        std::max(0.0f,hit.mPenetrationDepth),hit.mFraction==0&&hit.mPenetrationDepth>0};
+        std::max(0.0f,hit.mPenetrationDepth),hit.mFraction==0&&hit.mPenetrationDepth>0,impl_->surfaceHit(*entry,*impl_->system.GetBodyInterface().GetShape(entry->body),hit.mSubShapeID2)};
 }
 void PhysicsWorld::setInterpolationAlpha(float alpha) {
     if(!std::isfinite(alpha)||alpha<0||alpha>1) throw std::invalid_argument("Interpolation alpha must be 0..1");
     alpha_=alpha;
 }
+Mat4 PhysicsWorld::presentationMatrix(const Node& node) const {
+    if(node.scene()!=&impl_->scene||node.isPendingRemoval())throw std::invalid_argument("Foreign or removed presentation target");
+    return renderMatrix(node,node.worldMatrix());
+}
 Mat4 PhysicsWorld::renderMatrix(const Node& node,const Mat4& world) const {
+    for(const auto& vehicle:impl_->vehicles) if(auto* c=dynamic_cast<VehicleComponent*>(impl_->scene.findComponent(vehicle.component));c&&c->isActiveInHierarchy()) {
+        const auto* chassis=impl_->find(vehicle.body);if(!chassis||!impl_->live(*chassis))continue;
+        for(int i=0;i<4;++i) if(!c->visuals_[i].empty()) for(const Node* n=&node;n&&n!=c->owner();n=n->parent()) if(n->savedId()==c->visuals_[i]) {
+            Pose wheel{vehicle.previous[i].position+(vehicle.current[i].position-vehicle.previous[i].position)*alpha_,vehicle.previous[i].rotation.SLERP(vehicle.current[i].rotation,alpha_)};
+            return impl_->interpolated(*chassis,alpha_).matrix()*wheel.matrix()*inverseAffine(c->owner()->worldMatrix())*world;
+        }
+    }
     for(const Node* ancestor=&node;ancestor;ancestor=ancestor->parent()) if(const auto* actor=dynamic_cast<const Actor*>(ancestor)) {
         for(const auto& entry:impl_->characters) if(entry.actor==actor->id()&&impl_->live(entry)) {
             const Pose pose{entry.previous.position+(entry.current.position-entry.previous.position)*alpha_,entry.previous.rotation.SLERP(entry.current.rotation,alpha_)};
@@ -584,6 +849,11 @@ Mat4 PhysicsWorld::renderMatrix(const Node& node,const Mat4& world) const {
 }
 void PhysicsWorld::debugLines(std::vector<PhysicsDebugLine>& output,std::size_t limit) const {
     output.clear();
+    for(const auto& e:impl_->vehicles) if(auto* c=dynamic_cast<VehicleComponent*>(impl_->scene.findComponent(e.component));c&&c->state_.active)for(int i=0;i<4&&output.size()+2<=limit;++i){
+        auto* body=impl_->find(e.body);if(!body)continue;const auto origin=transformPoint(body->current.matrix(),e.definition->wheels[i].position);
+        const auto end=transformPoint(body->current.matrix(),{e.current[i].position.GetX(),e.current[i].position.GetY(),e.current[i].position.GetZ()});
+        output.push_back({origin,end,{1,1,0}});const auto& w=c->state_.wheels[i];if(w.contact)output.push_back({w.contactPoint,w.contactPoint+w.contactNormal*.4f,{1,0,1}});
+    }
     for(const auto& entry:impl_->entries) {
         if(!impl_->live(entry)||output.size()>=limit) continue;
         const auto shape=entry.geometry;
@@ -614,18 +884,13 @@ void PhysicsWorld::debugLines(std::vector<PhysicsDebugLine>& output,std::size_t 
             }
             continue;
         }
-        JPH::Shape::GetTrianglesContext context;
-        // Jolt triangle extraction uses the centre-of-mass position, not body origin.
         const auto center=pose.position+pose.rotation*shape->GetCenterOfMass();
-        shape->GetTrianglesStart(context,JPH::AABox::sBiggest(),center,pose.rotation,JPH::Vec3::sReplicate(1));
-        JPH::Float3 vertices[3*32];
-        while(output.size()<limit) {
-            const auto count=shape->GetTrianglesNext(context,32,vertices);if(!count) break;
-            for(int triangle=0;triangle<count&&output.size()<limit;++triangle) for(int edge=0;edge<3&&output.size()<limit;++edge) {
-                const auto& a=vertices[triangle*3+edge];const auto& b=vertices[triangle*3+(edge+1)%3];
-                output.push_back({{a.x,a.y,a.z},{b.x,b.y,b.z},color});
-            }
+        JPH::TransformedShape transformed(center,pose.rotation,shape,entry.body);
+        JPH::AllHitCollisionCollector<JPH::TransformedShapeCollector> leaves;transformed.CollectTransformedShapes(JPH::AABox::sBiggest(),leaves);
+        for(const auto& leaf:leaves.mHits){if(output.size()>=limit)break;JPH::TransformedShape::GetTrianglesContext context;leaf.GetTrianglesStart(context,JPH::AABox::sBiggest(),JPH::RVec3::sZero());JPH::Float3 vertices[96];
+            while(output.size()<limit){const auto count=leaf.GetTrianglesNext(context,32,vertices);if(!count)break;for(int t=0;t<count&&output.size()<limit;++t)for(int edge=0;edge<3&&output.size()<limit;++edge){const auto& a=vertices[t*3+edge];const auto& b=vertices[t*3+(edge+1)%3];output.push_back({{a.x,a.y,a.z},{b.x,b.y,b.z},color});}}
         }
+
     }
 }
 void PhysicsWorld::appendDebugDraws(SceneFrame& frame) const {

@@ -1,0 +1,14 @@
+.editor-content-tools{display:flex;gap:8px;padding:8px 16px;align-items:flex-start}.editor-content-tools>button{flex:1}.editor-content-tools>details{flex:2;background:#101c26;border:1px solid #344655;border-radius:6px;padding:9px;font-size:11px}
+.editor-content-section{border-top:1px solid var(--line);padding:15px 18px;font-size:11px}.editor-content-section>summary,.editor-content-tools summary{cursor:pointer;font-weight:600;color:#d1e5ed;list-style-position:inside}.editor-content-section[open]>summary{margin-bottom:14px}
+.editor-content-section label,.editor-content-tools label{display:flex;gap:8px;align-items:center;justify-content:space-between;margin:9px 0;color:#b5c7d5}
+.editor-content-section input:not([type=checkbox]),.editor-content-section select,.editor-content-tools input[type=number]{min-width:0;width:55%;background:#101c26;color:var(--text);border:1px solid #344655;border-radius:4px;padding:7px;font:inherit}
+.editor-content-section input[type=checkbox],.editor-content-tools input[type=checkbox]{accent-color:var(--accent)}.editor-content-section input:disabled,.editor-content-section select:disabled{opacity:.45}
+.editor-content-section label:has(select){display:block}.editor-content-section select{display:block;width:100%;margin-top:6px}.editor-content-section fieldset{margin:12px 0;padding:9px;border:1px solid #2a3b48;border-radius:5px;min-width:0}.editor-content-section legend{color:var(--accent);font-size:10px;padding:0 5px}
+.editor-content-section small,.editor-content-section p{display:block;color:var(--muted);font-size:10px;line-height:1.5;overflow-wrap:anywhere}.editor-content-section p.error{color:#ffaaa2}.editor-content-buttons{display:flex;gap:7px;flex-wrap:wrap}.editor-content-buttons button{flex:1;white-space:nowrap}
+#editor-material-fields{display:grid;grid-template-columns:1fr;gap:0}#editor-material-fields label{margin:6px 0}#editor-material-fields label:has(select){display:flex}#editor-material-fields select{width:55%;margin:0}
+body.editor-placing #viewport{cursor:crosshair}body.editor-placing #editor-gizmos{display:none!important}
+#editor-assets:not([open])+#editor-component-inspector{margin-top:0}
+body.editor-active #editor-tree{max-height:220px}
+
+body.editor-playing #scene-editor .editor-hierarchy,body.editor-playing #scene-editor .editor-inspector,body.editor-playing #editor-structure,body.editor-playing #editor-component-inspector,body.editor-playing #editor-materials{opacity:.5;pointer-events:none;}
+#editor-gizmos #editor-scale-uniform{pointer-events:all;cursor:ew-resize;}

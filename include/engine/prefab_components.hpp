@@ -24,6 +24,7 @@ struct PrefabCameraSettings {
     float verticalFov=pi/3,orthographicHeight=10,nearPlane=0.1f,farPlane=100;
     Viewport viewport;
     std::uint32_t visibilityMask=0xffffffffu;
+    CameraFollowSettings follow;
 };
 struct PrefabLightSettings {
     LightType type=LightType::Directional;

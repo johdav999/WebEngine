@@ -57,4 +57,55 @@ std::shared_ptr<const EffectAsset> explosionEffect() {
         a->validate();return a;
     }();return asset;
 }
+std::shared_ptr<const EffectAsset> fountainEffect() {
+    static const auto asset=[] {
+        auto a=std::make_shared<EffectAsset>();a->name="Fountain";
+        auto drops=std::make_shared<ParticleEmitterDefinition>();drops->name="Fountain drops";drops->texture=radialAtlas(false);
+        drops->shape=ParticleShape::Cone;drops->radius=.12f;drops->coneAngle=.3f;drops->speedMin=3;drops->speedMax=5;
+        drops->velocityMin=drops->velocityMax={};drops->gravity={0,-3,0};drops->drag=.12f;drops->wind={.2f,0,0};
+        drops->space=ParticleSpace::World;drops->spawnRate=80;drops->lifetimeMin=1.5f;drops->lifetimeMax=2.5f;
+        drops->alignment=ParticleAlignment::Velocity;drops->stretch=.075f;drops->softDistance=.18f;
+        drops->size={{0,.07f},{1,.025f}};drops->color={{0,{.2f,.7f,1,.9f}},{.8f,{.3f,.6f,1,.7f}},{1,{.3f,.6f,1,0}}};
+        a->emitters.push_back({drops,{}});
+        auto mist=std::make_shared<ParticleEmitterDefinition>();mist->name="Drifting mist";mist->texture=drops->texture;mist->seed=31;
+        mist->shape=ParticleShape::Disc;mist->radius=.45f;mist->drag=.7f;mist->wind={.35f,.1f,0};mist->turbulence={.15f,.08f,.15f};
+        mist->velocityMin={-.1f,.1f,-.1f};mist->velocityMax={.1f,.3f,.1f};mist->spawnRate=12;mist->lifetimeMin=2;mist->lifetimeMax=3;
+        mist->size={{0,.2f},{1,1.1f}};mist->softDistance=.5f;mist->color={{0,{.5f,.7f,.85f,0}},{.2f,{.5f,.7f,.85f,.35f}},{1,{.5f,.7f,.85f,0}}};
+        a->emitters.push_back({mist,{}});a->validate();return a;
+    }();return asset;
+}
+
+std::shared_ptr<const EffectAsset> ribbonEffect(){
+    static const auto asset=[] {auto a=std::make_shared<EffectAsset>();a->name="Ribbon trail";
+        auto d=std::make_shared<ParticleEmitterDefinition>();d->name="Ribbon";d->renderMode=ParticleRenderMode::Ribbon;
+        d->space=ParticleSpace::World;d->trailLifetime=2;d->trailMinDistance=.04f;d->trailBreakDistance=3;d->trailMaxPoints=256;
+        d->size={{0,.3f},{1,.02f}};d->color={{0,{.2f,1.3f,1.5f,1}},{.5f,{.8f,.3f,1,.7f}},{1,{.4f,.1f,1,0}}};
+        a->emitters.push_back({d,{}});a->validate();return a;
+    }();return asset;
+}
+
+std::shared_ptr<const EffectAsset> groundRingEffect(){
+    static const auto asset=[] {auto a=std::make_shared<EffectAsset>();a->name="Ground ring";
+        auto texture=std::make_shared<Texture>();texture->name="Procedural ground ring";texture->width=texture->height=64;texture->pixels.resize(64*64*4);
+        for(int y=0;y<64;++y)for(int x=0;x<64;++x){const float dx=(x+.5f)/32-1,dy=(y+.5f)/32-1;
+            const float alpha=std::clamp(1-std::abs(std::sqrt(dx*dx+dy*dy)-.75f)/.08f,0.f,1.f);const auto i=(y*64+x)*4;
+            texture->pixels[i]=texture->pixels[i+1]=texture->pixels[i+2]=255;texture->pixels[i+3]=std::uint8_t(alpha*255);}
+        auto d=std::make_shared<ParticleEmitterDefinition>();d->name="Ground ring";d->texture=texture;d->alignment=ParticleAlignment::Plane;
+        d->space=ParticleSpace::World;d->surfaceOffset=.02f;d->spawnRate=1;d->duration=2;d->lifetimeMin=d->lifetimeMax=1.5f;d->velocityMin=d->velocityMax={};
+        d->size={{0,.2f},{1,3}};d->color={{0,{.2f,.8f,1,1}},{1,{.3f,.4f,1,0}}};
+        a->emitters.push_back({d,{}});a->validate();return a;
+    }();return asset;
+}
+
+std::shared_ptr<const EffectAsset> debrisEffect(){
+    static const auto asset=[] {auto a=std::make_shared<EffectAsset>();a->name="Mesh debris";
+        auto mesh=std::make_shared<Mesh>(*Mesh::cube());auto material=std::make_shared<Material>();material->name="Debris material";material->roughness=.85f;mesh->materials={material};
+        auto d=std::make_shared<ParticleEmitterDefinition>();d->name="Fragments";d->renderMode=ParticleRenderMode::Mesh;d->particleMesh=mesh;
+        d->space=ParticleSpace::World;d->blend=BlendMode::Opaque;d->spawnRate=12;d->maxParticles=256;d->duration=2;d->lifetimeMin=1.5f;d->lifetimeMax=2;
+        d->bursts={{0,12}};d->velocityMin={-1,2,-1};d->velocityMax={1,3,1};d->gravity={0,-3,0};
+        d->meshRotationMax={2*pi,2*pi,2*pi};d->meshAngularVelocity={2,3,1};d->size={{0,.15f},{1,.06f}};
+        d->color={{0,{1,.65f,.2f,1}},{1,{.6f,.2f,.1f,1}}};a->emitters.push_back({d,{}});a->validate();return a;
+    }();return asset;
+}
+
 }

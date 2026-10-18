@@ -1,5 +1,14 @@
 # WebEngine
 
+Optional chunked heightfield terrain supports float samples or image heightmaps,
+four-layer materials with normal maps, height blending and optional triplanar projection,
+seamless chunk LOD with independent shadow detail,
+sculpt/paint brushes, affected-chunk rebuilding, bounded derived-chunk streaming,
+source paging with asynchronous worker chunk generation and bounded resident data,
+cross-page sculpt/paint with atomic dirty-page writeback,
+static collision, ground/ray queries and built-in scene saves.
+Open `?scene=terrain` for the browser demo; see [Terrain](docs/terrain.md).
+
 Versioned application snapshots, custom component codecs, stable saved identities
 and IndexedDB/localStorage byte adapters build on the scene archives. The inspector
 offers an explicit browser checkpoint under **Scenes & assets → Browser saves**.
@@ -8,24 +17,54 @@ See [Persistence and browser storage](docs/persistence.md).
 Asset identifiers, asynchronous loading, caching, progress, cancellation, unloading
 and preparation before scene activation are available through `AssetManager`,
 `AssetPreparation` and `Application::prepareScene`. See [asset resource contracts](docs/assets.md).
+Optional isolated decode workers, GPU upload admission and KTX2/fallback packaging
+are documented in [Mobile asset pipeline](docs/mobile-assets.md).
 
 Reusable object definitions are available through `Prefab`: instantiate configured
 actor/component hierarchies with shared assets, per-instance overrides and
 application-registered component factories. See [prefab usage and contracts](docs/prefabs.md).
 
 Selection and interaction is available through `InteractionComponent` and
-`Scene::selection()`: pointer/ray picking, action eligibility/execution, and
-ordered selection/focus events. See [the API and integration guide](docs/selection.md).
+`Scene::selection()`: bounds or precise triangle picking, optional visible-mesh
+occlusion, action eligibility/execution, and ordered selection/focus events.
+`ManipulationController` adds plane/axis dragging and pivot rotation with explicit
+commit/cancel. See [the API and integration guide](docs/selection.md).
 
 Application start/pause/resume/shutdown, scene ownership and transitions, and
 input/simulation/presentation clock contracts are documented in
 [Application and scene lifecycle](docs/application-lifecycle.md).
 
-A C++20 browser 3D engine starter, compiled to WebAssembly with Emscripten. The C++ renderer uses the WebGPU C++ API through [Emdawnwebgpu](https://emscripten.org/docs/porting/multimedia_and_graphics/WebGPU-support.html); JavaScript hosts the canvas and forwards input.
+A C++20 browser 3D engine starter, compiled to WebAssembly with Emscripten. The C++ renderer prefers the WebGPU C++ API through [Emdawnwebgpu](https://emscripten.org/docs/porting/multimedia_and_graphics/WebGPU-support.html) and automatically falls back to WebGL 2 when WebGPU is unavailable or initial adapter/device acquisition fails; JavaScript hosts the canvas and forwards input.
 
 The demo automatically loads `tests/fixtures/Knarr.fbx` through the FBX importer, including its seven embedded base-color textures and material assignments. It renders with a ground grid, a perspective orbit camera, a directional light, a moving point light, and overlay axes. Pause motion, switch lights, drag to orbit, scroll to zoom, or reset the camera.
 
 The browser build copies the Knarr asset to `dist/assets/Knarr.fbx`, which the page fetches at startup. Use **Import FBX / GLB** to select one local binary or ASCII `.fbx` file or binary glTF 2.0 `.glb` file together with its companion images. Embedded images load automatically; external references resolve against selected images by filename, case-insensitively. Missing images produce an inspector warning and use the material color. **Override texture** applies an image to every material of the imported mesh. Files stay local; no file upload is involved. **Restore demo** returns to the original cube scene. Reload the page to load Knarr again.
+
+## Scene editor
+
+Choose **Scene editor** or open `?editor=1` for local scene files, searchable
+hierarchy/selection, transform gizmos and undo/redo. Content authoring adds GLB/FBX,
+image and asset-library import, ground-plane placement, typed component inspectors,
+per-slot material/texture editing, hierarchy duplication, grid/angle snapping, and
+debounced IndexedDB autosave with explicit recovery. Edit mode pauses simulation
+while retaining camera navigation. The structure tools add supported component
+creation/removal, KeepWorld reparenting, modifier/range multi-selection, grouped
+history and local-axis/uniform scale gizmos. **Play / Stop** runs an isolated built-in
+runtime and returns to the same document/history. Portable `engine_editor` commands own scene edits;
+HTML/SVG and browser byte adapters supply the tool interface.
+The full-window workspace provides dockable/resizable Scene, Scene Outline,
+Details, Quick Add and Assets panels. Drag titles to dock or float, use Window to
+restore panels/reset the saved layout, and use Quick Add for primitive placement
+or component shortcuts. Narrow screens stack the same panels.
+In Scene, right-drag looks around; hold right mouse with WASD to fly, Q/E to move
+down/up and Shift to accelerate. Middle-drag pans, Alt-drag orbits and scroll zooms.
+Double-click an outline node (or press F) to frame it and set the orbit pivot.
+Use **Quick Add → Terrain** to create a collidable terrain. **Details → Terrain**
+provides Raise/Lower, Flatten, Smooth and four-layer Paint brushes with radius,
+strength and whole-stroke undo. Creation also accepts an imported heightmap image.
+Import images in **Assets**, then assign or clear each surface texture in
+**Details → Terrain → Paint layer textures**, with undo/redo and scene persistence.
+See [scene editor controls, APIs and scope](docs/scene-editor.md).
 
 ## Run on Windows
 
@@ -37,7 +76,7 @@ Prerequisites: Git, Python 3, CMake 3.22+, and Ninja on PATH. Use PowerShell fro
 ./scripts/serve.ps1                  # http://localhost:8080; Ctrl+C to stop
 ```
 
-Open [the demo](http://localhost:8080) in a WebGPU-capable browser. WebGPU requires a secure context: localhost works for development; deploy through HTTPS. Browser/GPU support is checked at startup and errors appear in the status bar.
+Open [the demo](http://localhost:8080) in a browser supporting WebGPU or WebGL 2. WebGPU requires HTTPS or localhost; automatic mode can use WebGL 2 without WebGPU. The status and capability panel identify the selected backend. Use `?renderer=webgl2` to force fallback or `?renderer=webgpu` to require WebGPU. The fallback supports textured scenes, animation, particles, ordered camera views and the canvas GUI with basic lighting; shadows, full PBR, instancing and GPU timing remain WebGPU features. See [rendering fallback contracts and validation](docs/rendering-fallback.md).
 
 The setup script does not install global SDK environment settings. `.tools`, `build`, and `dist` are ignored by Git. First setup downloads the compiler toolchain; the first browser build also downloads the SDK-pinned Dawn port.
 
@@ -45,6 +84,12 @@ The setup script does not install global SDK environment settings. `.tools`, `bu
 ./scripts/build.ps1 -Configuration Release
 ./scripts/serve.ps1 -Port 8081
 ```
+
+`serve.ps1` tries up to 100 consecutive ports starting at `-Port` (8080 by
+default), skipping occupied or access-denied ports. Open the actual URL printed
+in the terminal. Use `-PortAttempts 1` when a fixed port is required; the search
+never goes beyond port 65535. Direct `serve.py` calls remain fixed-port unless
+`--port-attempts` is supplied.
 
 Both configurations have their own build outputs. Each build publishes its selected output plus the shell into `dist/`. Deploy that entire directory, including `webengine.js` and `webengine.wasm`, with `application/wasm` as the Wasm MIME type. This starter uses one browser thread and needs no cross-origin isolation headers.
 
@@ -76,7 +121,24 @@ following/orbit modes, framing, custom behaviours/queries, ownership, update
 ordering and validation. The playground's existing parent-space `OrbitController`
 remains compatible with input actions and scene archives.
 
+## Sky backgrounds
+
+Optional visible sky backgrounds support gradients, panoramas and Rayleigh/Mie
+single-scattering atmospheres on WebGPU and WebGL 2, through either a fullscreen
+draw or an inward-facing mesh sky sphere. Procedural cloud coverage/density/wind
+and opt-in day/night lighting use explicit caller-owned clock steps. See
+[sky settings, examples and validation](docs/sky.md); the playground material
+inspector has a **Sky background** section. The playground starts with a mesh
+sphere, atmosphere, moving clouds and a 180-second day/night cycle. Its controls
+include cloud coverage, haze, time of day and cycle speed; Pause freezes the cycle.
+
 ## Rendering quality and browser resilience
+
+Optional **Anti-aliasing** selects Off or 4x MSAA on WebGPU and supported WebGL 2
+devices. Applications set `RenderQuality::msaaSamples` to 1 or 4 and read
+`Renderer::effectiveMsaaSamples()` plus `RenderCapabilities::msaa4x`. Profiles keep
+MSAA off by default. Scene layers and camera views resolve together before the
+canvas GUI. See [MSAA contracts and validation](docs/rendering-quality.md#optional-msaa).
 
 The **Rendering quality** inspector selects Low, Balanced (default) or High,
 with custom resolution scale, DPR/dimension/pixel limits and shadow-map counts.
@@ -342,7 +404,8 @@ pixel centers, so odd-width split screens have no gap. GPU layer timings sum
 across active views; draw/upload counters count actual work across the compositor.
 
 The playground's **Camera views** selector offers Single camera, Split screen,
-and Overview inset. `tests/render_view_tests.cpp` checks planning, masks, disabled
+Overview inset and an oblique orthographic inset for inspecting water reflections.
+`tests/render_view_tests.cpp` checks planning, masks, disabled
 ancestors, atomic validation, pixel rounding, and independent cached staging.
 `node scripts/compositing-smoke.cjs` verifies real WebGPU pixels for split/inset
 views, load-color overlays, ordering, independent depth, viewport clipping,
@@ -358,6 +421,42 @@ Culling covers opaque and transparent meshes in every layer, preserves traversal
 Use `MeshComponent::frustumCulling=false` for custom vertex deformation or `Renderer::setFrustumCullingEnabled(false)` to disable culling globally (`?culling=off` in the demo). Bounds with no usable positions conservatively remain visible. Mesh resources are immutable after publication; call `Mesh::invalidateBounds()` after editing static vertex positions in place before reuse. Camera-free `Scene::collect()` stays unculled; supply a `Frustum*` to scene/frame collection for visibility classification. Performance JSON reports `visibleMeshes` and `culledMeshes` alongside the original `meshes` count, summed across views.
 
 `frustum_culling_tests` covers clipping planes, camera/aspect changes, transformed and animated bounds, masks, hierarchy, transparent meshes, stable object uploads and warm frame capacities. `scripts/frustum-culling-smoke.cjs` compares WebGPU pixels and submissions with culling on/off for two camera positions. Run it against a browser build using the same Playwright setup as the browser acceptance script; evidence is saved under `build/evidence/frustum-culling/`.
+
+## Reflective animated water
+
+Open `?scene=water&renderer=webgpu` or `?scene=water&renderer=webgl2`, or choose
+**Open water demo** in the inspector. Drag to orbit, scroll to zoom and use
+**Pause motion**, **Reset camera**, surface presets and **Return to demo**.
+
+`MaterialShader::Water` adds three mesh-local Gerstner waves, moving normal-map
+ripples, Fresnel reflection and light highlights through ordinary mesh materials.
+WebGPU can reflect `Scene::environment`; WebGL 2 uses configurable horizon/zenith
+reflection colors. Set `Material::water` or `MaterialInstance::water`, and supply
+an explicit clock with `Renderer::setWaterTime(seconds)` before rendering.
+Use a subdivided local-XZ mesh for geometric waves. Water bounds account for
+displacement; shared assets, transforms and physics remain independent.
+Opt into depth-aware refraction/absorption and shoreline foam through
+`WaterSettings::refractionStrength` and `foamStrength`; both default to zero.
+The demo includes a sloping lakebed, submerged markers and independent effect
+presets. Both backends capture current-view opaque World color/depth, support
+1x/4x MSAA and preserve ordered cameras, resize and recovery. Opt into nearby-object
+reflections with `planarReflectionStrength` (default zero). A mirrored camera captures
+opaque/masked World objects above the transformed water plane, once per view;
+coplanar water shares it. The demo includes colored landmarks and planar-off/still
+mirror comparisons. `underwaterStrength` (default zero) enables depth-based fog
+and color absorption inside the water footprint on both backends. Configure
+`underwaterFogDensity`, `underwaterColor`, `underwaterMaxDistance` and existing
+`absorption`; use a double-sided surface to see its underside. The demo's View
+selector provides underwater/deep-water views and independent fog/absorption
+presets. Optional `causticsStrength` (default zero), `causticsScale`, `causticsSpeed`
+and `causticsDepth` add animated depth-faded light patterns on submerged receivers.
+The demo enables them and offers caustics-off/still comparisons. Underwater composition runs after World transparency and before Overlay/GUI.
+Submit up to 16 transient `WaterInteraction` values with `Renderer::setWaterInteractions`
+for contact rings and directed wakes. Applications supply world-space contacts,
+headings and emission times; the demo includes moving sources and an Object
+interactions selector. Both backends perturb water normals and crest highlights
+without changing geometry, collision or picking.
+See [water APIs, defaults, limitations and validation](docs/water.md).
 
 ## Materials and image-based lighting
 
@@ -732,8 +831,8 @@ Assign `mesh.layer = RenderLayer::Overlay` to render a component above world obj
 
 ## Particles, flipbooks and reusable effects
 
-The **Visual effects** panel plays a campfire (flames, smoke and sparks) or a
-one-shot explosion (fireball, smoke and sparks). Effects start stopped so the
+The **Visual effects** panel plays a campfire (flames, smoke and sparks), a
+one-shot explosion (fireball, smoke and sparks), or a fountain with drifting mist. Effects start stopped so the
 existing demo remains unchanged until **Play / restart** or a preset selection.
 **Pause / Resume** freezes all emitter clocks and particles. **Stop emission**
 lets living particles drain; **Clear** removes them immediately. The scene's
@@ -785,8 +884,8 @@ backing objects afterward. Multiple effect instances share definitions/textures
 but retain independent playback. Add more emitter entries to layer smoke, sparks
 and fire into one effect. Required emitter children cannot be removed independently;
 remove the effect component through the normal deferred lifecycle. Effect assets
-are C++ resources in this implementation; no JSON asset loader or visual editor
-is included. The common component snapshot does not persist FX assets or live particles.
+are shared C++ resources. The scene editor now provides [FX authoring](docs/fx-authoring.md),
+curves/timing, isolated previews and versioned .wefx import/export; no JSON loader is included. The common component snapshot does not persist FX assets or live particles.
 
 `ParticleSpace::Local` follows the component hierarchy, including size scaling.
 `World` captures position, velocity and size scale when a particle spawns; subsequent
@@ -797,14 +896,16 @@ times. Existing particles advance once per update, rather than once per emitted
 particle. Pool saturation drops emissions. A bounded per-update emission budget
 also drops events after very large deltas or excessive rates.
 
-The renderer uploads compact 64-byte particle instances and generates camera-facing
+The renderer uploads compact 80-byte particle instances and generates camera-facing
 quads in WGSL. Compatible consecutive particles share instanced draw calls.
 Alpha particles and transparent meshes sort together by camera-space center,
 back to front; texture batching never changes that order. Additive particles draw
 after alpha. Large intersecting transparent meshes can still need triangle sorting
 or order-independent transparency; sorting uses mesh origins. FX use premultiplied
 blending and the current renderer's display conversion. HDR compositing, bloom,
-soft-particle depth fading, collision and fluid simulation are not included.
+collision and fluid simulation are not included. Optional soft-particle depth fading,
+shaped emission, drag/wind/gusts, vector motion curves and velocity-stretched
+billboards are described in [particle FX contracts](docs/fx.md).
 
 Flipbooks use top-left frame order, left to right then top to bottom. Grid cells
 must divide image dimensions evenly and the frame count must fit the grid.
@@ -1061,7 +1162,7 @@ exact blend endpoints, bind-pose stop, playback/fade controls and buffer release
 ## Audio system
 
 The reusable C++ `AudioSystem` provides shared immutable sounds, simultaneous
-voices, loops, hierarchical buses, volume/mute controls, interruptible fades and
+voices, loops, variable playback rate, hierarchical buses, volume/mute controls, interruptible fades and
 scene-handle-based positional emitters/listeners. The optional browser backend
 uses Web Audio with explicit activation and host suspension. Open **Audio system**
 in the inspector for overlapping effects, looping music, bus controls, fade-out,
@@ -1069,6 +1170,10 @@ positional playback and local MP3/WAV sound imports.
 
 See [audio contracts, usage and validation](docs/audio.md) for lifetime rules,
 PCM decoding, frame ordering, browser activation and persistence scope.
+
+The vehicle course also provides **Driving audio and rate preview** in Details:
+RPM/load loops, contact-slip/gravel and impact examples, isolated preview and
+separate saved tuning. See [driving audio](docs/driving-audio.md).
 
 ## MP3 and WAV audio
 
@@ -1275,6 +1380,37 @@ recovery and cleanup. `scripts/ship-stress-smoke.cjs` checks browser controls,
 actual canvas pixels, shared GPU assets, submissions and scene transitions using
 the same Playwright environment as the other browser smoke scripts.
 
+## Game AI
+
+Optional `engine_ai` provides authored waypoint graphs, static collision-baked
+navmeshes and bounded A* search,
+command-based path following, capsule clearance and bounded automatic obstacle
+recovery, handle-safe sight queries and a simulation decision clock. Games own
+goals, state/memory/action rules, ground support/access and cancellation.
+Open `?scene=ai` or **Game AI → Open AI demo** to try patrol, target following,
+last-known-position investigation, movable blockers, alternate routes, unreachable
+goals and retry. See
+[AI contracts](docs/ai.md) and [recovery validation](docs/ai-recovery-validation.md).
+Open `?scene=navmesh` for arbitrary click-to-move destinations, walkable polygons
+and full planned paths. See [navmesh contracts](docs/navmesh.md) and
+[validation](docs/navmesh-validation.md). Versioned `NavigationSource` invalidation
+stops active routes when collision changes; explicit revision-checked rebaking
+replans original goals without resetting deadlines or retry limits. The demo
+includes passage and floor-bridge controls. See
+[navigation update validation](docs/navigation-updates-validation.md). Dynamic carving, crowd avoidance and
+built-in AI persistence remain future extensions.
+
+Reusable flat `StateMachine` instances execute immutable state/transition graphs
+with named game behavior/condition bindings, explicit enter/update/exit and bounded
+work. The AI demo uses this runtime. In **Scene editor → Details → AI state
+machines**, open the graphical editor to drag/connect states, edit guards/delays,
+set entry and priority, undo/redo, save/open `.weai` assets and preview the actual
+runtime independently of the scene. **Use in AI demo** runs supported authored
+bindings. See [state machines and editor](docs/ai-state-machines.md). Actor-bound
+`AiControllerComponent` assignments add typed binding forms, scene save/load,
+codec-aware Play reconstruction and a live state/time/transition debugger. See
+[actor AI controllers](docs/ai-controllers.md).
+
 ## Physics
 
 Optional [movement controllers](docs/movement.md) provide a device-independent
@@ -1285,6 +1421,9 @@ Jolt Physics runs inside the C++/WebAssembly engine with reusable rigid-body and
 collider components, a scene-owned physics world, fixed steps, render
 interpolation, collision events/layers, forces/impulses, filtered raycasts,
 convex-shape overlaps/sweeps, and sensor enter/exit events. Use
+the optional [physics joint APIs](docs/physics-joints.md) for hinges, sliders,
+damped distance springs and movable point grabs with world-owned handles and
+automatic endpoint cleanup. Use
 **Physics playground** in the inspector or open `?scene=physics` to try falling
 boxes/spheres, click/tap impulses, and collider outlines. See
 [Physics usage and architecture](docs/physics.md) for the API, ownership contract,
@@ -1316,3 +1455,78 @@ node scripts/browser-smoke.cjs
 It checks real canvas changes for orbit/zoom/reset and both light toggles, frozen animation while paused, binary/ASCII FBX uploads, mesh replacement and repeated imports, import-error recovery, demo restoration, layer submission, responsive resizing, startup errors, and console/GPU validation errors. Texture checks verify that Knarr's seven images affect rendered pixels, overrides/reloads preserve geometry, embedded and companion versions render identically, missing-image fallback is visible, and corrupt images preserve the current scene. Screenshots and JSON results go to `build/evidence/`. This is a scoped test of that browser/GPU, not a browser compatibility matrix or performance benchmark.
 
 GitHub Actions builds native core tests and a release browser artifact. Browser rendering acceptance is separate from CI compilation.
+
+Scene-wide exponential height fog is optional on both browser backends, with per-view opt-out, material/particle distances and archive support. Use **Height fog** in the playground. See [fog settings and composition](docs/fog.md).
+
+
+### Ribbon trails
+
+FX now supports bounded camera-facing ribbon trails on WebGPU and WebGL2, including
+local/world paths, lifetime width/color curves, texture repetition, breaks, fog,
+soft depth fades and archive v19 continuation. In Scene editor -> Details ->
+Particle FX choose **Ribbon trail**, then **Open preview** for isolated source motion.
+See [API and limitations](docs/trails.md) and [validation](docs/trails-validation.md).
+
+
+### Ground-aligned particles
+
+Use `ParticleAlignment::Plane` with `planeNormal` and `surfaceOffset` for ground rings,
+sloped contact flashes and wall-aligned effects. Existing flipbooks, curves, rotation,
+fog and soft fading work on both renderers. In Scene editor -> Details -> Particle FX,
+choose **Ground ring**, or set Appearance -> Alignment to Plane / supplied normal.
+[API and limitations](docs/plane-particles.md) · [Validation](docs/plane-particles-validation.md).
+Current scene/effect/application archives use v21; host and worker codecs must match.
+
+
+### Mesh particles
+
+Emit shared static meshes for debris, leaves and fragments with
+`ParticleRenderMode::Mesh`, `particleMesh`, seeded 3D rotation and spin. The existing
+mesh renderer supplies materials, lighting, fog, opaque instancing and transparent
+ordering. Scene editor -> Details -> Particle FX -> **Mesh debris** previews the
+feature; import GLB/FBX geometry through Assets and select it under Mesh particles.
+[API and limits](docs/mesh-particles.md) · [Validation](docs/mesh-particles-validation.md).
+Current archives use v23, including matching host/worker codecs.
+
+### Particle collision and projected decals
+
+Enable an emitter's Collision settings for bounded sphere sweeps with Bounce,
+Slide, Kill or Settle responses. Consume its queued impacts in application code.
+DecalComponent projects textures onto opaque scene triangles using a clipped box
+volume; floors, slopes and terrain chunks can receive persistent marks. Scene
+structure can add a decal, Details edits its properties/texture, and transforms
+control the projector. FX previews have an isolated collision floor.
+[API and limits](docs/fx-contacts-decals.md) · [Validation](docs/fx-contacts-decals-validation.md).
+Configuration and settled state persist; queued impacts and projection caches are transient.
+
+
+### Wheeled vehicles
+
+Open `?scene=vehicle` for the handling course or `?editor=1&scene=vehicle` to author
+it. Optional VehicleComponent supports a four-wheel chassis, suspension, automatic
+drivetrain, brakes, commands/telemetry and interpolated wheel visuals through Jolt
+on both WebGPU and WebGL 2. Editor properties, undoable presets, duplication, isolated
+Play and v24 scene/application persistence use existing engine paths.
+[Vehicle API, defaults and limits](docs/vehicles.md) · [Validation](docs/vehicles-validation.md).
+
+
+Driving Stage 2: [physical surfaces, compound collision and impact observations](docs/physical-surfaces.md),
+including editor history, archive v25 and WETP3 persistence. See
+[validation](docs/physical-surfaces-validation.md) and use
+`?scene=vehicle&surfaceTest=1` for the three-lane application fixture.
+
+
+Driving Stage 3 adds [optional gamepad input and composed follow cameras](docs/driving-controls.md),
+including typed camera authoring, isolated preview controls and archive v26.
+Use `?editor=1&scene=vehicle`; see [validation](docs/driving-controls-validation.md).
+
+## Splines and procedural routes
+
+Optional immutable Hermite splines support arc-length sampling and bounded nearest
+queries. Configurable cross-section sweeps provide transported/banked frames,
+distance UVs, bounds and optional static collision shared by both renderers.
+Details -> **Splines and swept routes** offers grouped point/tangent/profile edits,
+snapping, surface selection, duplication, collision preview and explicit terrain
+point sampling. Scene v27 preserves source resources/sharing and rebuilds geometry
+under budgets. Open `?editor=1&scene=route` for the banked driving example.
+See [contracts and validation](docs/splines-routes.md).

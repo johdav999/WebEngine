@@ -1,0 +1,45 @@
+const {chromium}=require('playwright');const {PNG}=require('pngjs');
+const fs=require('node:fs/promises'),assert=require('node:assert/strict');
+const base=process.env.DEMO_URL||'http://localhost:8080';const evidence=process.env.EVIDENCE_DIR||'build/evidence/sky-weather';
+const pixel=(p,x,y)=>{const i=(Math.floor(y*p.height)*p.width+Math.floor(x*p.width))*4;return [...p.data.subarray(i,i+3)];};
+const luminance=p=>{let n=0;for(let i=0;i<p.data.length;i+=4)n+=p.data[i]+p.data[i+1]+p.data[i+2];return n/(p.width*p.height*3);};
+const changed=(a,b,threshold=10)=>{let n=0;for(let i=0;i<a.data.length;i+=4)if(Math.abs(a.data[i]-b.data[i])+Math.abs(a.data[i+1]-b.data[i+1])+Math.abs(a.data[i+2]-b.data[i+2])>threshold)n++;return n;};
+(async()=>{
+ await fs.mkdir(evidence,{recursive:true});const b=await chromium.launch({headless:true,executablePath:process.env.BROWSER_EXECUTABLE});const result={browser:await b.version(),checks:[],errors:[],backends:{}};
+ try{for(const renderer of ['webgpu','webgl2']){
+  const page=await b.newPage({viewport:{width:1280,height:900},deviceScaleFactor:1});
+  page.on('pageerror',e=>result.errors.push(String(e)));page.on('console',m=>{if(m.type()==='error')result.errors.push(m.text());});
+  await page.goto(`${base}/?renderer=${renderer}&skyTest=1&resilienceTest=1`);await page.waitForFunction(()=>document.body.dataset.defaultModel==='ready'||document.body.dataset.engine==='error');
+  assert.equal(await page.locator('body').getAttribute('data-engine'),'ready',await page.locator('#status').textContent());
+  await page.addStyleTag({content:'.scene-title,.view-footer,.camera-touch-controls{display:none!important}.viewport-panel,#viewport{border-radius:0!important}'});
+  const shot=async name=>PNG.sync.read(await page.locator('#viewport').screenshot({path:`${evidence}/${renderer}-${name}.png`}));
+  const capture=async(mode,name)=>{const frame=await page.evaluate(mode=>{if(Module._engine_sky_weather_fixture(mode)!==1)throw Error('Weather fixture failed: '+mode);return Number(document.body.dataset.frames||0);},mode);await page.waitForFunction(f=>Number(document.body.dataset.frames)>f+6,frame);assert.equal(await page.locator('body').getAttribute('data-engine'),'ready');return shot(name);};
+  const flat=await capture(0,'fullscreen-gradient'),sphere=await capture(1,'sphere-gradient');assert(changed(flat,sphere)<sphere.width*sphere.height*.005,'Sphere must match fullscreen directions');
+  await page.waitForTimeout(350);const metrics=await page.evaluate(()=>EnginePerformance.snapshot().latest.current);assert(metrics.triangles>3000&&metrics.meshes===0&&metrics.shadowDrawCalls===0,'Actual sphere indices must render without scene meshes or shadow draws');
+  const moved=await capture(2,'sphere-translated');assert(changed(moved,sphere)<10,'Sphere must follow each viewing camera');
+  const ortho=await capture(3,'sphere-orthographic');assert.deepEqual(pixel(ortho,.1,.1),pixel(ortho,.9,.9),'Orthographic rays must stay parallel');
+  const clipped=await capture(4,'sphere-tight-clipping');assert(changed(clipped,sphere)<10,'Scene near/far clipping must not cut sky sphere');
+  const inset=await capture(5,'sphere-second-camera');assert.deepEqual(pixel(inset,.25,.5),pixel(sphere,.25,.5));assert(changed(inset,sphere)>1000,'Second view must use its own sphere center/orientation');
+  const preserve=await capture(6,'sphere-inset-disabled');assert(changed(preserve,sphere)<10,'Per-view suppression preserves earlier sky');
+  const noon=await capture(7,'noon-clear'),sunset=await capture(8,'sunset'),night=await capture(9,'midnight');
+  assert(luminance(noon)>luminance(night)*3,'Atmosphere must distinguish noon and night');assert(changed(sunset,noon)>noon.width*noon.height*.1,'Sunset atmosphere must differ');
+  const cloud=await capture(10,'clouds'),wind=await capture(11,'cloud-wind');assert(changed(cloud,noon)>1000,'Cloud layer must be visible');assert(changed(cloud,wind)>1000,'Cloud wind must change density pattern');
+  const before=await shot('wind-before-step');assert.equal(await page.evaluate(()=>Module._engine_sky_step(60)),1);await page.waitForTimeout(150);const after=await shot('wind-after-step');assert(changed(before,after)>1000,'Explicit sky clock must animate cloud phase');
+  const atmosphericFlat=await capture(12,'fullscreen-atmosphere');assert(changed(atmosphericFlat,noon,15)<noon.width*noon.height*.01,'Sphere and fullscreen atmosphere must agree');
+  const surfaceDay=await capture(13,'lit-surface-noon'),surfaceNight=await capture(14,'lit-surface-night');assert(pixel(surfaceDay,.5,.5).reduce((a,b)=>a+b)>pixel(surfaceNight,.5,.5).reduce((a,b)=>a+b)*2,'Day/night must change actual surface lighting');
+  const stable=await capture(10,'before-recovery');const generation=await page.evaluate(()=>EngineQuality.snapshot().generation);await page.evaluate(()=>Module._engine_lose_gpu());await page.waitForFunction(g=>EngineQuality.snapshot()?.generation>g&&EngineQuality.snapshot()?.state==='ready',generation,{timeout:60000});
+  await page.waitForTimeout(150);const recovered=await shot('after-recovery');assert(changed(stable,recovered)<10,'Recovery restores sphere buffers and weather pipelines');
+  await page.goto(`${base}/?renderer=${renderer}`);await page.waitForFunction(()=>document.body.dataset.defaultModel==='ready');await page.locator('#pause').click();
+  await page.waitForTimeout(300);assert.equal(await page.locator('#sky-mode').inputValue(),'3');assert.equal(await page.locator('#sky-geometry').inputValue(),'1');
+  await page.locator('#sky-running').uncheck();
+  await page.locator('#sky-hour').evaluate(el=>{el.value='0';el.dispatchEvent(new Event('input',{bubbles:true}));});await page.waitForTimeout(350);assert.equal(await page.locator('#sky-hour-value').textContent(),'00:00');
+  await page.locator('#viewport').screenshot({path:`${evidence}/${renderer}-playground-midnight.png`});
+  await page.locator('#sky-hour').evaluate(el=>{el.value='12';el.dispatchEvent(new Event('input',{bubbles:true}));});await page.waitForTimeout(350);await page.locator('#viewport').screenshot({path:`${evidence}/${renderer}-playground-noon.png`});
+  await page.locator('#sky-day-seconds').fill('24');await page.locator('#sky-day-seconds').dispatchEvent('change');await page.locator('#sky-running').check();
+  await page.locator('#pause').click();const h=await page.locator('#sky-hour-value').textContent();await page.waitForTimeout(700);assert.notEqual(await page.locator('#sky-hour-value').textContent(),h,'Automatic cycle must advance');
+  await page.locator('#pause').click();await page.waitForTimeout(300);const frozen=await page.locator('#sky-hour-value').textContent();await page.waitForTimeout(500);assert.equal(await page.locator('#sky-hour-value').textContent(),frozen,'Pause must freeze automatic sky clock');
+  result.backends[renderer]={noon:luminance(noon),night:luminance(night),sphereTriangles:metrics.triangles,skySceneMeshes:metrics.meshes,cloudPixels:changed(cloud,noon),windPixels:changed(cloud,wind)};
+  result.checks.push(`${renderer}: indexed inward sphere, camera translation/orthographic/clipping, two views, shadows excluded, atmosphere noon/sunset/night, clouds/wind, surface lighting, recovery, playground controls, automatic cycle and pause`);await page.close();
+ }assert.deepEqual(result.errors,[]);}catch(e){result.failure=String(e);throw e;}finally{await fs.writeFile(`${evidence}/results.json`,JSON.stringify(result,null,2));await b.close();}
+ console.log(JSON.stringify(result,null,2));
+})();

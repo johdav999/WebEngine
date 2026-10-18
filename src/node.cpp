@@ -148,6 +148,13 @@ bool Node::removeChild(Node& child) {
     else { auto removed=detachChild(child); }
     return true;
 }
+void Node::setChildIndex(Node& child,std::size_t index) {
+    requireIdle();
+    if(child.parent_!=this||child.isPendingRemoval()||index>=children_.size()) throw std::invalid_argument("Invalid sibling index");
+    auto from=std::find_if(children_.begin(),children_.end(),[&](const auto& p){return p.get()==&child;});
+    auto to=children_.begin()+index;
+    if(from<to) std::rotate(from,from+1,to+1);else if(to<from) std::rotate(to,from,from+1);
+}
 void Node::reparent(Node& newParent,ReparentMode mode) {
     requireIdle();newParent.requireIdle();
     if(!parent_ || protectedChild_ || subtreePending() || newParent.isPendingRemoval())

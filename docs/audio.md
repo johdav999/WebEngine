@@ -16,11 +16,13 @@ auto music = audio.createBus("Music");
 auto sound = SoundAsset::create(48000, 1, samples);
 AudioPlayOptions options;
 options.bus = effects;
+options.playbackRate = 1.5f; // Pitch and speed; default 1.
 auto first = audio.play(sound, options);
 auto second = audio.play(sound, options);
 audio.setBusVolume(audio.masterBus(), 0.7f);
 audio.setBusMuted(effects, true);
 audio.setVoiceMuted(second, true);
+audio.setVoicePlaybackRate(first, 0.75f);
 audio.fadeVoice(first, 0.2f, 1.0);
 audio.stop(first, 0.5); // Fade to silence, then release.
 ```
@@ -48,6 +50,37 @@ time domain. Fades advance only when the backend reports active audio. The
 playground uses presentation time, so simulation pause keeps sound/fades running.
 Fade gain is updated at host frame cadence; playback completion and looping use
 the browser device clock. This is not sample-accurate fade scheduling.
+
+## Playback rate
+
+`AudioPlayOptions::playbackRate` defaults to 1. `setVoicePlaybackRate(voice, rate)`
+changes a live or pending voice, and `voicePlaybackRate(voice)` returns its last
+accepted value (0 for an unknown handle). Rates must be finite in [0.125,8]. Zero,
+negative values, NaN and infinity throw before publication. Use suspension or stop
+for pausing; reverse playback and independent pitch/time stretching are not provided.
+
+The backend must implement `bool playbackRate(uint32_t,float) noexcept`. A false
+result preserves the previous rate and voice; AudioSystem publishes only success.
+Foreign/stale controls return false. Natural completion may precede AudioSystem's
+next cleanup update: controls then return false when the backend no longer owns
+that source. Starting at an unsupported rate follows transactional start failure.
+
+Offsets always count **source seconds**, independently of rate. A constant-rate
+one-shot takes `(duration - offsetSeconds) / playbackRate` active device seconds.
+Loops wrap at the source buffer boundary. Changes preserve source identity and the
+current cursor: the browser schedules `AudioParam.setValueAtTime` at the current
+AudioContext time, taking effect at its next audio rendering quantum. This is an
+immediate, unsmoothed pitch/speed change, not sample-accurate host automation.
+Repeated updates do not recreate BufferSources or PCM buffers. Browser AudioParam
+reads can retain their last rendered value while suspended; the accepted option
+is retained and applies on activation/resume. Pending sources never consume their
+offset before activation. Context suspension freezes the cursor/device clock;
+mute only changes gain. Rate never changes simulation, fade time, or scene data.
+
+The inspector's Playback rate slider changes its music preview loop and applies
+to future emitter/loop starts. Existing one-shots retain their own rates.
+See the [driving example](driving-audio.md) for a separate tuning document,
+editor preview and telemetry mappings outside the engine.
 
 ## Scene emitters and listeners
 

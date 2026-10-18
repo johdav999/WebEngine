@@ -4,18 +4,20 @@
 #include "engine/particle_emitter_component.hpp"
 using namespace engine;
 void setCompositingDemo(Scene& scene,CameraComponent& camera,Renderer& renderer,int mode) {
-    if(mode<0 || mode>2) throw std::invalid_argument("Unknown camera layout");
+    if(mode<0 || mode>3) throw std::invalid_argument("Unknown camera layout");
     static CameraComponent* overview=nullptr;
     if(!overview) overview=&scene.addChild<CameraComponent>("Overview camera");
     camera.setViewport(mode==1 ? Viewport{0,0,0.5f,1} : Viewport{});
     overview->setViewport(mode==1 ? Viewport{0.5f,0,0.5f,1} : Viewport{0.68f,0.05f,0.28f,0.32f});
     overview->transform.position={0,14,0};overview->lookAt({0,0,0},{0,0,-1});overview->setOrthographic(18,0.1f,100);
+    if(mode==3) {overview->transform.position={10,5,12};overview->lookAt({0,0,0});}
     overview->enabled=mode!=0;
     const std::array views={RenderView{&camera},RenderView{overview,std::array<float,4>{0.04f,0.07f,0.1f,1}}};
     renderer.setViews({views.data(),mode==0 ? 1u : 2u});
 }
 void setCompositingFixture(Scene& scene,CameraComponent& camera,Renderer& renderer,int mode) {
-    if(mode<0 || mode>10) throw std::invalid_argument("Unknown compositing fixture");
+    scene.setSky(std::nullopt); // Isolate compositor clear/load acceptance from playground weather.
+    if(mode<0 || mode>11) throw std::invalid_argument("Unknown compositing fixture");
     static Actor* root=nullptr;
     static CameraComponent* other=nullptr;
     if(!root) {
@@ -34,7 +36,10 @@ void setCompositingFixture(Scene& scene,CameraComponent& camera,Renderer& render
         particle.visibilityMask=4;particle.transform.position={0,0,1};
     }
     for(const auto& child:scene.children()) child->enabled=false;
-    root->enabled=true;other->enabled=mode!=4;camera.enabled=mode!=5;
+    root->enabled=true;other->enabled=mode!=4&&mode!=11;camera.enabled=mode!=5;
+    for(const auto& child:root->children()) {
+        if(child->name=="First camera red") child->transform.rotation.z=mode==11 ? 0.37f : 0;
+    }
     camera.transform={};camera.transform.position={0,0,5};camera.lookAt({});camera.setOrthographic(4,0.1f,20);
     other->transform=camera.transform;other->setOrthographic(4,0.1f,20);
     camera.setVisibilityMask(1);other->setVisibilityMask(mode==7?4:mode==8?8:2);
@@ -43,6 +48,8 @@ void setCompositingFixture(Scene& scene,CameraComponent& camera,Renderer& render
     if(mode==6) other->setOrthographic(2,0.1f,20);
     if(mode==10) other->transform.position.x=1; // Only the later view moves.
     std::array views={RenderView{&camera,std::array<float,4>{0.1f,0,0,1}},RenderView{other,std::array<float,4>{0,0,0.2f,1}}};
+    // Acceptance fixtures use their authored clear colors, independent of scene sky.
+    views[0].skyEnabled=views[1].skyEnabled=false;
     if(mode==2 || mode==7) views[1].clearColor=std::nullopt;
     if(mode==3) std::swap(views[0],views[1]);
     renderer.setViews(mode==9 ? std::span<const RenderView>{} : std::span<const RenderView>{views});

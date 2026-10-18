@@ -5,14 +5,15 @@ namespace engine {
 EM_JS(unsigned, audio_device_create, (), { return window.EngineAudioDevices.create(); });
 EM_JS(void, audio_device_destroy, (unsigned device), { window.EngineAudioDevices.dispose(device); });
 EM_JS(int, audio_device_start, (unsigned device,unsigned voice,unsigned sound,unsigned rate,unsigned channels,
-    const float* samples,unsigned count,int loop,double offset,int spatial,float x,float y,float z,float ref,float max,float rolloff,float gain), {
+    const float* samples,unsigned count,int loop,double offset,int spatial,float x,float y,float z,float ref,float max,float rolloff,float gain,float playbackRate), {
     const pcm=new Float32Array(HEAPU8.buffer,samples,count);
     return window.EngineAudioDevices.get(device).start(voice,sound,rate,channels,pcm,
-        {loop:!!loop,offset,spatial:!!spatial,position:[x,y,z],referenceDistance:ref,maxDistance:max,rolloff},gain);
+        {loop:!!loop,offset,spatial:!!spatial,position:[x,y,z],referenceDistance:ref,maxDistance:max,rolloff,playbackRate},gain);
 });
 EM_JS(void, audio_device_stop, (unsigned device,unsigned voice), { window.EngineAudioDevices.get(device).stop(voice); });
 EM_JS(int, audio_device_playing, (unsigned device,unsigned voice), { return window.EngineAudioDevices.get(device).voices.has(voice); });
 EM_JS(void, audio_device_gain, (unsigned device,unsigned voice,float gain), { window.EngineAudioDevices.get(device).gain(voice,gain); });
+EM_JS(int, audio_device_rate, (unsigned device,unsigned voice,float value), { return window.EngineAudioDevices.get(device).playbackRate(voice,value); });
 EM_JS(void, audio_device_position, (unsigned device,unsigned voice,float x,float y,float z), {
     window.EngineAudioDevices.get(device).position(voice,[x,y,z]);
 });
@@ -26,11 +27,12 @@ BrowserAudioBackend::BrowserAudioBackend():device_(audio_device_create()) {}
 BrowserAudioBackend::~BrowserAudioBackend() { audio_device_destroy(device_); }
 bool BrowserAudioBackend::start(std::uint32_t id,const SoundAsset& s,const AudioPlayOptions& o,float g) {
     return audio_device_start(device_,id,s.identity(),s.sampleRate(),s.channels(),s.samples().data(),unsigned(s.samples().size()),
-        o.loop,o.offsetSeconds,o.spatial,o.position.x,o.position.y,o.position.z,o.referenceDistance,o.maxDistance,o.rolloff,g)!=0;
+        o.loop,o.offsetSeconds,o.spatial,o.position.x,o.position.y,o.position.z,o.referenceDistance,o.maxDistance,o.rolloff,g,o.playbackRate)!=0;
 }
 void BrowserAudioBackend::stop(std::uint32_t id) noexcept { audio_device_stop(device_,id); }
 bool BrowserAudioBackend::playing(std::uint32_t id) const noexcept { return audio_device_playing(device_,id)!=0; }
 void BrowserAudioBackend::gain(std::uint32_t id,float value) noexcept { audio_device_gain(device_,id,value); }
+bool BrowserAudioBackend::playbackRate(std::uint32_t id,float value) noexcept { return audio_device_rate(device_,id,value)!=0; }
 void BrowserAudioBackend::position(std::uint32_t id,Vec3 p) noexcept { audio_device_position(device_,id,p.x,p.y,p.z); }
 void BrowserAudioBackend::listener(const AudioListenerPose& p) noexcept {
     audio_device_listener(device_,p.position.x,p.position.y,p.position.z,p.forward.x,p.forward.y,p.forward.z,p.up.x,p.up.y,p.up.z);

@@ -24,13 +24,15 @@
     },
     markCustom: () => { profile.value = 'custom'; },
     report(next) {
-      const settingsChanged = !state || ['resolutionScale','maxPixelRatio','maxDimension','maxPixels','maxShadowMaps','lod','shadowLod','compressedTextures','shadowResolution','shadowFilterTaps'].some(key => state[key] !== next[key]);
+      const settingsChanged = !state || ['resolutionScale','maxPixelRatio','maxDimension','maxPixels','maxShadowMaps','lod','shadowLod','compressedTextures','shadowResolution','shadowFilterTaps','msaaSamples'].some(key => state[key] !== next[key]);
       state = {...next, gpuApi:!!navigator.gpu, secureContext:isSecureContext, capabilitiesAvailable:next.generation>0};
       document.body.dataset.gpuState = next.state;
+      document.body.dataset.renderer = next.backend;
       retry.hidden = next.state !== 'failed';
       retry.disabled = false;
       if (next.state !== 'ready') window.EngineInput?.instance?.cancelAll();
       if (settingsChanged) {
+      field('msaa').value = next.msaaSamples;
       field('scale').value = next.resolutionScale;
       field('ratio').value = next.maxPixelRatio;
       field('dimension').value = next.maxDimension;
@@ -40,11 +42,13 @@
       field('compressed').checked = next.compressedTextures;
       document.querySelector('#mesh-lod').checked = next.lod;
       document.querySelector('#shadow-lod').checked = next.shadowLod;
-      document.querySelector('#shadow-resolution').value = next.shadowResolution;
-      document.querySelector('#shadow-filter').value = next.shadowFilterTaps;
+      if (next.shadows !== false) {
+        document.querySelector('#shadow-resolution').value = next.shadowResolution;
+        document.querySelector('#shadow-filter').value = next.shadowFilterTaps;
+      }
       }
       const formats = ['BC','ETC2','ASTC'].filter(name => next[`compression${name}`]);
-      report.textContent = next.generation ? `${next.state} · GPU generation ${next.generation} · max texture ${next.maxTextureDimension2D} · timestamps ${next.timestampQuery ? 'available' : 'unavailable'} · compression ${formats.join(', ') || 'RGBA fallback'}` : `${next.state} · GPU capabilities pending`;
+      report.textContent = next.generation ? `${next.backend === "webgl2" ? "WebGL 2 · basic lighting; shadows and PBR unavailable" : "WebGPU"} · ${next.state} · MSAA ${next.effectiveMsaaSamples === 4 ? '4×' : 'off'}${next.msaaSamples === 4 && !next.msaa4x ? ' (4× unsupported)' : ''} · GPU generation ${next.generation} · max texture ${next.maxTextureDimension2D} · timestamps ${next.timestampQuery ? 'available' : 'unavailable'} · compression ${formats.join(', ') || 'RGBA fallback'}` : `${next.state} · GPU capabilities pending`;
       if (next.state === 'ready' && !configured) {
         configured = true;
         const requested = new URLSearchParams(location.search).get('quality');
@@ -86,6 +90,13 @@
   };
   profile.addEventListener('change', () => {
     field('lod').checked = true; field('compressed').checked = true; apply();
+  });
+  field('msaa').addEventListener('change', () => {
+    if (Module._engine_msaa(Number(field('msaa').value))) profile.value = 'custom';
+    else {
+      field('msaa').value = state.msaaSamples;
+      report.textContent = 'Anti-aliasing could not be changed. Previous settings retained.';
+    }
   });
   document.querySelector('#quality-form').addEventListener('submit', event => {
     event.preventDefault(); apply(true);

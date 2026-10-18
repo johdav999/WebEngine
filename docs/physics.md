@@ -156,7 +156,7 @@ if (sweep) {
 }
 ```
 
-Query geometry supports boxes, spheres, capsules, and convex hulls. Poses use
+Query geometry supports boxes, spheres, capsules, convex hulls and compounds of convex leaves. Poses use
 world position/Euler rotation and require unit scale. Hulls retain their shape
 origin even when their center of mass is offset. Targets can include static
 triangle meshes; triangle meshes cannot be query geometry. Tests use Jolt's
@@ -275,7 +275,9 @@ node scripts/physics-smoke.cjs
 Evidence defaults to `build/evidence/physics/`. Browser acceptance is scoped to
 the tested browser/GPU; physical Android/iOS behavior remains a device check.
 See [movement controllers](movement.md) for the optional character motor.
-Compound colliders, joints, ragdolls, vehicles, physics
+Optional [physics joints](physics-joints.md) provide hinges, sliders, distance
+springs and movable point grabs with world-owned handles and body cleanup.
+Compound colliders, ragdolls, physics
 workers, and physics-state serialization are future extensions.
 
 ### Verified in this checkout, 2026-10-10
@@ -333,3 +335,39 @@ and application suites failed in the concurrently changing checkout. Physics,
 scene archives, movement, and camera controllers passed. The captured full result
 is `build/evidence/spatial-queries/native-ctest.txt`; focused spatial-query evidence
 does not establish that the whole checkout is green.
+
+## Owned collision geometry snapshots
+
+`PhysicsWorld::triangleGeometry(filter, triangleLimit=100000)` returns owned
+world-space triangles and contributing component handles from registered solver
+leaf shapes, respecting categories, layers and exclusions. Collider-local offsets
+and authoritative transforms are preserved. Invoke on the scene owner while idle
+after synchronization; stepping and overflow reject without partial output.
+No Jolt or renderer types cross this portable boundary. Static navigation uses
+this snapshot; see [navmesh contracts](navmesh.md) for occupancy and bake policy.
+
+
+## Vehicle foundation and archive v24
+
+See [vehicle contracts](vehicles.md) for the optional four-wheel component,
+COM/inertia and point-force body APIs, typed editor/preset/Play support and supported
+checkpoint state. Current scene/application/effect envelope writer version is 24;
+older formats remain readable. Vehicle configuration/checkpoints and visual saved
+references persist; commands, solver listeners and contact history do not.
+
+
+## Physical surfaces and compounds
+
+[Stage 2 contracts](physical-surfaces.md) add bounded immutable compound shapes,
+physical resources and triangle/terrain maps, query/wheel/contact source metadata,
+explicit friction combination and pre-solver relative/closing velocity observations.
+Convex-leaf compounds support moving bodies and queries; mesh leaves retain static
+body restrictions. Shape/map changes rebuild bodies; collider fallback changes
+invalidate contacts without replacing geometry. No force, impulse or damage is
+inferred from closing speed. See [validation](physical-surfaces-validation.md).
+
+Protected static body/collider children may also be owned by one identity-local
+component directly under a scene-root actor (used by RouteComponent). Moving
+bodies retain direct attachment; parent transforms and unmanaged nested physics
+are not implicitly accumulated. Queries/disable/removal retain the ordinary
+lifetime contracts. See [routes](splines-routes.md).

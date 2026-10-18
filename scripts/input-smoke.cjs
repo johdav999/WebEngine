@@ -24,9 +24,13 @@ function different(a,b) {
     const context=await browser.newContext(options),page=await context.newPage();
     page.on('pageerror',error=>result.errors.push(String(error)));
     page.on('console',message=>{if(message.type()==='error')result.errors.push(message.text());});
-    await page.goto(url+query);
+    const destination=new URL(url+query);if(process.env.RENDERER)destination.searchParams.set("renderer",process.env.RENDERER);
+    await page.route("https://fonts.googleapis.com/**",r=>r.fulfill({contentType:"text/css",body:""}));
+    await page.goto(destination.href);
     await page.waitForFunction(()=>document.body.dataset.engine==='ready'&&document.body.dataset.defaultModel==='ready',null,{timeout:60000});
+    if(process.env.RENDERER)assert.equal(await page.evaluate(()=>EngineQuality.snapshot().backend),process.env.RENDERER);
     await page.locator('#pause').click();await settle(page);
+    await page.locator('#reset').click();await settle(page); // Canonical reset pose; initial demo framing may differ.
     await page.evaluate(()=>{
       window.inputPackets=[];window.inputBatches=[];
       const submit=Module._engine_input_submit;

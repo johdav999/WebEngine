@@ -6,6 +6,8 @@
 - Check each proposed change against its architectural boundaries. Keep reusable mechanisms generic, optional and composable; keep game-specific rules in application/example code.
 - Use the current architecture sections to locate existing responsibilities. Treat the intended extensions as design directions, not implemented features or a requirement to implement unrelated systems.
 - Update `architecture.md` in the same change when module responsibilities, ownership/lifetimes, frame execution, dependencies, platform boundaries or extension status change. Distinguish current implementation from future work.
+- Always update the installed `engine-skill` at `C:/Users/Johan/.codex/skills/engine-skill` in the same task whenever new engine functionality is added, existing functionality is extended, or the architecture changes. Update `SKILL.md` and affected supporting references to match the delivered APIs, usage, defaults, limitations, architectural contracts, build commands and validation guidance. Include this documentation update before reporting the task complete.
+- Whenever `engine-skill` is updated, also update the CatGame repository copy at `C:/Users/Johan/source/repos/CatGame/.agents/skills/engine-skill` in the same task, including `SKILL.md` and affected supporting references. Merge the changes while preserving CatGame-specific guidance, and verify both copies before reporting the task complete.
 - Read the relevant feature contracts in [README.md](README.md) and `docs/` before extending existing systems. Verify the current source rather than relying on older feature inventories.
 
 ## Implementation

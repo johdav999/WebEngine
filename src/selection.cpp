@@ -7,6 +7,8 @@ namespace engine {
 namespace {
 bool finite(Vec3 p) { return std::isfinite(p.x)&&std::isfinite(p.y)&&std::isfinite(p.z); }
 void validateQuery(const SelectionQuery& query) {
+    if(query.geometry!=SelectionGeometry::Bounds&&query.geometry!=SelectionGeometry::Triangles)
+        throw std::invalid_argument("Invalid selection geometry mode");
     if(!std::isfinite(query.maxDistance)||query.maxDistance<=0||!std::isfinite(query.minDistance)
         ||query.minDistance<0||query.minDistance>query.maxDistance) throw std::invalid_argument("Invalid selection distance range");
 }
@@ -34,6 +36,71 @@ std::optional<float> intersect(Ray ray,const MeshBounds& bounds,const Mat4& mode
 }
 bool accepts(const InteractionComponent& provider,SelectionKind kind) {
     return provider.isActiveInHierarchy() && (kind==SelectionKind::Selection ? provider.selectable : provider.focusable);
+}
+struct SurfaceHit {
+    float distance=0;
+    std::optional<std::uint32_t> triangle;
+    Vec3 normal{},barycentric{};
+    Vec2 uv{};
+};
+struct PreciseVector { double x,y,z; };
+PreciseVector precise(Vec3 p) { return {p.x,p.y,p.z}; }
+PreciseVector operator-(PreciseVector a,PreciseVector b) { return {a.x-b.x,a.y-b.y,a.z-b.z}; }
+PreciseVector cross(PreciseVector a,PreciseVector b) { return {a.y*b.z-a.z*b.y,a.z*b.x-a.x*b.z,a.x*b.y-a.y*b.x}; }
+double dot(PreciseVector a,PreciseVector b) { return a.x*b.x+a.y*b.y+a.z*b.z; }
+// Original CPU geometry, morphed before skinning exactly as in localBounds/rendering.
+// Broad-phase bounds avoid deforming/testing triangles on unrelated surfaces.
+std::optional<SurfaceHit> meshHit(Ray ray,const MeshComponent& component,const Mat4& model,
+    const SelectionQuery& query,SelectionGeometry geometry) {
+    const auto* skeletal=dynamic_cast<const SkeletalMeshComponent*>(&component);
+    const auto pose=skeletal ? skeletal->skinPose() : nullptr;
+    const auto broad=intersect(ray,component.localBounds(pose),model,query.minDistance,query.maxDistance);
+    if(!broad) return {};
+    if(geometry==SelectionGeometry::Bounds) return SurfaceHit{*broad,{}, {}, {}, {}};
+    const auto& mesh=*component.mesh;
+    const auto morph=component.morphPose();
+    const auto& vertices=morph ? morph->vertices : mesh.vertices;
+    std::vector<Vec3> positions;positions.reserve(vertices.size());
+    for(std::size_t i=0;i<vertices.size();++i) {
+        auto p=vertices[i].position;
+        if(pose) {
+            p={};const auto& skin=mesh.skin[i];
+            for(std::size_t j=0;j<4;++j)
+                p=p+transformPoint(pose->bones.at(skin.joints[j]).transform,vertices[i].position)*skin.weights[j];
+        }
+        p=transformPoint(model,p);
+        if(!finite(p)) throw std::invalid_argument("Nonfinite picking geometry");
+        positions.push_back(p);
+    }
+    std::optional<SurfaceHit> best;
+    const auto origin=precise(ray.origin),direction=precise(ray.direction);
+    const auto range=[&](std::size_t first,std::size_t count) {
+        if(first>mesh.indices.size()||count>mesh.indices.size()-first||first%3||count%3)
+            throw std::invalid_argument("Invalid picking triangle range");
+        for(std::size_t index=first;index<first+count;index+=3) {
+            const auto ia=mesh.indices[index],ib=mesh.indices[index+1],ic=mesh.indices[index+2];
+            if(ia>=positions.size()||ib>=positions.size()||ic>=positions.size())
+                throw std::invalid_argument("Picking index outside vertices");
+            const auto a=precise(positions[ia]),e1=precise(positions[ib])-a,e2=precise(positions[ic])-a;
+            const auto p=cross(direction,e2);const double determinant=dot(e1,p);
+            const double scale=std::sqrt(dot(e1,e1)*dot(e2,e2));
+            if(scale==0||std::abs(determinant)<=1e-8*scale) continue; // Two-sided, including mirrored meshes.
+            const auto delta=origin-a;const auto q=cross(delta,e1);
+            const double u=dot(delta,p)/determinant,v=dot(direction,q)/determinant;
+            if(u<0||v<0||u+v>1) continue;
+            const double t=dot(e2,q)/determinant;
+            if(!std::isfinite(t)||t<query.minDistance||t>query.maxDistance||(best&&t>=best->distance)) continue;
+            const float w=float(1-u-v),fu=float(u),fv=float(v);
+            const auto uvA=vertices[ia].uv,uvB=vertices[ib].uv,uvC=vertices[ic].uv;
+            const auto n=cross(e1,e2);const double normalLength=std::hypot(n.x,n.y,n.z);
+            const Vec3 normal{float(n.x/normalLength),float(n.y/normalLength),float(n.z/normalLength)};
+            best=SurfaceHit{float(t),static_cast<std::uint32_t>(index/3),normal,{w,fu,fv},
+                {uvA.x*w+uvB.x*fu+uvC.x*fv,uvA.y*w+uvB.y*fu+uvC.y*fv}};
+        }
+    };
+    if(mesh.parts.empty()) range(0,mesh.indices.size());
+    else for(const auto& part:mesh.parts) range(part.firstIndex,part.indexCount);
+    return best;
 }
 }
 bool SelectionSystem::valid(ActorId id,SelectionKind kind) const {
@@ -88,28 +155,41 @@ std::optional<SelectionHit> SelectionSystem::resolveRay(Ray ray,const SelectionQ
         throw std::invalid_argument("Invalid selection ray");
     ray.direction={float(ray.direction.x/length),float(ray.direction.y/length),float(ray.direction.z/length)};
     std::optional<SelectionHit> hit;
-    const auto consider=[&](const InteractionComponent& provider,ComponentId surface,const MeshBounds& bounds,const Mat4& model) {
-        const auto distance=intersect(ray,bounds,model,query.minDistance,query.maxDistance);
-        if(distance&&(!hit||*distance<hit->distance)) hit=SelectionHit{provider.owner()->id(),provider.id(),surface,ray.origin+ray.direction*(*distance),*distance};
+    std::optional<float> blockerDistance;ActorId blockerActor;
+    const auto consider=[&](const InteractionComponent& provider,ComponentId surface,const SurfaceHit& value) {
+        if(!hit||value.distance<hit->distance) hit=SelectionHit{provider.owner()->id(),provider.id(),surface,
+            ray.origin+ray.direction*value.distance,value.distance,value.triangle,value.normal,value.barycentric,value.uv};
     };
     // Reuse the render transform (including physics interpolation), original
     // geometry and animated bounds. LOD and shadow detail do not affect picking.
     scene_.visit([&](const Node& node,const Mat4& authoritativeWorld) {
         const auto* physics=scene_.physicsIfCreated();
         const auto model=physics ? physics->renderMatrix(node,authoritativeWorld) : authoritativeWorld;
-        if(const auto* mesh=dynamic_cast<const MeshComponent*>(&node);mesh&&mesh->mesh&&mesh->owner()
+        if(const auto* mesh=dynamic_cast<const MeshComponent*>(&node);mesh&&mesh->mesh
             &&mesh->opacity>0&&(mesh->visibilityMask&query.visibilityMask)) {
-            const auto* skeletal=dynamic_cast<const SkeletalMeshComponent*>(mesh);
-            const auto bounds=mesh->localBounds(skeletal ? skeletal->skinPose() : nullptr);
-            for(const auto* provider:mesh->owner()->getComponents<InteractionComponent>()) {
+            std::vector<const InteractionComponent*> providers;
+            if(mesh->owner()) for(const auto* provider:mesh->owner()->getComponents<InteractionComponent>()) {
                 if(!accepts(*provider,kind)||provider->proxyBounds||!(provider->selectionMask&query.selectionMask)) continue;
-                consider(*provider,mesh->id(),bounds,model);
+                providers.push_back(provider);
+            }
+            const bool blocks=query.occlusion&&(mesh->visibilityMask&query.occluderMask);
+            if(!providers.empty()||blocks) {
+                const auto value=meshHit(ray,*mesh,model,query,blocks ? SelectionGeometry::Triangles : query.geometry);
+                if(blocks&&value&&(!blockerDistance||value->distance<*blockerDistance)) {
+                    blockerDistance=value->distance;blockerActor=mesh->owner() ? mesh->owner()->id() : ActorId{};
+                }
+                const auto target=blocks&&query.geometry==SelectionGeometry::Bounds&&!providers.empty()
+                    ? meshHit(ray,*mesh,model,query,SelectionGeometry::Bounds) : value;
+                if(target) for(const auto* provider:providers) consider(*provider,mesh->id(),*target);
             }
         }
         const auto* provider=dynamic_cast<const InteractionComponent*>(&node);
         if(!provider||!provider->owner()||!accepts(*provider,kind)||!provider->proxyBounds||!(provider->selectionMask&query.selectionMask)) return;
-        provider->validate();consider(*provider,provider->id(),*provider->proxyBounds,model);
+        provider->validate();
+        if(const auto distance=intersect(ray,*provider->proxyBounds,model,query.minDistance,query.maxDistance))
+            consider(*provider,provider->id(),SurfaceHit{*distance,{}, {}, {}, {}});
     });
+    if(hit&&blockerDistance&&blockerActor!=hit->actor&&*blockerDistance<hit->distance) return {};
     return hit;
 }
 std::optional<SelectionHit> SelectionSystem::resolvePointer(Vec2 pixel,const CameraComponent& camera,PixelViewport viewport,const SelectionQuery& query,SelectionKind kind) {

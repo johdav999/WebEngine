@@ -20,6 +20,8 @@ function changed(a,b) { const x=PNG.sync.read(a),y=PNG.sync.read(b);assert.equal
   const save=async(id,name)=>{const event=page.waitForEvent('download');await page.locator(`#${id}`).click();const download=await event;assert.equal(await download.failure(),null);const filename=path.resolve(evidence,name);await download.saveAs(filename);assert((await fs.stat(filename)).size>1000);return filename;};
   const open=async(filename,assets=false)=>{await page.locator(assets?'#asset-archive-file':'#scene-archive-file').setInputFiles(filename);await page.waitForFunction(()=>!document.querySelector('#open-scene').disabled);assert.equal(await page.locator('#archive-status').evaluate(e=>e.classList.contains('error')),false,await page.locator('#archive-status').textContent());await frames();};
   await ready();await page.locator('#pause').click();
+  // This fixture authors IBL directly; the default day/night policy otherwise owns it.
+  await page.locator('#sky-cycle').uncheck();
   await page.locator('#material-roughness').evaluate(el=>{el.value='0.83';el.dispatchEvent(new Event('input',{bubbles:true}));});
   await page.locator('#environment-intensity').evaluate(el=>{el.value='1.35';el.dispatchEvent(new Event('input',{bubbles:true}));});
   await page.locator('#camera-layout').selectOption('2');
