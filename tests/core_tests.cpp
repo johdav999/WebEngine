@@ -59,6 +59,19 @@ int main() {
     rejected=false;
     try { Transform zero; zero.scale.x=0; inverseAffine(zero.matrix()); } catch(const std::invalid_argument&) { rejected=true; }
     check(rejected,"Singular transforms are rejected");
+    Node rotationNode;
+    for(float sign:{-1.f,1.f}) for(int step=-100;step<=100;++step) {
+        Transform pose;pose.position={2,1,-4};
+        pose.rotation={.12f,sign*pi/2+step*.00001f,-.08f};
+        pose.scale={1.2f,.7f,2};
+        const auto expected=pose.matrix();
+        try {
+            rotationNode.setWorldTransform(expected);
+            const auto actual=rotationNode.worldMatrix();
+            for(int i=0;i<16;++i)
+                check(std::abs(actual.m[i]-expected.m[i])<.0002f,"Near-gimbal TRS round trip preserves the matrix");
+        } catch(const std::exception&) { check(false,"Valid near-gimbal transforms must not throw"); }
+    }
     if(failures) return 1;
     std::cout<<"Engine core tests passed\n";
 }
