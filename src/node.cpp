@@ -96,7 +96,11 @@ Transform decomposeTransform(const Mat4& matrix) {
     const float cosine=std::hypot(x.x,x.y);
     value.rotation.y=std::atan2(-x.z,cosine);
     if(cosine>0.00001f) {
-        value.rotation.x=std::atan2(y.z,z.z);value.rotation.z=std::atan2(x.y,x.x);
+        value.rotation.z=std::atan2(x.y,x.x);
+        // Derive roll from the well-conditioned Y/Z plane after removing yaw.
+        // Independent ratios of tiny y.z/z.z amplify quaternion float noise.
+        const float sz=std::sin(value.rotation.z),cz=std::cos(value.rotation.z);
+        value.rotation.x=std::atan2(sz*z.x-cz*z.y,cz*y.y-sz*y.x);
     } else {
         value.rotation.x=0;value.rotation.z=std::atan2(-y.x,y.y);
     }

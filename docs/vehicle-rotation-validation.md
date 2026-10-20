@@ -10,3 +10,9 @@ The core regression checks 402 poses around both positive and negative 90-degree
 headings, with pitch, roll and nonuniform scale. On Windows, Release native tests
 `engine_core`, `physics`, and `vehicle` passed on 2026-10-20. The downstream
 RacingGame browser validation is recorded in that repository.
+
+A second regression records the actual quaternion-derived matrix from the
+RacingGame failure. Roll extraction uses the well-conditioned Y/Z plane after
+removing yaw, rather than independently dividing tiny cosine-scaled entries.
+Both RacingGame vehicles completed three simulated laps without recovery using
+this correction. The three engine suites above were rerun and passed.
