@@ -380,6 +380,8 @@ private:
 };
 class GuiSystem {
 public:
+    // Idle only: cancels capture/focus before destroying widgets. Keeps font/theme/scale.
+    void clear();
     Widget& root() { return root_; }
     void setFont(std::shared_ptr<GuiFont> font) { font_=std::move(font); }
     const std::shared_ptr<GuiFont>& font() const { return font_; }

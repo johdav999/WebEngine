@@ -1922,3 +1922,72 @@ workspace viewport is restored to authored composition during serialization.
 Specialized graphical tool panels, docking and terrain brushes remain browser-only.
 The developer executable examples/windows_editor.cpp owns entry-point policy;
 player packaging remains separate. See [workbench contract](docs/windows-editor.md).
+
+### Optional compiled code modules (M1)
+
+`engine_modules` / `WebEngine::Modules` is an optional standard-C++20-only target,
+also consumable through `modules/` without configuring the rest of the engine.
+It validates namespaced descriptors, API/dependency versions, capabilities and
+provided schemas, then provides typed owner-thread staged composition with
+deterministic dependency ordering. Immutable registry snapshots retain provider
+captures; sessions keep snapshots alive. Failed preparation keeps the previous
+composition; registry teardown precedes reverse provider release. No scheduler,
+scene ownership, global registry, dynamic loader or executable unload is added.
+
+`cmake/WebEngineModule.cmake` supplies the public static-module target helper.
+`examples/modules` is an external non-quest plugin template with independent
+counter sessions, optional browser/Windows rendered hosts and disabled-module
+coverage. Browser hosting supplies Application/renderer callbacks; Windows uses
+the existing DesktopHost. The portable quest kernel is delivered separately in M2; Paws migration remains future work.
+See [contracts](docs/modules.md) and [evidence](docs/modules-validation.md).
+
+### Optional quest kernel (M2)
+
+`engine_quests` / `WebEngine::Quests` depends only on Modules and standard C++20.
+Explicit `webengine.quests` registration supplies pure typed handlers; additional
+compiled modules extend the staging Bindings registry. Immutable catalogues own
+module snapshots/provider captures. Application-owned Runtime instances retain
+catalogues and independently own facts, staged progress, earned receipts and
+scoped input; no scene, global registry, platform IO or second clock is added.
+
+Owner-thread preparation computes an immutable candidate with bounded work and
+typed effect requests. Failed validation, callback/reentry, budget exhaustion or
+host effect rejection preserves live state and queued input. No-allocation commit
+checks exact owner/state/queue revisions. Hosts stage and publish their game
+economy/journal alongside it. Restore validates canonical versioned snapshots,
+rebases generations and drops transient input; it emits no effects. Stable earned
+completion survives retry, and receipts are independent of attempt/content IDs.
+Callbacks are deterministic/pure; native and Wasm use identical kernel sources.
+
+`examples/quests` contains a custom compiled delivery handler and small real
+browser/Windows consumers. The M2 tests prove cross-runtime state/effect/trace
+and save equivalence. M3 now supplies shared host pause/scene-travel/persistent-IO integration;
+Paws migration/pin publication remains M4 onward. See [quest contracts](docs/quests.md)
+and [platform evidence](docs/quests-validation.md).
+
+### Quest host vertical slice (M3)
+
+The optional quest example now owns a shared application-level Session and
+Controller, composed from the M1 registry/M2 kernel and the existing Application.
+The session owns wallet, location, explicit pause and fractional simulation time;
+its bounded versioned envelope joins these with the kernel snapshot/receipts.
+Browser localStorage/file transfer and native DesktopFiles atomic IO are adapters.
+No game/save policy or platform dependency moves into the portable quest module.
+
+Controller simulation uses Application delta only. Scene travel stages a new
+presentation, registers its view, commits an idle transition and unloads the old
+scene while session progress survives. Scene projections use component IDs;
+renderer borrows release/rebind before destruction. Input/import epochs cancel
+old work on lifecycle/scene/session replacement. Staged loads validate all game
+and quest state before publication; restore emits no rewards and rebases clocks.
+See [host contracts](docs/quests-host.md) and [cross-platform evidence](docs/quests-host-validation.md).
+Paws host extraction, pin publication and migration remain M4 onward.
+
+
+### Consumer host integration (M4)
+
+The engine exports WebEngine::Browser for reusable browser renderer packaging.
+GuiSystem supports idle clear/rebuild while retaining host ownership. DesktopHost
+exposes GUI-aware pointer/wheel notifications and an optional application-owned
+water phase. Sessions borrow the host Application; the engine gains no game save
+or quest policy. See [consumer host contracts](docs/consumer-hosts.md).

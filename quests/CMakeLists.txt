@@ -1,0 +1,23 @@
+option(WEBENGINE_BUILD_QUESTS "Build portable quest kernel" OFF)
+option(WEBENGINE_BUILD_QUEST_TESTS "Build native/Wasm quest kernel tests" OFF)
+if(NOT WEBENGINE_BUILD_QUESTS)
+  return()
+endif()
+if(NOT TARGET WebEngine::Modules)
+  message(FATAL_ERROR "WebEngine::Quests requires WebEngine::Modules")
+endif()
+webengine_add_module(engine_quests ALIAS WebEngine::Quests
+  PUBLIC_INCLUDE_DIR "${CMAKE_CURRENT_LIST_DIR}/../include"
+  SOURCES ../src/quests/bindings.cpp ../src/quests/definition.cpp ../src/quests/runtime.cpp ../src/quests/snapshot.cpp
+  PUBLIC_DEPENDENCIES WebEngine::Modules)
+if(WEBENGINE_BUILD_QUEST_TESTS)
+  add_executable(quest_tests ../tests/quests_tests.cpp)
+  target_link_libraries(quest_tests PRIVATE WebEngine::Quests)
+  if(EMSCRIPTEN)
+    set_target_properties(quest_tests PROPERTIES SUFFIX ".js")
+    target_link_options(quest_tests PRIVATE -sENVIRONMENT=node -sEXIT_RUNTIME=1 -sALLOW_MEMORY_GROWTH=1 -sSTACK_SIZE=1048576 -sNODERAWFS=1)
+    add_test(NAME quests COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} $<TARGET_FILE:quest_tests>)
+  else()
+    add_test(NAME quests COMMAND quest_tests)
+  endif()
+endif()

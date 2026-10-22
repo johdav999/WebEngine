@@ -1,0 +1,6 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>WebEngine module sample</title>
+<style>body{margin:0;background:#101a26;color:#eef4fa;font:18px system-ui}main{padding:24px}button{font:inherit;padding:10px;margin:4px}canvas{width:800px;height:450px;display:block}p{max-width:780px}</style>
+<main><h1>Two independent sessions</h1><p>The same compiled counter plugin creates both sessions. Resetting one keeps the other intact.</p>
+<div id="values">Loading module…</div><button id="add-a" onclick="Module._module_demo_command(0)">Add to A</button><button id="add-b" onclick="Module._module_demo_command(1)">Add to B</button>
+<button id="reset-a" onclick="Module._module_demo_command(2)">Reset A</button><button id="reject" onclick="Module._module_demo_command(4)">Test invalid replacement</button>
+<canvas id="viewport" width="800" height="450"></canvas></main><script>window.engineStatus=(text,error)=>{window.moduleHostStatus=text;if(error)window.moduleHostError=text;};window.engineStats=()=>{};window.enginePerformance=()=>{};var Module={canvas:document.getElementById('viewport')};</script><script src="module_demo.js"></script></html>

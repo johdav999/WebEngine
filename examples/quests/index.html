@@ -1,0 +1,9 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Quest host sample</title>
+<style>body{margin:0;background:#101a26;color:#eef4fa;font:17px system-ui}main{padding:24px;max-width:960px}button,.import{font:inherit;padding:8px;margin:4px;border:1px solid #697c90;border-radius:4px;background:#22364a;color:#fff;cursor:pointer}button:disabled{opacity:.5;cursor:default}canvas{width:800px;height:450px;display:block;max-width:100%}p{max-width:850px}#message{min-height:26px;margin-top:8px}input{max-width:280px}</style>
+<main><h1>Delivery quest: two places, one session</h1><p>Activate and deliver two apples. Friendly waits half a second of play time; Quiet waits for the gate. Travel keeps progress. Save stores progress and coins together; Load restores them. Export/import uses the same file on Windows.</p>
+<div id="values">Loading…</div><div id="actions">
+<button id="activate" data-command="0">Activate</button><button id="deliver" data-command="1">Deliver apple</button><button id="friendly" data-command="2">Friendly</button><button id="quiet" data-command="3">Quiet</button>
+<button id="pause" data-command="4">Pause</button><button id="travel" data-command="5">Travel</button><button id="save" data-command="6">Save</button><button id="load" data-command="7">Load</button><button id="retry" data-command="8">Retry</button><button id="gate" data-command="9">Open gate</button><button id="export" data-command="10">Export file</button>
+<label class="import">Import file <input id="import" type="file" accept=".qhost"></label></div>
+<div id="message" role="status"></div><canvas id="viewport" width="800" height="450"></canvas></main>
+<script src="host.js"></script><script src="quest_demo.js"></script></html>
