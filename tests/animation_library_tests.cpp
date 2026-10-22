@@ -1,0 +1,35 @@
+#include "engine/editor_animation.hpp"
+#include "engine/editor.hpp"
+#include "engine/skeletal_mesh_component.hpp"
+#include <iostream>
+using namespace engine;
+namespace {
+void check(bool v,const char* m){if(!v)throw std::runtime_error(m);}
+template<class F>void rejects(F fn){bool rejected=false;try{fn();}catch(const std::exception&){rejected=true;}check(rejected,"Expected rejection");}
+std::shared_ptr<Skeleton> rig(){auto s=std::make_shared<Skeleton>();s->joints={{"Root",-1,{}},{"Hand",0,{}}};s->bindings={{},{1,Mat4::identity()}};s->clips={{"Idle",1,2,{{},{},{},{}}},{"Attack",.2,2,{{},{},{},{{0,1,0},{1,1,1},{}}}}};s->validate();return s;}
+}
+int main(){try{
+    auto s=rig();auto base=AnimationLibrary::fromSkeleton(s);auto d=base->data();d.name="Character";d.clips[1].folder="Combat";d.clips[1].tags="attack melee";d.clips[1].loop=false;
+    d.controller.parameters={{"Attack",AnimationParameterType::Trigger,false},{"Blocking",AnimationParameterType::Boolean,false},{"Speed",AnimationParameterType::Number,0.0}};
+    d.controller.states.push_back({"Attack",1,false,1,{}});d.positions.push_back({320,80});d.controller.transitions={{0,1,.03,{},{{0,AnimationComparison::Equal,true}}},{1,0,.03,1,{}}};
+    auto library=AnimationLibrary::create(d);auto bytes=AnimationLibraryArchive::save(*library);auto loaded=AnimationLibraryArchive::load(bytes);check(AnimationLibraryArchive::metadata(loaded->data())==AnimationLibraryArchive::metadata(d),"Metadata roundtrip");check(loaded->data().skeleton->clips[1].frames[3].translation.y==1,"Samples roundtrip");
+    auto corrupt=bytes;corrupt.back()^=std::byte{1};rejects([&]{AnimationLibraryArchive::load(corrupt);});
+    auto invalid=d;invalid.controller.transitions[0].conditions[0].parameter=999;rejects([&]{AnimationLibrary::create(invalid);});invalid=d;invalid.clips[1].id=invalid.clips[0].id;rejects([&]{AnimationLibrary::create(invalid);});
+    auto foreign=*s;foreign.joints[1].bindPose.translation.x=2;rejects([&]{library->append(foreign);});foreign=*s;foreign.joints[1].name="Other";rejects([&]{library->append(foreign);});
+    auto appended=library->append(*s);check(appended->data().clips.size()==4&&appended->clipIndex("clip-2")==1,"Append preserves IDs and references");check(library->data().clips.size()==2,"Immutable source preserved");
+    AnimationLibraryEditor doc(library);doc.edit(appended);check(doc.undo()&&doc.library()==library,"Undo library import");check(doc.redo()&&doc.library()==appended,"Redo library import");rejects([&]{doc.open(corrupt);});check(doc.library()==appended,"Invalid open preserves library");
+    auto mesh=std::make_shared<Mesh>(*Mesh::cube());mesh->skeleton=s;Scene scene("Test");auto& actor=scene.addChild<Actor>("Character");auto& component=actor.addComponent<SkeletalMeshComponent>("Mesh",mesh);const auto id=component.savedId();scene.synchronize();EditorSession edit(scene);edit.select(id);const auto before=SceneArchive::save(scene);
+    auto* originalMesh=&component;auto* originalSkeleton=&component.skeleton();auto* originalPlayer=&component.animation();
+    check(edit.setAnimationLibrary(library),"Apply library");auto* target=dynamic_cast<SkeletalMeshComponent*>(scene.findSavedNode(id));check(target&&target->animation().controller(),"Controller installed");check(target==originalMesh&&&target->skeleton()==originalSkeleton&&&target->animation()==originalPlayer,"Apply preserves node references and handles");const auto applied=SceneArchive::save(scene);check(edit.undo(),"Undo application");check(SceneArchive::save(scene)==before,"Exact previous playback restored");check(edit.redo(),"Redo application");check(SceneArchive::save(scene)==applied,"Exact configured playback restored");check(scene.findSavedNode(id)==originalMesh,"History preserves node identity");
+    target=dynamic_cast<SkeletalMeshComponent*>(scene.findSavedNode(id));auto& player=target->animation();player.trigger("Attack");scene.update(.05);check(player.controllerState()==1&&!std::get<bool>(player.parameter("Attack")),"Gameplay trigger consumed on entry");scene.update(.2);scene.update(.01);check(player.controllerState()==0,"Completion returns to idle");scene.update(.2);check(player.controllerState()==0,"One shot does not repeat");
+    player.setParameter("Blocking",true);player.setParameter("Speed",1.0);rejects([&]{player.setParameter("Speed",true);});
+    auto saved=SceneArchive::load(SceneArchive::save(scene));auto* restored=dynamic_cast<SkeletalMeshComponent*>(saved.scene->findSavedNode(id));check(restored&&std::get<bool>(restored->animation().parameter("Blocking")),"Scene retains parameters/controller");
+    check(!edit.undo(),"External runtime advancement guards undo");
+    const auto unchanged=SceneArchive::save(scene);scene.visit([&](const Node& n,const Mat4&){if(n.savedId()==id)rejects([&]{library->apply(*target);});});check(SceneArchive::save(scene)==unchanged,"Guarded traversal rejects asset replacement");
+    auto other=std::make_shared<Mesh>(*Mesh::cube());other->skeleton=s;SkeletalMeshComponent independent("Other character",other);library->apply(independent);check(independent.animation().controllerState()==0&&!std::get<bool>(independent.animation().parameter("Blocking")),"Characters own independent parameters and clocks");
+    auto boolData=d;boolData.controller.parameters[0].type=AnimationParameterType::Boolean;auto boolLibrary=AnimationLibrary::create(boolData);boolLibrary->apply(independent);independent.animation().setParameter("Attack",true);independent.animation().update(.01);check(independent.animation().controllerState()==1&&std::get<bool>(independent.animation().parameter("Attack")),"Boolean Attack is persistent gameplay input");check(independent.animation().lastTransition()==0&&independent.animation().transitionCount()==1,"Transition diagnostics");independent.animation().setParameter("Attack",false);independent.animation().update(.25);independent.animation().update(.01);check(independent.animation().controllerState()==0,"Boolean completion returns after release");independent.animation().clearController();check(!independent.animation().lastTransition()&&independent.animation().transitionCount()==0,"Diagnostics reset on detach");
+    auto anonymous=rig();anonymous->joints[0].name.clear();auto anonymousLibrary=AnimationLibrary::fromSkeleton(anonymous);check(anonymousLibrary->append(*anonymous)->data().clips.size()==4,"Importer synthetic root supported");
+    auto ordered=rig();ordered->joints.push_back({"Foot",0,{}});for(auto& c:ordered->clips){c.frames.assign(c.frameCount*3,{});c.frames[1].translation.y=2;c.frames[2].translation.y=3;}
+    auto reordered=*ordered;std::swap(reordered.joints[1],reordered.joints[2]);for(auto& c:reordered.clips)for(std::size_t f=0;f<c.frameCount;++f)std::swap(c.frames[f*3+1],c.frames[f*3+2]);auto mapped=AnimationLibrary::fromSkeleton(ordered)->append(reordered);check(mapped->data().skeleton->clips[2].frames[1].translation.y==2,"Joint mapping preserves target semantics");
+    std::cout<<"Animation library/editor contracts passed\n";return 0;
+}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

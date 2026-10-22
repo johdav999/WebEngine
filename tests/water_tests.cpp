@@ -96,7 +96,11 @@ int main() {try {
     auto hidden=frame.sceneFrame().meshes;for(auto& draw:hidden) draw.cameraVisible=false;
     check(!waterReflection(hidden,{0,4,0}),"Invisible water selected a reflection plane");
     a.transform={};a.setMaterial(0,reflective);
-    const auto bytes=SceneArchive::save(scene);check(bytes[8]==std::byte{27},"Water archives must use current format 27");
+    const auto bytes=SceneArchive::save(scene);
+    // Later archive versions extend unrelated components. Water requires its
+    // minimum format and exact data round trips, not a frozen global version.
+    std::uint32_t version=0;for(unsigned i=0;i<4;++i)version|=std::to_integer<std::uint32_t>(bytes[8+i])<<(i*8);
+    check(version>=31,"Water archive predates its required format");
     auto restored=SceneArchive::load(bytes);check(bytes==SceneArchive::save(*restored.scene),"Water archive does not round trip exactly");
     auto* copy=dynamic_cast<MeshComponent*>(restored.scene->findSavedNode(a.savedId()));
     check(copy&&copy->resolvedMaterial(0).water.planarReflectionStrength==.8f&&copy->resolvedMaterial(0).water.amplitude==.4f&&copy->resolvedMaterial(0).shader==MaterialShader::Water,"Water overrides lost on load");

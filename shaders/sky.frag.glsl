@@ -1,5 +1,8 @@
 #version 300 es
 precision highp float;
+uniform bool hdrOutput;
+vec3 hdrEncode(vec3 c){return hdrOutput?c:pow(c,vec3(1.0/2.2));}
+
 // FOG_FUNCTIONS
 in vec3 fogOffset;
 in vec3 direction;
@@ -78,5 +81,5 @@ void main() {
         radiance=samplePanorama(uv);
     }
     vec3 linear=cloudLayer(d,radiance)*skyHorizon.w;
-    outputColor=vec4(pow(fogApply(fog,linear/(vec3(1)+linear),fog.eye.xyz+fogOffset+d*(fog.height.w/max(dot(d,fog.forward.xyz),0.001)),false),vec3(1.0/2.2)),1);
+    outputColor=vec4(hdrEncode(fogApply(fog,hdrOutput?linear:linear/(vec3(1)+linear),fog.eye.xyz+fogOffset+d*(fog.height.w/max(dot(d,fog.forward.xyz),0.001)),false)),1);
 }

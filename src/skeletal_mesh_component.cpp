@@ -1,4 +1,5 @@
 #include "engine/skeletal_mesh_component.hpp"
+#include <tuple>
 
 namespace engine {
 SkeletalMeshComponent::SkeletalMeshComponent(std::string name,std::shared_ptr<const Mesh> mesh):MeshComponent(std::move(name),std::move(mesh)) {
@@ -11,5 +12,11 @@ void SkeletalMeshComponent::synchronizeSkeleton() const {
 }
 std::shared_ptr<const SkinPose> SkeletalMeshComponent::skinPose() const {
     synchronizeSkeleton();return skeleton_->skeleton() ? skeleton_->skinPose() : nullptr;
+}
+void SkeletalMeshComponent::swapAnimationState(SkeletalMeshComponent& other) noexcept {
+    mesh.swap(other.mesh);
+    auto skeletonState=[](SkeletonComponent& s){return std::tie(s.skeleton_,s.skinPose_,s.worlds_,s.pending_,s.bind_);};
+    auto a=skeletonState(*skeleton_),b=skeletonState(*other.skeleton_);a.swap(b);
+    animation_->swapPlayback(*other.animation_);
 }
 } // namespace engine

@@ -1,0 +1,10 @@
+#pragma once
+#include "engine/ai_controller.hpp"
+#include "ai_event_browser.hpp"
+namespace engine::aiTaskBrowser {
+inline std::string quote(std::string_view value){std::string out="\"";for(unsigned char c:value){if(c=='"'||c=='\\'){out+='\\';out+=char(c);}else if(c=='\n')out+="\\n";else if(c=='\r')out+="\\r";else if(c=='\t')out+="\\t";else if(c>=32)out+=char(c);}return out+'"';}
+inline void state(std::ostream& out,const AiState& s){out<<",\"succeededEvent\":"<<quote(s.succeededEvent)<<",\"failedEvent\":"<<quote(s.failedEvent)<<",\"tasks\":[";bool comma=false;for(const auto& t:s.tasks){if(comma)out<<',';comma=true;out<<"{\"key\":"<<quote(t.key)<<",\"timeout\":"<<t.timeout<<",\"event\":"<<quote(t.event)<<",\"parameters\":{";bool sep=false;for(const auto&[k,v]:t.parameters){if(sep)out<<',';sep=true;out<<quote(k)<<':';aiEventBrowser::value(out,v);}out<<"},\"sources\":{";sep=false;for(const auto&[p,k]:t.sources){if(sep)out<<',';sep=true;out<<quote(p)<<':'<<quote(k);}out<<"}}";}out<<']';}
+inline void schemas(std::ostream& out){out<<'[';bool comma=false;for(const auto& t:AiBindingRegistry::builtins()->tasks()){if(comma)out<<',';comma=true;out<<"{\"key\":"<<quote(t.key)<<",\"parameters\":[";bool sep=false;for(const auto& p:t.parameters){if(sep)out<<',';sep=true;out<<"{\"key\":"<<quote(p.key)<<",\"type\":"<<int(p.type)<<",\"minimum\":"<<p.minimum<<",\"maximum\":"<<p.maximum<<",\"initial\":";aiEventBrowser::value(out,p.initial);out<<'}';}out<<"]}";}out<<']';}
+inline void records(std::ostream& out,const std::vector<AiTaskRecord>& records){out<<'[';bool comma=false;for(const auto& r:records){if(comma)out<<',';comma=true;static constexpr const char* names[]={"running","succeeded","failed","canceled"};out<<"{\"state\":"<<r.state<<",\"index\":"<<r.index<<",\"key\":"<<quote(r.key)<<",\"status\":"<<quote(names[int(r.status)])<<",\"seconds\":"<<r.seconds<<",\"error\":"<<quote(r.error)<<",\"deliveryPending\":"<<(r.deliveryPending?"true":"false")<<'}';}out<<']';}
+inline void diagnostics(std::ostream& out,const AiControllerComponent& c){out<<"{\"active\":";records(out,c.activeTasks());out<<",\"history\":";records(out,c.taskHistory());out<<'}';}
+}

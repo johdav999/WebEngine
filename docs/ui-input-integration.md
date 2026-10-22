@@ -1,5 +1,16 @@
 # UI and input integration
 
+The optional native Windows [DesktopHost](windows-desktop.md) uses these same
+InputBindings/Application snapshots and GuiSystem widgets. Stable DesktopControl
+IDs keep SDL details private. GUI input takes precedence over gameplay; menu,
+scene, focus and shutdown boundaries cancel held sources and component commands
+through synchronous InputCancelled events. See the desktop contracts for pointer
+coordinates, capture cancellation, gamepad rearming and callback lifetimes.
+The private desktop text service connects the same single-line TextInput to SDL
+Unicode/IME events and Windows clipboard, with UTF-8 selection editing and focus
+cancellation. Honor guiConsumed in application shortcut handlers. Native text
+services are owned by DesktopHost; semantic DOM/text services remain browser-owned.
+
 The engine exposes portable device-to-action bindings and retained GUI layout,
 scrolling and accessibility data. Browser event, text-service and semantic DOM
 integration stay in the optional adapters. Application code supplies control
@@ -97,6 +108,11 @@ and `touch-action: none` for accessible virtual controls.
 
 ## GUI composition and accessibility
 
+For portable custom painting/input hooks, checkbox and horizontal slider
+controls, see [custom GUI widgets](gui-widgets.md). Focused sliders consume their
+value-navigation keys before scroll-panel navigation; ordinary handled presses
+can still be cancelled by scrolling.
+
 ```cpp
 GuiSystem gui;
 gui.setScale(1.25f); // independent of device pixel ratio
@@ -115,14 +131,18 @@ action.onClick(applySettings);
 ```
 
 Use `WrapLayout{gap,rowGap}` for rows of fixed-size children. Hidden children
-reserve no space. Stretch fills the parent's padded width/height; flow does not
-distribute leftover space or infer arbitrary container heights. Call `layout`
+reserve no space. Stretch fills the parent's padded width/height, clamped by
+optional size limits. Explicit sizes remain the default; opt-in content sizing
+measures containers and controls. Alignment packs groups/cells without flex-weight
+distribution; `GridLayout` provides equal columns. See [layout contracts](gui-layout.md).
+Call `layout`
 after changing geometry, text, font, visibility, scale or scroll offset.
 Geometry and input coordinates returned by the GUI are CSS pixels; configured
 sizes, spacing and scroll offsets are design units. Scaling also scales glyph
 quads, caret, selection and hit testing. Scroll panels always clip their content,
 even if `setClipChildren(false)` is set. Vertical content extent includes visible
-direct children; applications must size nested containers to their contents.
+direct children; use content-height sizing for nested containers when their full
+measured contents should contribute to scrolling.
 
 `wheel(position, delta)` consumes GUI input and scrolls the nearest ancestor
 that can move, falling back to an outer scroll panel at a boundary. The legacy

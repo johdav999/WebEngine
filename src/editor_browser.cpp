@@ -5,6 +5,7 @@
 #include "editor_browser.hpp"
 #include "engine/editor.hpp"
 #include "route_example.hpp"
+#include "region_example.hpp"
 #include "engine/mesh_component.hpp"
 #include "engine/skeletal_mesh_component.hpp"
 #include "engine/orbit_controller.hpp"
@@ -27,6 +28,8 @@ std::vector<const CameraComponent*> borrowedCameras;
 std::unique_ptr<EditorSession> session;
 EditorPlaySession play;
 std::unique_ptr<OrbitController> playOrbit;
+std::unique_ptr<RegionExample> regionPreview;
+std::map<std::string,std::shared_ptr<const RegionSource>> regionSources;
 EffectPreview fxPreview;
 std::unique_ptr<OrbitController> fxOrbit;
 const EffectAsset* fxSource=nullptr;
@@ -40,8 +43,11 @@ EM_JS(void, fx_emitter,(const char* name,const double* values,int count,int text
 });
 EM_JS(void, fx_curve,(int kind,const float* values,int count),{window.__editorFx.emitters.at(-1).curves[kind]=Array.from(new Float32Array(HEAPU8.buffer,values,count));});
 EM_JS(void, fx_end,(),{window.EngineEditorFx?.inspect(window.__editorFx);});
-EM_JS(void, fx_diagnostics,(int active,int paused,double seconds,int count,double dropped,int impacts,int queries),{
-    window.EngineEditorFx?.diagnostics({active:!!active,paused:!!paused,seconds,particles:count,dropped,impacts,queries});
+EM_JS(void, fx_composition_begin,(int effects,int decals,int spawns,int depth,int events),{window.__editorFx.limits=[effects,decals,spawns,depth,events];window.__editorFx.triggers=[];});
+EM_JS(void, fx_trigger,(int emitter,const char* target,const double* values),{window.__editorFx.triggers.push({emitter,target:UTF8ToString(target),values:Array.from(new Float64Array(HEAPU8.buffer,values,14))});});
+EM_JS(void, fx_composition_stats,(int effects,int decals,double spawned,double dropped),{window.EngineEditorFxComposition?.diagnostics({effects,decals,spawned,dropped});});
+EM_JS(void, fx_diagnostics,(int active,int paused,double seconds,int count,double dropped,int impacts,int queries,int trailPoints),{
+    window.EngineEditorFx?.diagnostics({active:!!active,paused:!!paused,seconds,particles:count,dropped,impacts,queries,trailPoints});
 });
 EM_JS(void, fx_bytes,(const void* data,int count),{window.EngineEditorFx?.download(new Uint8Array(HEAPU8.buffer,data,count).slice());});
 
@@ -121,6 +127,10 @@ EM_JS(void, editor_bound,(const char* id),{window.EngineEditorCamera?.cancel();w
 void reportPhysicsAuthoring();
 void reportRouteAuthoring();
 void projectRouteAuthoring();
+void projectSpotlightAuthoring();
+void reportRegionAuthoring();
+void reportRegionPreview();
+void projectRegionAuthoring();
 void rebuildCatalog() {
     auto used=SceneArchive::collectAssets(*document);catalogMeshes.clear();catalogTextures.clear();
     auto append=[](auto& to,const auto& from){for(const auto& resource:from)if(resource&&std::find(to.begin(),to.end(),resource)==to.end())to.push_back(resource);};
@@ -165,6 +175,8 @@ void reportFxAuthoring() {
         for(const auto& k:d.forceOverLife){flat.insert(flat.end(),{k.time,k.value.x,k.value.y,k.value.z});}fx_curve(3,flat.data(),int(flat.size()));flat.clear();
         for(const auto& k:d.bursts){flat.insert(flat.end(),{float(k.time),float(k.count)});}fx_curve(4,flat.data(),int(flat.size()));
     }
+    if(effect){const auto& a=effect->asset();const auto& l=a.limits;fx_composition_begin(l.maxActiveEffects,l.maxActiveDecals,l.maxSpawnsPerUpdate,l.maxDepth,l.maxEventsPerEmitter);
+        for(const auto& t:a.triggers){const auto d=t.decal.value_or(EffectDecal{});const auto texture=std::find(catalogTextures.begin(),catalogTextures.end(),d.settings.texture);const double values[]={double(t.event),double(t.alignNormal),t.inheritVelocity,double(t.decal.has_value()),d.settings.lifetime,d.settings.fadeOut,d.scale.x,d.scale.y,d.scale.z,double(texture==catalogTextures.end()?-1:int(texture-catalogTextures.begin())),d.settings.color.x,d.settings.color.y,d.settings.color.z,d.settings.opacity};fx_trigger(t.emitter,t.effect?t.effect->name.c_str():"None",values);}}
     fx_end();
     if(fxPreview.active()&&effect) {
         if(fxTarget!=effect->savedId()||fxSource!=&effect->asset()) {
@@ -222,7 +234,7 @@ void reportContent() {
     if(const auto* decal=dynamic_cast<const DecalComponent*>(node)){const auto found=std::find(catalogTextures.begin(),catalogTextures.end(),decal->settings().texture);editor_decal(found==catalogTextures.end()?-1:int(found-catalogTextures.begin()),decal->projectionLimited(),int(decal->triangleCount()));}
     const auto* owner=node?dynamic_cast<const Actor*>(node):nullptr;
     if(!owner)if(const auto* c=dynamic_cast<const Component*>(node))owner=c->owner();
-    reportPhysicsAuthoring();reportRouteAuthoring();
+    reportPhysicsAuthoring();reportRouteAuthoring();reportRegionAuthoring();
     editor_content_end(why.c_str(),node&&!session->propertyReadOnlyReason(*node).empty()?0:node&&node!=document,owner&&session->selectionIds().size()==1&&why.empty());
 }
 
@@ -253,7 +265,7 @@ void report(bool tree=false) {
     reportContent();reportFxAuthoring();
 }
 template<class F> int command(F action,bool tree=false) {
-    if(!session||!enabled||play.playing()) return 0;
+    if(!session||!enabled||play.playing()||regionPreview) return 0;
     try {
         const bool ok=action();report(tree);
         if(!ok) editor_message("The edit is unavailable or its target changed. The last valid pose was kept.",1);
@@ -264,7 +276,7 @@ template<class F> int command(F action,bool tree=false) {
 }
 bool browserEditorActive() { return enabled; }
 void setBrowserEditorEnabled(bool value) { unbindBrowserEditor();enabled=value; }
-void unbindBrowserEditor() { stopDrivingAudio();stopAudioPreview(); vehiclePlayCamera.reset();stopBrowserAiPreview();fxOrbit.reset();fxPreview.stop();fxSource=nullptr;fxTarget.clear();playOrbit.reset();play.stop();session.reset();borrowedCameras.clear();document=nullptr;viewCamera=nullptr;viewOrbit=nullptr;retainedAssets=nullptr;catalogMeshes.clear();catalogTextures.clear(); }
+void unbindBrowserEditor() { invalidateBrowserContentIteration();invalidateBrowserAnimationBinding();invalidateBrowserPrefabBinding();regionPreview.reset(); stopDrivingAudio();stopAudioPreview(); vehiclePlayCamera.reset();stopBrowserAiPreview();fxOrbit.reset();fxPreview.stop();fxSource=nullptr;fxTarget.clear();playOrbit.reset();play.stop();session.reset();borrowedCameras.clear();document=nullptr;viewCamera=nullptr;viewOrbit=nullptr;retainedAssets=nullptr;catalogMeshes.clear();catalogTextures.clear(); }
 void bindBrowserEditor(Scene& scene,CameraComponent& camera,OrbitController& orbit,AssetLibrary& assets,std::span<const RenderView> views) {
     unbindBrowserEditor();if(!enabled) return;
     if(vehicleMainCamera.ownsPose(camera)){const auto offset=camera.follow().offset;orbit.adoptCamera(std::max(.1f,std::sqrt(dot(offset,offset))));vehicleMainCamera.reset();}
@@ -291,6 +303,7 @@ bool browserEditorPlaying(){return play.playing();}
 EditorPlaySession& browserEditorPlaySession(){return play;}
 void startBrowserEditorPlay(std::span<const RenderView> views){
     stopBrowserAiPreview();
+    if(regionPreview)throw std::logic_error("Close the region preview before Play");
     if(fxPreview.active())throw std::logic_error("Close the FX preview before Play");
     if(!session||!enabled||play.playing())throw std::logic_error("Enter edit mode before Play");
     session->cancel();
@@ -317,19 +330,23 @@ void markBrowserEditorSaved() { if(session) { session->markSaved();report(); } }
 bool browserEditorFxActive(){return fxPreview.active();}
 EffectPreview& browserEditorFxPreview(){return fxPreview;}
 void startBrowserEditorFx(){
+    if(regionPreview)throw std::logic_error("Close the region preview before FX preview");
     if(!enabled||!session||play.playing())throw std::logic_error("Enter edit mode before previewing FX");
     auto* effect=session->selectedEffect();if(!effect)throw std::invalid_argument("Select an effect first");
     auto asset=std::make_shared<const EffectAsset>(effect->asset());fxPreview.start(asset);fxIsolation=-1;fxSource=&effect->asset();fxTarget=effect->savedId();
     fxOrbit=std::make_unique<OrbitController>(fxPreview.camera(),true);
+    if(std::any_of(effect->emitters().begin(),effect->emitters().end(),[](const auto* e){return e->definition().renderMode==ParticleRenderMode::SurfaceTrail;})){
+        auto state=fxOrbit->snapshot();state.elevation=.9f;state.yaw=.7f;state.resetTarget={};fxOrbit->restore(state);fxOrbit->focus({},8);
+    }
 }
 void stopBrowserEditorFx(){fxOrbit.reset();fxPreview.stop();fxSource=nullptr;fxTarget.clear();}
 void updateBrowserEditorFx(const InputSystem& input,float dt,float height){if(fxPreview.active()&&fxOrbit)navigate(*fxOrbit,input,dt,height);}
 void tickBrowserEditor() {
-    if(enabled)fx_diagnostics(fxPreview.active(),fxPreview.paused(),fxPreview.seconds(),int(fxPreview.particleCount()),double(fxPreview.droppedParticles()),int(fxPreview.impactCount()),int(fxPreview.collisionQueries()));
+    if(enabled){fx_diagnostics(fxPreview.active(),fxPreview.paused(),fxPreview.seconds(),int(fxPreview.particleCount()),double(fxPreview.droppedParticles()),int(fxPreview.impactCount()),int(fxPreview.collisionQueries()),int(fxPreview.trailPointCount()));const auto s=fxPreview.compositionStats();fx_composition_stats(s.effects,s.decals,double(s.spawned),double(s.dropped));}
     if(!enabled||!session) return;
-    if(!play.playing()&&document)reportVehicle(*document);projectRouteAuthoring();
+    if(!play.playing()&&document)reportVehicle(*document);projectRouteAuthoring();projectSpotlightAuthoring();projectRegionAuthoring();reportRegionPreview();
     if(const auto* decal=dynamic_cast<const DecalComponent*>(session->selected()))editor_decal_stats(decal->projectionLimited(),int(decal->triangleCount()));
-    if(play.playing()||fxPreview.active()){const float hidden[]={0};editor_projection(hidden,1);return;}
+    if(play.playing()||fxPreview.active()||regionPreview){const float hidden[]={0};editor_projection(hidden,1);return;}
     auto* node=session->selected();
     const auto roots=session->selectionRoots();
     if(!node||std::any_of(roots.begin(),roots.end(),[](auto* n){return !reason(*n).empty();})||!reason(*node).empty()||!node->isActiveInHierarchy()) { const float hidden[]={0};editor_projection(hidden,1);return; }
@@ -554,8 +571,27 @@ EMSCRIPTEN_KEEPALIVE int engine_editor_history(int redo) { return command([&] { 
 
 extern "C" {
 EMSCRIPTEN_KEEPALIVE int engine_editor_fx_create(int preset){return command([&]{
-    if(preset<0||preset>5)return false;
-    return session->createEffect(preset==0?campfireEffect():preset==1?explosionEffect():preset==2?fountainEffect():preset==3?ribbonEffect():preset==4?groundRingEffect():debrisEffect());
+    if(preset<0||preset>7)return false;
+    return session->createEffect(preset==7?impactChainEffect():preset==0?campfireEffect():preset==1?explosionEffect():preset==2?fountainEffect():preset==3?ribbonEffect():preset==4?groundRingEffect():preset==5?debrisEffect():surfaceTrailEffect());
+},true);}
+EMSCRIPTEN_KEEPALIVE int engine_editor_fx_trigger(int emitter,int index,int preset,const double* v,int count){return command([&]{
+    auto* owner=session->selectedEffect();if(!owner||emitter<0||emitter>=int(owner->asset().emitters.size())||index< -1||index>=int(owner->asset().triggers.size()))return false;
+    auto asset=std::make_shared<EffectAsset>(owner->asset());
+    if(!v&&count==0){if(index<0)return false;asset->triggers.erase(asset->triggers.begin()+index);return session->setEffectAsset(asset);}
+    if(!v||count!=14||preset< -2||preset>6)return false;for(int i=0;i<count;++i)if(!std::isfinite(v[i]))return false;
+    if(v[0]!=std::floor(v[0])||v[0]<0||v[0]>2||(v[1]!=0&&v[1]!=1)||(v[3]!=0&&v[3]!=1)||v[9]!=std::floor(v[9])||v[9]< -1||v[9]>=int(catalogTextures.size()))return false;
+    EffectTrigger t=index<0?EffectTrigger{}:asset->triggers[index];t.emitter=emitter;t.event=ParticleEventType(int(v[0]));t.alignNormal=v[1]!=0;t.inheritVelocity=float(v[2]);
+    if(preset==-2)t.effect.reset();else if(preset>=0)t.effect=preset==0?campfireEffect():preset==1?explosionEffect():preset==2?fountainEffect():preset==3?ribbonEffect():preset==4?groundRingEffect():preset==5?debrisEffect():surfaceTrailEffect();
+    if(v[3]){auto d=t.decal.value_or(EffectDecal{});d.settings.lifetime=v[4];d.settings.fadeOut=v[5];d.scale={float(v[6]),float(v[7]),float(v[8])};d.settings.texture=v[9]<0?Texture::white():catalogTextures[int(v[9])];d.settings.color={float(v[10]),float(v[11]),float(v[12])};d.settings.opacity=v[13];t.decal=d;}else t.decal.reset();
+    if(index<0)asset->triggers.push_back(std::move(t));else asset->triggers[index]=std::move(t);return session->setEffectAsset(asset);
+},true);}
+EMSCRIPTEN_KEEPALIVE int engine_editor_fx_child_import(int index,const void* data,int count){return command([&]{
+    auto* owner=session->selectedEffect();if(!owner||index<0||index>=int(owner->asset().triggers.size())||!data||count<=0||count>64*1024*1024)return false;
+    auto child=EffectArchive::load({static_cast<const std::byte*>(data),std::size_t(count)});auto asset=std::make_shared<EffectAsset>(owner->asset());asset->triggers[index].effect=std::move(child);return session->setEffectAsset(asset);
+},true);}
+EMSCRIPTEN_KEEPALIVE int engine_editor_fx_limits(const double* v,int count){return command([&]{
+    auto* owner=session->selectedEffect();if(!owner||!v||count!=5)return false;for(int i=0;i<5;++i)if(!std::isfinite(v[i])||v[i]<0||v[i]>4096||v[i]!=std::floor(v[i]))return false;
+    auto asset=std::make_shared<EffectAsset>(owner->asset());asset->limits={std::uint32_t(v[0]),std::uint32_t(v[1]),std::uint32_t(v[2]),std::uint32_t(v[3]),std::uint32_t(v[4])};return session->setEffectAsset(asset);
 },true);}
 EMSCRIPTEN_KEEPALIVE int engine_editor_fx_meta(int emitter,int operation,const char* name){return command([&]{
     auto* effect=session->selectedEffect();if(!effect)return false;
@@ -564,8 +600,8 @@ EMSCRIPTEN_KEEPALIVE int engine_editor_fx_meta(int emitter,int operation,const c
     else if(operation==1){if(asset->emitters.size()>=64)return false;asset->emitters.push_back({std::make_shared<const ParticleEmitterDefinition>(),{}});}
     else {
         if(emitter<0||emitter>=int(asset->emitters.size()))return false;
-        if(operation==2){if(asset->emitters.size()==1)return false;asset->emitters.erase(asset->emitters.begin()+emitter);}
-        else if(operation==3){if(asset->emitters.size()>=64)return false;asset->emitters.insert(asset->emitters.begin()+emitter+1,asset->emitters[emitter]);}
+        if(operation==2){if(asset->emitters.size()==1)return false;asset->emitters.erase(asset->emitters.begin()+emitter);std::erase_if(asset->triggers,[&](const auto& t){return t.emitter==std::uint32_t(emitter);});for(auto& t:asset->triggers)if(t.emitter>std::uint32_t(emitter))--t.emitter;}
+        else if(operation==3){if(asset->emitters.size()>=64)return false;asset->emitters.insert(asset->emitters.begin()+emitter+1,asset->emitters[emitter]);for(auto& t:asset->triggers)if(t.emitter>std::uint32_t(emitter))++t.emitter;}
         else if(operation==4){if(!name||!name[0]||std::strlen(name)>512)return false;auto d=std::make_shared<ParticleEmitterDefinition>(*asset->emitters[emitter].definition);d->name=name;asset->emitters[emitter].definition=d;}
         else return false;
     }
@@ -582,7 +618,7 @@ EMSCRIPTEN_KEEPALIVE int engine_editor_fx_values(int emitter,const double* value
     d->stretch=values[17];d->softDistance=values[18];d->drag=values[19];d->turbulenceFrequency=values[20];d->rotationMin=values[21];d->rotationMax=values[22];d->angularVelocity=values[23];
     auto vector=[&](int i){return Vec3{float(values[i]),float(values[i+1]),float(values[i+2])};};
     d->positionMin=vector(24);d->positionMax=vector(27);d->velocityMin=vector(30);d->velocityMax=vector(33);d->gravity=vector(36);d->wind=vector(39);d->turbulence=vector(42);
-    d->renderMode=ParticleRenderMode(integer(58,0,2));d->trailMaxPoints=integer(59,2,4096);d->trailLifetime=values[60];d->trailMinDistance=values[61];d->trailBreakDistance=values[62];d->trailTextureLength=values[63];d->planeNormal={float(values[64]),float(values[65]),float(values[66])};d->surfaceOffset=values[67];
+    d->renderMode=ParticleRenderMode(integer(58,0,3));d->trailMaxPoints=integer(59,2,4096);d->trailLifetime=values[60];d->trailMinDistance=values[61];d->trailBreakDistance=values[62];d->trailTextureLength=values[63];d->planeNormal={float(values[64]),float(values[65]),float(values[66])};d->surfaceOffset=values[67];
     d->meshRotationMin=vector(68);d->meshRotationMax=vector(71);d->meshAngularVelocity=vector(74);d->meshTextureOverride=integer(77,0,1);
     const auto geometry=values[78];if(geometry!=std::floor(geometry)||geometry < -1||geometry>=double(catalogMeshes.size()))return false;
     d->particleMesh=geometry<0?nullptr:catalogMeshes[std::size_t(geometry)];
@@ -624,4 +660,6 @@ EMSCRIPTEN_KEEPALIVE int engine_editor_fx_transport(int action,int emitter){
 
 #include "editor_physics.inc"
 #include "editor_route.inc"
+#include "editor_spotlight.inc"
+#include "editor_region.inc"
 } // namespace engine

@@ -80,6 +80,8 @@ protected:
     virtual void onDisable() noexcept {}
     virtual void onOwnerChanged(Actor* previous,Actor* current) noexcept { (void)previous;(void)current; }
     virtual void tick(double deltaSeconds) { (void)deltaSeconds; }
+    // After existing child variable ticks; new children start next update.
+    virtual void postTick(double deltaSeconds) { (void)deltaSeconds; }
     virtual void fixedTick(double stepSeconds) { (void)stepSeconds; }
 private:
     friend class Scene;

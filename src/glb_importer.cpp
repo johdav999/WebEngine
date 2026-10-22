@@ -1,3 +1,4 @@
+#include "engine/performance_timeline.hpp"
 #include "engine/glb_importer.hpp"
 #include "engine/mesh_optimizer.hpp"
 #include <cgltf.h>
@@ -321,6 +322,7 @@ struct Import {
 };
 }
 std::shared_ptr<const Mesh> GlbImporter::loadMemory(std::span<const std::byte> bytes,const GlbImportOptions& o) {
+    ProfileScope profile(ProfileCategory::Loading,"GLB import");
     const auto start=Clock::now();if(o.measurements)*o.measurements={};
     struct Timer {GlbImportMeasurements* m;Clock::time_point start;~Timer(){if(m)m->totalMs=elapsed(start);}} timer{o.measurements,start};
     validate(o);require(!bytes.empty()&&bytes.size()<=o.maxFileBytes,"empty file or file size limit exceeded");

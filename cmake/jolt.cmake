@@ -19,6 +19,8 @@ function(webengine_add_jolt)
   set(USE_WASM_SIMD OFF)
   set(DOUBLE_PRECISION OFF)
   set(BUILD_SHARED_LIBS OFF)
+  # Match the parent MSVC targets (/MD); Jolt otherwise defaults to /MT.
+  set(USE_STATIC_MSVC_RUNTIME_LIBRARY OFF)
   foreach(feature SSE4_1 SSE4_2 AVX AVX2 AVX512 LZCNT TZCNT F16C FMADD)
     set(USE_${feature} OFF)
   endforeach()

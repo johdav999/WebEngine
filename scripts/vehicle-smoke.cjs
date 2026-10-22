@@ -20,7 +20,7 @@ try{for(const backend of ['webgpu','webgl2']){
  for(const samples of [1,4]){assert.equal(await page.evaluate(s=>Module._engine_msaa(s),samples),1);await reset();await step(60);const repeat=await step(120,1);assert(Math.abs(repeat.speed-moving.speed)<.001);await shot('msaa-'+samples);}
  await reset();const reverse=await step(150,-1);assert(reverse.speed< -2);
  await reset();const turn=await step(120,.6,.5);assert(Math.abs(turn.x)>1);
- await reset();await step(90,1);const beforeSave=await step(1);assert.equal(await page.evaluate(()=>{window.__vehicleSaved=EngineSceneArchive.saveSceneBytes().slice();return __vehicleSaved[8];}),27);
+ await reset();await step(90,1);const beforeSave=await step(1);assert.equal(await page.evaluate(()=>{window.__vehicleSaved=EngineSceneArchive.saveSceneBytes().slice();return __vehicleSaved[8];}),34);
  assert(await page.evaluate(async()=>EngineSceneArchive.openScene(new File([__vehicleSaved],'vehicle.wescene'))));await frames();const resumed=await step(1);assert(resumed.active&&resumed.gear===beforeSave.gear&&Math.abs(resumed.rpm-beforeSave.rpm)<1000);
  assert(await page.evaluate(()=>EngineSceneArchive.saveProgress()));assert(await page.evaluate(()=>EngineSceneArchive.loadProgress()));await step(1);const reopened=await shot('restored');await page.setViewportSize({width:1200,height:850});await shot('resized');await page.evaluate(()=>Module._engine_lose_gpu());await page.waitForFunction(()=>document.body.dataset.engine==='ready');await shot('recovered');
  result.backends[backend]={settled,moving,stop,reverse,turn,resumed,checks:['settling','acceleration/braking/reverse/steering','wheel rendering','simulation invariant under view masks/split views/MSAA','scene restore','IndexedDB progress restore','resize/recovery']};

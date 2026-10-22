@@ -1,3 +1,4 @@
+#include "engine/performance_timeline.hpp"
 #include "engine/scene.hpp"
 #include "engine/decal.hpp"
 #include "engine/mesh_component.hpp"
@@ -186,8 +187,10 @@ void Scene::updateNodes(Node& node,double delta,bool fixed) {
         std::stable_sort(ordered.begin(),ordered.end(),[&](const Node* a,const Node* b){return order(a)<order(b);});
         for(auto* child:ordered){if(!node.isActiveInHierarchy())break;updateNodes(*child,delta,true);}
     }else for(std::size_t i=0;i<count;++i) updateNodes(*node.children_[i],delta,fixed);
+    if(!fixed&&node.isActiveInHierarchy())if(auto* c=dynamic_cast<Component*>(&node);c&&c->initialized_&&c->tickEnabled_)c->postTick(delta);
 }
 void Scene::update(double delta) {
+    ProfileScope profile(ProfileCategory::Simulation,"Scene variable update",name);
     if(!std::isfinite(delta) || delta<0) throw std::invalid_argument("Invalid scene delta");
     requireIdle();
     { TraversalGuard guard(*this);prepareNodes(*this);synchronizePhysics();updateNodes(*this,delta,false); }
@@ -207,6 +210,7 @@ void Scene::synchronize() {
     flushPendingDestroy();
 }
 void Scene::fixedUpdate(double step) {
+    ProfileScope profile(ProfileCategory::Simulation,"Scene fixed update",name);
     if(!std::isfinite(step) || step<=0) throw std::invalid_argument("Invalid fixed step");
     requireIdle();
     { TraversalGuard guard(*this);prepareNodes(*this);synchronizePhysics();updateNodes(*this,step,true);if(physics_) physics_->step(step); }
@@ -223,6 +227,7 @@ SelectionSystem& Scene::selection() {
     return *selection_;
 }
 void Scene::synchronizePhysics() {
+    ProfileScope profile(ProfileCategory::Physics,"Physics reconciliation",name);
     // Validate free motors too, without creating a physics world for them.
     for(const auto& slot:components_) if(const auto* motor=dynamic_cast<const CharacterMotorComponent*>(slot.component);
         motor&&motor->isInitialized()&&motor->isActiveInHierarchy()) motor->validate();
@@ -252,6 +257,7 @@ void Scene::updateAnimations(double delta) {
     update(delta);
 }
 void Scene::collect(SceneFrame& frame,std::uint32_t visibilityMask,const Frustum* frustum) const {
+    ProfileScope profile(ProfileCategory::Render,"Scene collection",name);
     frame.clear();
     // One reference keeps the traversal callback within std::function's small storage.
     struct { SceneFrame& frame;std::uint32_t mask;const Frustum* frustum;const PhysicsWorld* physics; } context{frame,visibilityMask,frustum,physics_.get()};
@@ -310,13 +316,18 @@ void Scene::collect(SceneFrame& frame,std::uint32_t visibilityMask,const Frustum
             const auto rc=frame.ribbons.capacity();emitter->appendRibbons(frame.ribbons,world);frame.storageGrowths+=rc!=frame.ribbons.capacity();
         }
         if(const auto* light=dynamic_cast<const LightComponent*>(&node); light && (light->visibilityMask&visibilityMask)) {
+            light->validateSettings();
             if(light->shadow.enabled) {
                 light->shadow.validate();
-                if(light->type!=LightType::Directional) throw std::invalid_argument("Shadow maps currently require a directional light");
-                directionalShadowMatrix(transformDirection(world,light->direction),transformPoint(world,light->shadow.center),light->shadow,1024);
+                if(light->type==LightType::Directional)
+                    directionalShadowMatrix(transformDirection(world,light->direction),transformPoint(world,light->shadow.center),light->shadow,1024);
+                else spotShadowMatrix(transformPoint(world,{}),transformDirection(world,light->direction),light->outerAngle,light->range);
             }
+            const auto lightDirection=normalized(transformDirection(world,light->direction)),lightPosition=transformPoint(world,{});
+            for(float value:{lightDirection.x,lightDirection.y,lightDirection.z,lightPosition.x,lightPosition.y,lightPosition.z})if(!std::isfinite(value))throw std::invalid_argument("Invalid world light pose");
+            if(light->type!=LightType::Point&&dot(lightDirection,lightDirection)<.5f)throw std::invalid_argument("Singular world light direction");
             const auto capacity=frame.lights.capacity();
-            frame.lights.push_back({light->type,transformPoint(world,{}),normalized(transformDirection(world,light->direction)),light->color,light->intensity,light->range,light->shadow,transformPoint(world,light->shadow.center)});
+            frame.lights.push_back({light->type,lightPosition,lightDirection,light->color,light->intensity,light->range,light->shadow,transformPoint(world,light->shadow.center),light->innerAngle,light->outerAngle});
             frame.storageGrowths+=capacity!=frame.lights.capacity();
         }
     },Mat4::identity(),&frame.transformRebuilds);

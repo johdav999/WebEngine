@@ -12,6 +12,7 @@
 
 ## Implementation
 
+- Implement every engine update and new feature for both the browser and native Windows targets in the same change. Keep shared functionality in portable engine code and provide the required platform-specific integrations for both targets; do not treat either target as a later follow-up.
 - Preserve unrelated work in the shared checkout. Inspect its current state before editing; do not reset or clean changes belonging to other work.
 - Reuse the scene hierarchy, actor/component handles, input actions and existing resource representations. Preserve deferred destruction, guarded traversal and cache invalidation contracts.
 - Keep browser APIs and renderer implementation types out of new portable interfaces. Put game-specific examples outside reusable systems; existing demo placement is documented in `architecture.md`.
@@ -21,6 +22,7 @@
 ## Validation and handoff
 
 - Run checks appropriate to the changed contracts. Use focused native tests for core logic and relevant browser smoke scripts for input, adapters and rendering. Documentation-only changes need content/link checks rather than runtime builds.
+- Validate engine updates and new features on both browser and native Windows targets, including affected platform integrations and user-facing behaviour. Report evidence for each target separately and explicitly record any validation that could not be completed; passing checks on one target does not establish support on the other.
 - Follow the setup/build commands in `README.md` and the Emscripten version in `.emscripten-version`; use the repository-local SDK.
 - Record what was actually verified and any remaining limitations. Desktop browser checks and Chromium mobile emulation do not establish physical Android/iOS acceptance or sustained mobile performance.
 - Keep feature contracts and architecture documentation consistent with delivered code. Do not report planned capabilities as implemented or existing evidence as a new test run.

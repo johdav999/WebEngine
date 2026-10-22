@@ -7,6 +7,12 @@
 using namespace engine;
 template<class F> void rejects(F f) { bool threw=false;try { f(); } catch(const std::invalid_argument&) { threw=true; }assert(threw); }
 int main() {
+    { RenderQuality post;assert(!post.post.enabled&&post.directionalCascades==1);
+    post.post.enabled=true;post.post.exposure=2;post.directionalCascades=4;post.validate();
+    auto invalid=post;invalid.post.exposure=std::numeric_limits<float>::quiet_NaN();rejects([&]{invalid.validate();});
+    invalid=post;invalid.post.bloomStrength=-1;rejects([&]{invalid.validate();});
+    invalid=post;invalid.directionalCascades=5;rejects([&]{invalid.validate();});
+    invalid=post;invalid.shadowDistance=0;rejects([&]{invalid.validate();}); }
     RenderCapabilities caps;
     assert(caps.backend==RenderBackend::WebGpu&&caps.shadowMaps&&caps.pbr&&caps.instancing);
     const auto low=RenderQuality::profile(QualityProfile::Low), balanced=RenderQuality::profile(QualityProfile::Balanced);

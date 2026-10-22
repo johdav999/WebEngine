@@ -1,3 +1,4 @@
+#include "engine/performance_timeline.hpp"
 #include "engine/fbx_importer.hpp"
 #include "engine/mesh_optimizer.hpp"
 #include "fbx_animation_import.hpp"
@@ -32,6 +33,7 @@ void validateOptions(const FbxImportOptions& options) {
 }
 }
 std::shared_ptr<const Mesh> FbxImporter::loadMemory(std::span<const std::byte> data,const FbxImportOptions& options) {
+    ProfileScope profile(ProfileCategory::Loading,"FBX import");
     const auto started=ImportClock::now();
     if(options.measurements) *options.measurements={};
     struct TotalTimer { FbxImportMeasurements* output;ImportClock::time_point start;~TotalTimer(){if(output) output->totalMs=elapsedMs(start);} } totalTimer{options.measurements,started};

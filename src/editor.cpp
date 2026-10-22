@@ -61,6 +61,8 @@ bool EditorSession::select(std::string_view id) {
 }
 std::string EditorSession::readOnlyReason(const Node& node) const {
     if(node.scene()!=&scene_||node.isPendingRemoval()) return "Node is no longer in this document";
+    if(node.archiveTransient())return "Resident region content is managed by its stream";
+    if(dynamic_cast<const RegionManifestComponent*>(&node)||(dynamic_cast<const Actor*>(&node)&&static_cast<const Actor&>(node).getComponent<RegionManifestComponent>()))return "Region manifests use world bounds; keep their transform identity";
     if(&node==&scene_) return "Scene root transform is read-only";
     for(const Node* p=&node;p;p=p->parent())if(p->isProtectedChild()) return "This implementation child is managed by its owning component";
     if(dynamic_cast<const RouteComponent*>(&node))return "Position the owning actor; route geometry has identity local transform";

@@ -1,6 +1,7 @@
 #include "ai_demo.hpp"
 #include "engine/collider_component.hpp"
 #include "engine/mesh_component.hpp"
+#include "engine/ai_controller.hpp"
 
 using namespace engine;
 std::shared_ptr<const StateMachineDefinition> aiDemoStateMachine(){
@@ -11,6 +12,8 @@ std::shared_ptr<const StateMachineDefinition> aiDemoStateMachine(){
     for(std::uint32_t state:{0u,2u,3u})d.transitions.push_back({id++,state,1,"target-visible",0});
     d.transitions.push_back({id++,1,3,"target-removed",0});d.transitions.push_back({id++,1,2,"target-lost",0});
     d.transitions.push_back({id++,2,3,"target-removed",0});d.transitions.push_back({id++,2,3,"memory-expired",0});d.transitions.push_back({id++,3,0,"arrived",0});
+    for(const auto& key:{"target-visible","target-lost","target-removed","memory-expired","arrived","navigation-failed"})d.blackboard.push_back({key,AiParameterType::Boolean,false});
+    d.blackboard.push_back({"target",AiParameterType::Actor,std::string{}});d.blackboard.push_back({"lastSeenPosition",AiParameterType::Vector,Vec3{}});
     return StateMachineDefinition::create(std::move(d));
 }
 namespace {
@@ -23,7 +26,15 @@ public:
     std::shared_ptr<const NavMesh> navMesh;
     std::shared_ptr<const NavigationSource> navSource;
     std::shared_ptr<const StateMachineDefinition> definition;
-    StateMachine machine;
+    AiControllerComponent* controller(){return getComponent<AiControllerComponent>();}
+    AiControllerSettings controllerSettings(std::shared_ptr<const StateMachineDefinition> def){
+        auto d=def->data();for(const auto& k:{"target-visible","target-lost","target-removed","memory-expired","arrived","navigation-failed"}){auto it=std::find_if(d.blackboard.begin(),d.blackboard.end(),[&](const auto& f){return f.key==k;});if(it==d.blackboard.end())d.blackboard.push_back({k,AiParameterType::Boolean,false});else if(it->type!=AiParameterType::Boolean)throw std::invalid_argument("Demo perception field must be Boolean");}
+        for(auto field:std::vector<AiParameter>{{"target",AiParameterType::Actor,std::string{}},{"lastSeenPosition",AiParameterType::Vector,Vec3{}}}){auto it=std::find_if(d.blackboard.begin(),d.blackboard.end(),[&](const auto& f){return f.key==field.key;});if(it==d.blackboard.end())d.blackboard.push_back(field);else if(it->type!=field.type)throw std::invalid_argument("Demo field has incompatible type");}
+        AiControllerSettings settings;settings.graph=StateMachineDefinition::create(std::move(d));for(const auto& state:settings.graph->data().states)settings.states[state.id]={state.behavior,{}};for(const auto& t:settings.graph->data().transitions)settings.conditions[t.condition]={"flag",{{"value",false}},{{"value",t.condition}}};return settings;
+    }
+    void stepNavigation(double seconds){const auto prior=navigator.stats();navigator.step(motor(),seconds);replans+=navigator.stats().replans-prior.replans;searches+=navigator.stats().searches-prior.searches;}
+    void adoptGraph(std::shared_ptr<const StateMachineDefinition> def){auto settings=controllerSettings(def);controller()->configure(std::move(settings));definition=std::move(def);}
+
     bool manual=false;
     DecisionClock clock;
     State state=Patrol,resumeState=Patrol;
@@ -41,37 +52,42 @@ public:
         for(const auto& t:definition.data().transitions)if(t.condition!="target-visible"&&t.condition!="target-lost"&&t.condition!="target-removed"&&t.condition!="memory-expired"&&t.condition!="arrived"&&t.condition!="navigation-failed")
             throw std::invalid_argument("AI demo has no condition binding: "+t.condition);
     }
-    explicit PatrolAgent(std::shared_ptr<const WaypointGraph> routes,std::shared_ptr<const StateMachineDefinition> def):Actor("AI patrol agent"),graph(std::move(routes)),definition(std::move(def)),machine(definition) {
+    explicit PatrolAgent(std::shared_ptr<const WaypointGraph> routes,std::shared_ptr<const StateMachineDefinition> def):Actor("AI patrol agent"),graph(std::move(routes)),definition(std::move(def)) {
         validateBindings(*definition);setTickEnabled(true);transform.position=graph->points()[0];addComponent<CharacterMotorComponent>();
         auto& body=addComponent<MeshComponent>("Agent state color",Mesh::cube());
         body.transform.position={0,.75f,0};body.transform.scale={.6f,1.5f,.6f};
         auto& nose=addComponent<MeshComponent>("Facing",Mesh::cube());
         nose.transform.position={0,1.2f,.4f};nose.transform.scale={.2f,.2f,.35f};nose.color={1,1,1};
+        std::vector<AiBehaviorBinding> behaviors;for(const std::string key:{"patrol","follow","investigate","return","blocked"}){
+            behaviors.push_back({key,{},true,[this,key](AiControllerComponent&,const AiBinding&,double){enter({0,"",key,{}});},[this,key](AiControllerComponent&,const AiBinding&,double dt){update({0,"",key,{}},dt);stepNavigation(dt);},[this](AiControllerComponent&,const AiBinding&,double){exit({});}});
+        }
+        auto registry=AiBindingRegistry::create(std::move(behaviors),AiBindingRegistry::builtins()->conditions());addComponent<AiControllerComponent>("Perception blackboard AI",controllerSettings(definition),registry);
+
     }
     CharacterMotorComponent& motor(){return *getComponent<CharacterMotorComponent>();}
     bool route(Vec3 goal){if(navSource)navigator.navigateSource(navSource,goal);else navigator.navigate(graph,goal);return true;}
     void reset(){
-        machine.restart(*this,definition,definition->data().initial);navigator.cancel(motor());motor().teleport(graph->points()[0]);
+        controller()->restart();navigator.cancel(motor());motor().teleport(graph->points()[0]);
         manual=false;state=Patrol;remembered=visible=removed=moved=false;lost=0;patrol=1;clock.reset();
     }
-    void manualMove(Vec3 goal){machine.stop(*this);manual=true;remembered=visible=false;state=Move;route(goal);}
+    void manualMove(Vec3 goal){if(auto* ai=controller())ai->stop();manual=true;remembered=visible=false;state=Move;route(goal);}
     void retryBehavior(){
         if(!navigator.retry())return;
         if(manual){state=resumeState;return;}
-        for(const auto& s:definition->data().states)if(behavior(s.behavior)==resumeState){machine.restart(*this,definition,s.id);return;}
+        for(const auto& s:definition->data().states)if(behavior(s.behavior)==resumeState){auto d=definition->data();d.initial=s.id;adoptGraph(StateMachineDefinition::create(std::move(d)));return;}
     }
     void enter(const AiState& next) override {
         const auto previous=state;state=behavior(next.behavior);
         if(state==Blocked){resumeState=previous;visible=remembered=false;return;}
         if(state==Patrol){if(previous==Return)patrol=1;route(graph->points()[patrol]);}
-        else if(state==Follow){route(lastSeen);moved=false;}
-        else if(state==Investigate)route(lastSeen);
+        else if(state==Follow){route(std::get<Vec3>(controller()->blackboardValue("lastSeenPosition")));moved=false;}
+        else if(state==Investigate)route(std::get<Vec3>(controller()->blackboardValue("lastSeenPosition")));
         else if(state==Return){remembered=false;route(graph->points()[0]);}
     }
     void update(const AiState& current,double) override {
         const auto value=behavior(current.behavior);
         if(value==Patrol&&navigator.status()==NavigationStatus::Arrived){++patrols;patrol=(patrol+1)%graph->points().size();route(graph->points()[patrol]);}
-        if(value==Follow&&visible&&moved){route(lastSeen);moved=false;}
+        if(value==Follow&&visible&&moved){route(std::get<Vec3>(controller()->blackboardValue("lastSeenPosition")));moved=false;}
     }
     void exit(const AiState&) noexcept override {
         const auto status=navigator.status();
@@ -88,8 +104,8 @@ public:
         return false;
     }
 protected:
-    void onDisable() noexcept override {machine.stop(*this);if(auto* m=getComponent<CharacterMotorComponent>())navigator.cancel(*m);visible=remembered=false;clock.reset();}
-    void onDespawn() noexcept override {machine.stop(*this);if(auto* m=getComponent<CharacterMotorComponent>())navigator.cancel(*m);}
+    void onDisable() noexcept override {if(auto* ai=controller())ai->stop();if(auto* m=getComponent<CharacterMotorComponent>())navigator.cancel(*m);visible=remembered=false;clock.reset();}
+    void onDespawn() noexcept override {if(auto* ai=controller())ai->stop();if(auto* m=getComponent<CharacterMotorComponent>())navigator.cancel(*m);}
     void fixedTick(double seconds) override {
         removed=!manual&&!scene()->findActor(target)&&remembered;
         if(clock.advance(seconds)){
@@ -101,9 +117,7 @@ protected:
             }
         }
         if(!visible&&remembered)lost+=seconds;
-        if(!manual)machine.step(*this,seconds);
-        const auto prior=navigator.stats();navigator.step(motor(),seconds);
-        replans+=navigator.stats().replans-prior.replans;searches+=navigator.stats().searches-prior.searches;
+        if(!manual){std::map<std::string,AiValue> patch;for(const auto& k:{"target-visible","target-lost","target-removed","memory-expired","arrived","navigation-failed"})patch[k]=condition(k);auto* targetActor=scene()->findActor(target);patch["target"]=targetActor?targetActor->savedId():std::string{};patch["lastSeenPosition"]=lastSeen;controller()->setBlackboard(patch);}else stepNavigation(seconds);
         if(manual&&state!=Blocked&&condition("navigation-failed")){resumeState=state;state=Blocked;visible=remembered=false;}
         const auto velocity=motor().movementCommand().velocity;
         if(dot(velocity,velocity)>1e-6f){forward=normalized(velocity);transform.rotation.y=std::atan2(forward.x,forward.z);}
@@ -215,7 +229,7 @@ void AiDemo::showNavigation(Scene& scene,bool visible) {
 void AiDemo::setStateMachine(Scene& scene,std::shared_ptr<const StateMachineDefinition> definition){
     if(!definition)throw std::invalid_argument("Missing AI graph");PatrolAgent::validateBindings(*definition);
     if(auto* agent=dynamic_cast<PatrolAgent*>(scene.findActor(agent_))){
-        agent->machine.restart(*agent,definition,definition->data().initial);agent->definition=definition;agent->manual=false;agent->navigator.cancel(agent->motor());
+        agent->adoptGraph(definition);agent->manual=false;agent->navigator.cancel(agent->motor());
     }
     stateMachine_=std::move(definition);
 }

@@ -1,5 +1,10 @@
 'use strict';
 const canvas = document.querySelector('#viewport');
+// Keep the measured-layout showcase reachable at narrow widths. The host's
+// floating zoom buttons otherwise cover its scrollable canvas controls.
+if(new URLSearchParams(location.search).get('guiLayout')==='1') {
+  document.querySelector('.camera-touch-controls').style.display='none';
+}
 const statusText = document.querySelector('#status');
 const statusDot = document.querySelector('#status-dot');
 let fatal = false;
@@ -20,6 +25,7 @@ window.engineLifecycle = snapshot => {
   button.setAttribute('aria-pressed', String(paused));
   if (snapshot.state === 3) {
     runtimeReady = false;
+    document.body.dataset.engine = 'stopped';
     for (const control of document.querySelectorAll('button,input,select')) control.disabled = true;
     statusText.textContent = 'Engine shut down';
   }
@@ -30,6 +36,7 @@ let importName = '';
 let defaultModelStarted = false;
 const importMessage = document.querySelector('#import-status');
 window.engineStatus = (text, error = false) => {
+  if (document.body.dataset.applicationState === 'stopped') return;
   fatal = error;
   const gpuReady = window.EngineQuality?.snapshot()?.state === 'ready';
   statusText.textContent = text;
@@ -254,6 +261,34 @@ async function loadDefaultModel() {
   if (new URLSearchParams(location.search).get('scene') === 'materials') { Module._engine_material_scene(1); document.body.dataset.defaultModel = 'ready'; document.querySelector('#scene-description').textContent='Material showcase · drag to inspect surfaces'; return; }
   if (new URLSearchParams(location.search).get('scene') === 'physics') { Module._engine_physics_action(0,0); document.body.dataset.defaultModel = 'ready'; return; }
   const sceneName=new URLSearchParams(location.search).get('scene');
+  if(sceneName==='content-iteration'){document.body.dataset.defaultModel='ready';document.querySelector('#scene-description').textContent='Content iteration · source dependencies, safe hot reload and nested prefabs';return;}
+  if(sceneName==='replay'){const ok=Module._engine_vehicle_course();if(ok){const drive=document.getElementById('vehicle-drive');if(drive){drive.checked=true;drive.dispatchEvent(new Event('change'));}}document.body.dataset.defaultModel=ok?'ready':'error';document.querySelector('#scene-description').textContent='Driving replay lab · record, inspect and race a non-colliding ghost';return;}
+  if(sceneName==='cinematic'){document.body.dataset.defaultModel=Module._engine_cinematic_example()?'ready':'error';document.querySelector('#scene-description').textContent='Cinematic sequencer · camera cuts, performer motion, animation, sound and fountain';return;}
+  if(sceneName==='audio'){document.body.dataset.defaultModel='ready';document.querySelector('#scene-description').textContent='Audio lab · wall occlusion, room reverb and streamed music';return;}
+  if(sceneName==='lighting'||sceneName==='spotlight'){document.body.dataset.defaultModel='ready';return;}
+  if(sceneName==='crowd'){document.body.dataset.defaultModel=Module._engine_crowd_demo(1)?'ready':'error';document.querySelector('#scene-description').textContent='Crowd navigation · passing characters and a changing gate';window.EngineCrowd?.open();return;}
+  if(sceneName==='prefabs'){document.body.dataset.defaultModel=Module._engine_prefab_demo()?'ready':'error';document.querySelector('#scene-description').textContent='Prefab assets · linked lanterns · variants and preserved instance overrides';return;}
+  if(sceneName==='retarget'){document.body.dataset.defaultModel=Module._engine_retarget_demo()?'ready':'error';document.querySelector('#scene-description').textContent='Animation retargeting · blue source, gold destination · different limb lengths and bind orientations';return;}
+  if(sceneName==='ik'){document.body.dataset.defaultModel=Module._engine_ik_demo()?'ready':'error';document.querySelector('#scene-description').textContent='Inverse kinematics · planted feet, hand reach and head aim · edit targets in the animation editor';return;}
+  if(sceneName==='formula') {
+    let pointer=0;
+    try {
+      window.EngineFormula?.loading('Loading your Formula 1 car…');
+      const response=await fetch('assets/formula1-red-driving.glb');
+      if(!response.ok)throw new Error(`Car model HTTP ${response.status}`);
+      const bytes=new Uint8Array(await response.arrayBuffer());
+      if(bytes.length>32*1024*1024)throw new Error('Circuit car exceeds its 32 MB budget.');
+      pointer=Module._malloc(bytes.length);if(!pointer)throw new Error('Car allocation failed');
+      Module.HEAPU8.set(bytes,pointer);
+      window.EngineFormula?.loading('Preparing the circuit…');
+      if(!Module._engine_formula_demo(pointer,bytes.length))throw new Error('Could not prepare the circuit. See console for details.');
+      document.body.dataset.defaultModel='ready';
+      document.querySelector('#scene-description').textContent='Formula circuit · closed-loop time trial';
+      window.EngineFormula?.ready();
+    }catch(error){document.body.dataset.defaultModel='error';window.EngineFormula?.loading(error.message,true);}
+    finally{if(pointer)Module._free(pointer);}
+    return;
+  }
   const name=sceneName==='morph' ? 'morph_column_ascii.fbx' : sceneName==='skeleton' ? 'skeletal_column_ascii.fbx' : 'Knarr.fbx';
   document.querySelector('#scene-description').textContent=`Loading ${name}…`;
   const loaded = await loadFbxBytes(name, async () => {
@@ -330,7 +365,7 @@ document.querySelector('#texture-file').addEventListener('change', async event =
 // JavaScript hosts the page and input. C++ owns the scene, camera, lights, GPU resources, and draw calls.
 window.Module = {
   canvas,
-  onRuntimeInitialized() { runtimeReady = true; EngineQuality.syncLifecycle(); },
+  onRuntimeInitialized() { runtimeReady = true; window.EngineTimeline?.ready(); EngineQuality.syncLifecycle(); },
   onAbort(reason) { window.engineStatus(`Engine stopped: ${reason}`, true); },
   printErr(message) { console.error(message); },
 };

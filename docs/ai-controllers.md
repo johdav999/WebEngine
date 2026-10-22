@@ -59,6 +59,7 @@ At runtime a missing/disabled target resolves to null, so `near` returns false.
 | `move` | Behavior | `velocity`: world-space Vector, default `(1,0,0)`, each component -100..100. Requires a motor; collision-aware velocity must have Y=0. |
 | `always` | Condition | Returns true; combine with graph minimum-state time for timed transitions. |
 | `flag` | Condition | Boolean `value`, default false. |
+| `not-flag` | Condition | Negates Boolean `value`, default false. |
 | `near` | Condition | Actor `target`, default none; Number `distance`, default 2 m, range 0..10000. Tests authoritative world positions. |
 
 Graphs retain their own state behavior/condition labels. Controller configuration
@@ -137,10 +138,23 @@ payloads are reconstructed by value; other reference-cloned immutable scene asse
 retain their existing sharing contracts.
 
 This is configuration persistence, not an AI runtime checkpoint or visual action
-scripting system. Navigation bindings, game perception, dynamic parameter feeds
-and additional behaviors remain application integrations. Generic actor duplication
+scripting system. Navigation bindings, game perception and additional behaviors remain application
+integrations. Typed dynamic inputs are described in [AI blackboards](ai-blackboards.md). Generic actor duplication
 still uses the built-in subtree codec path and rejects custom AI components rather
-than dropping them. No automatic binding discovery, hierarchical states, remote
+than dropping them. No automatic binding discovery, remote
 debugger or physical-mobile acceptance is implied.
 
 See [validation](ai-controllers-validation.md).
+
+Graph schemas, per-agent live values, parameter sources and payload version 2
+are described in [typed blackboards](ai-blackboards.md); version 1 remains readable.
+
+[Hierarchical graphs](ai-hierarchy.md) run parent and leaf bindings with a complete
+active-path debugger and one log record per accepted transition.
+
+[Typed events](ai-events.md) add postEvent/currentEvent/eventScope adapters, bounded
+queue diagnostics and explicit rejection of configuration reentry from callbacks.
+
+## State task sequences
+
+The registry optionally accepts a third vector of typed task factories. Controllers execute ordered `AiState::tasks` with per-activation cancellation, timeouts, scoped result events and bounded diagnostics. Graph files now write WEAI5 and read 1..5 within the unchanged AIC2 container. See [task integration and editor workflow](ai-tasks.md).

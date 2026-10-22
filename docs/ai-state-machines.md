@@ -53,7 +53,7 @@ pending-removal motor may no longer resolve. Cancel persistent movement explicit
 where needed. One producer owns motor commands; do not reissue navigation every
 frame merely because a state remains active.
 
-### Execution and lifetime contract
+### Execution and lifetime contract for polled flat graphs
 
 - Instances start Idle. First `step(host, dt)` enters the initial state, advances
   its timer and calls update once. Eligible transitions are evaluated afterward.
@@ -145,7 +145,7 @@ history (default 128 edits; configurable 1–1024), undo/redo and a saved identi
 content is a no-op. `open(bytes)` parses before replacing document/history;
 `markSaved()` tracks export state independently of scene files.
 
-`StateMachineArchive::save/load` writes version-1 `.weai` text with header `WEAI 1`,
+`StateMachineArchive::save/load` writes version-5 `.weai` text with header `WEAI 5` (also reads versions 1–4),
 stable IDs, graph/state names, bindings, layout, transition order and delays.
 Loads reject unsupported versions, invalid counts, orphan identities, malformed
 values, truncated/trailing input and files over 512 KiB. This format contains no
@@ -156,8 +156,19 @@ can load a file and pass the resulting shared definition to their instances.
 registered bindings to ordinary actors through scene history. Their optional custom
 codec preserves configuration in scene files and isolated Play clones; a live
 Play debugger displays selected controller state/time/history. Standalone graph
-files remain separate authoring assets. Hierarchical/concurrent states, behavior
+files remain separate authoring assets. Concurrent states, behavior
 trees, automatic game callback discovery, visual action scripting, runtime AI
 checkpoints and AI graph autosave remain extensions.
 
 See [validation evidence](ai-state-machines-validation.md).
+
+Typed field declarations are now part of graph assets; see [AI blackboards](ai-blackboards.md).
+
+[Hierarchical states](ai-hierarchy.md) extend these flat-graph rules with parent
+interrupts, active paths, per-ancestor timers, group authoring and complete-chain
+cancellation. Flat graphs retain the ordering described above.
+
+[Typed events](ai-events.md) add bounded per-agent occurrence queues, guarded
+event edges, activation-scoped cancellation and editor/debugger injection.
+
+[State task sequences](ai-tasks.md) now add registered per-activation work, cancellation, timeouts and live task diagnostics through actor controllers.

@@ -28,6 +28,13 @@ struct AssetProgress {
 };
 namespace asset_detail { struct Operation; struct Consumer; }
 using AssetCancel=std::function<void()>;
+// Source IO policy shared by browser and native adapters. Timeout begins at
+// IO/worker admission (queue time is excluded); progress describes source bytes.
+struct AssetSourceOptions {
+    std::size_t maxBytes=32*1024*1024;
+    std::uint32_t timeoutMilliseconds=30000;
+    bool fresh=false; // Bypass transport caches for iteration; disk sources already read fresh bytes.
+};
 
 // Copyable completion endpoint: safe after cancellation or manager destruction.
 // Reports may come from workers; publication happens only in AssetManager::update.
@@ -56,6 +63,7 @@ public:
     AssetRequest(const AssetRequest&)=delete;
     AssetRequest& operator=(const AssetRequest&)=delete;
     AssetProgress progress() const;
+    std::uint64_t revision() const; // Changes only after successful publication/reload.
     void cancel();
     template<class T> std::shared_ptr<const T> get() const {
         return std::static_pointer_cast<const T>(resource(typeid(T)));
@@ -70,6 +78,12 @@ private:
 // Owner-thread registry/cache. Requests and mutation run on that same thread.
 // A loader starts at update(), returns an optional nonthrowing abort callback,
 // and reports a validated immutable resource through its context.
+struct AssetReloadProgress {
+    AssetStatus status=AssetStatus::Ready;
+    std::size_t readyAssets=0,totalAssets=0;
+    std::uint64_t generation=0;
+    std::string error;
+};
 class AssetManager {
 public:
     AssetManager();
@@ -85,6 +99,18 @@ public:
     std::size_t collectUnused(); // Evict ready/failed/cancelled entries with no requests.
     void clear(); // Cancels all pending loads and evicts cache; retains registrations.
     std::size_t cachedCount() const;
+    // Explicit invalidation graph, not an implicit loader scheduler. All keys
+    // must be registered. Candidate edges validate completely before replacement.
+    void setDependencies(const AssetId&,std::span<const AssetId>);
+    std::vector<AssetId> dependencies(const AssetId&) const;
+    std::vector<AssetId> dependents(const AssetId&,bool transitive=true) const;
+    // Stage roots and reverse dependents as one transaction. Ready requests keep
+    // their old values until every candidate succeeds; then revision/get change
+    // together at update(). Failure/cancel retains the entire previous cache.
+    // A newer reload supersedes unfinished work, retaining its invalidation set.
+    void reload(std::span<const AssetId> roots);
+    void cancelReload();
+    AssetReloadProgress reloadProgress() const;
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

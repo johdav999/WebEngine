@@ -59,7 +59,8 @@ void PhysicsWorld::stepVehicles(bool after,double seconds) {
         auto& controller=static_cast<JPH::WheeledVehicleController&>(*e.constraint->GetController());
         if(!after) {
             if(c->pending_){const auto checkpoint=*c->pending_;controller.GetEngine().SetCurrentRPM(checkpoint.rpm);controller.GetTransmission().Set(checkpoint.gear,1);for(int i=0;i<4;++i){auto* w=e.constraint->GetWheel(i);w->SetRotationAngle(checkpoint.rotation[i]);w->SetAngularVelocity(checkpoint.angularVelocity[i]);}c->pending_.reset();}
-            const auto command=c->command_;controller.SetDriverInput(command.throttle,command.steering,command.brake,command.handbrake);
+            // Portable +1 means right; Jolt's positive steering rotates toward -X.
+            const auto command=c->command_;controller.SetDriverInput(command.throttle,-command.steering,command.brake,command.handbrake);
             if(command.throttle||command.steering||command.brake||command.handbrake)bodies.ActivateBody(p.require(e.body).body);
             float rolling=0;Vec3 normal{};for(const auto& wheel:c->state_.wheels)if(wheel.contact){rolling+=(wheel.surface.surface?wheel.surface.surface->rollingResistance:0.f)*.25f;normal=normal+wheel.contactNormal;}
             if(rolling>0&&seconds>0){const auto& body=p.require(e.body);auto velocity=vec(bodies.GetLinearVelocity(body.body));auto n=normalized(normal);auto tangent=velocity-n*dot(velocity,n);const auto speed=std::sqrt(dot(tangent,tangent));

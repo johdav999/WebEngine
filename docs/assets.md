@@ -37,8 +37,12 @@ if (request.progress().status == engine::AssetStatus::Ready) {
 
 Browser callers link `engine_assets_browser`, whose interface adds `-sFETCH=1`.
 The portable header has no browser/WebGPU types. Native applications register their
-own asynchronous file/IO/executor loaders; no native thread pool or implicit file
-access is created. Synchronous factories can complete inside a loader, but their
+own asynchronous file/IO/executor loaders. Optional Windows `DesktopAssetExecutor`
+supplies bounded background file/directory loading and decoding over the same
+requests/publication contracts; see [Windows background assets](windows-background-assets.md).
+`AssetSourceOptions` and `AssetDecodeOptions` share source/decode policy with the
+browser. The older DesktopFiles loader remains synchronous, with no implicit pool.
+Synchronous factories can complete inside a loader, but their
 work occupies `update()`.
 
 ## Ownership, publication and cancellation

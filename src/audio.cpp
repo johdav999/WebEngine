@@ -1,5 +1,6 @@
 #include "engine/audio.hpp"
 #include "engine/scene.hpp"
+#include "engine/physics.hpp"
 #include <atomic>
 #include <limits>
 
@@ -44,6 +45,22 @@ std::shared_ptr<const SoundAsset> SoundAsset::create(std::uint32_t rate,std::uin
     for(float sample:samples) if(!std::isfinite(sample)||sample<-1||sample>1) throw std::invalid_argument("Invalid PCM sample");
     return std::shared_ptr<const SoundAsset>(new SoundAsset(rate,channels,samples));
 }
+std::shared_ptr<const AudioStreamAsset> AudioStreamAsset::create(std::string uri) {
+    if(uri.empty()||uri.size()>4096)throw std::invalid_argument("Invalid audio stream URI");
+    for(unsigned char c:uri)if(c<=32||c==127)throw std::invalid_argument("Invalid audio stream URI");
+    return std::shared_ptr<const AudioStreamAsset>(new AudioStreamAsset(std::move(uri)));
+}
+void AudioReverbSettings::validate() const {
+    volume(wet);
+    if(!std::isfinite(decaySeconds)||decaySeconds<.1f||decaySeconds>8||!std::isfinite(preDelaySeconds)||preDelaySeconds<0||preDelaySeconds>.2f)
+        throw std::invalid_argument("Invalid room reverb settings");
+}
+void AudioOcclusionSettings::validate() const {
+    volume(blockedGain);
+    if(maxQueriesPerUpdate<1||maxQueriesPerUpdate>64||!std::isfinite(lowPassHz)||lowPassHz<20||lowPassHz>20000||
+       !std::isfinite(transitionSeconds)||transitionSeconds<0||transitionSeconds>10)
+        throw std::invalid_argument("Invalid audio occlusion settings");
+}
 AudioSystem::AudioSystem(std::unique_ptr<AudioBackend> backend,std::size_t maximum)
     :backend_(std::move(backend)),identity_(nextSystem.fetch_add(1)),maxVoices_(maximum) {
     if(!backend_||maximum==0||maximum>65536) throw std::invalid_argument("Invalid audio backend or voice budget");
@@ -70,9 +87,12 @@ float AudioSystem::effectiveGain(const Voice& v) const {
         const auto& b=buses_.at(id);if(b.muted) return 0;
         gain*=b.volume;id=b.parent;
     }
-    return gain;
+    return gain*(1-v.occlusion*(1-occlusion_.blockedGain));
 }
-void AudioSystem::refreshGains() noexcept { for(const auto& [id,v]:voices_) backend_->gain(id,effectiveGain(v)); }
+void AudioSystem::refreshGains() noexcept {
+    const auto& master=buses_.at(1);backend_->muteOutput(master.muted||master.volume==0);
+    for(const auto& [id,v]:voices_) backend_->gain(id,effectiveGain(v));
+}
 bool AudioSystem::setBusVolume(AudioBusId id,float value) {
     volume(value);auto* b=bus(id);if(!b) return false;b->volume=value;b->fade.running=false;refreshGains();return true;
 }
@@ -89,17 +109,30 @@ float AudioSystem::busVolume(AudioBusId id) const {
 bool AudioSystem::busMuted(AudioBusId id) const { auto* b=const_cast<AudioSystem*>(this)->bus(id);return b&&b->muted; }
 AudioVoiceId AudioSystem::play(std::shared_ptr<const SoundAsset> sound,AudioPlayOptions options) {
     if(!sound) throw std::invalid_argument("Audio requires a sound asset");
+    if(options.offsetSeconds>=sound->duration())throw std::invalid_argument("Invalid audio offset");
+    return startVoice(std::move(sound),{},options);
+}
+AudioVoiceId AudioSystem::playStream(std::shared_ptr<const AudioStreamAsset> stream,AudioPlayOptions options) {
+    if(!stream)throw std::invalid_argument("Audio requires a stream asset");
+    return startVoice({},std::move(stream),options);
+}
+AudioVoiceId AudioSystem::startVoice(std::shared_ptr<const SoundAsset> sound,std::shared_ptr<const AudioStreamAsset> stream,AudioPlayOptions options) {
     volume(options.volume);rateValid(options.playbackRate);seconds(options.offsetSeconds);positionValid(options.position);
+    volume(options.reverbSend);
     if(options.bus==AudioBusId{}) options.bus=masterBus();
-    if(!bus(options.bus)||options.offsetSeconds>=sound->duration()||!std::isfinite(options.referenceDistance)
+    if(!bus(options.bus)||!std::isfinite(options.referenceDistance)
         ||!std::isfinite(options.maxDistance)||!std::isfinite(options.rolloff)||options.referenceDistance<=0
         ||options.maxDistance<options.referenceDistance||options.rolloff<0)
         throw std::invalid_argument("Invalid audio playback options");
     if(voices_.size()>=maxVoices_||nextVoice_==std::numeric_limits<std::uint32_t>::max()) return {};
     const auto id=nextVoice_++;
-    auto [it,inserted]=voices_.emplace(id,Voice{std::move(sound),options,{},false,false,{}});(void)inserted;
+    Voice candidate;candidate.sound=std::move(sound);candidate.stream=std::move(stream);candidate.options=options;
+    auto [it,inserted]=voices_.emplace(id,std::move(candidate));(void)inserted;
     try {
-        if(!backend_->start(id,*it->second.sound,options,effectiveGain(it->second))) { voices_.erase(it);return {}; }
+        const auto& v=it->second;
+        const bool started=v.stream?backend_->startStream(id,*v.stream,options,effectiveGain(v)):backend_->start(id,*v.sound,options,effectiveGain(v));
+        if(!started) { voices_.erase(it);return {}; }
+        backend_->environment(id,20000,options.reverbSend);
     } catch(...) { backend_->stop(id);voices_.erase(it);throw; }
     return {identity_,id};
 }
@@ -114,7 +147,7 @@ bool AudioSystem::stop(AudioVoiceId id,double duration) {
     else { backend_->stop(id.value);voices_.erase(id.value); }
     return true;
 }
-void AudioSystem::stopAll() noexcept { for(const auto& [id,v]:voices_) { (void)v;backend_->stop(id); }voices_.clear(); }
+void AudioSystem::stopAll() noexcept { for(const auto& [id,v]:voices_) { (void)v;backend_->stop(id); }voices_.clear();backend_->clearEffects(); }
 bool AudioSystem::setVoiceVolume(AudioVoiceId id,float value) {
     volume(value);auto* v=voice(id);if(!v) return false;
     v->options.volume=value;v->fade.running=false;v->stopAfterFade=false;refreshGains();return true;
@@ -139,6 +172,17 @@ bool AudioSystem::setVoicePlaybackRate(AudioVoiceId id,float value) {
 float AudioSystem::voicePlaybackRate(AudioVoiceId id) const {
     auto* v=const_cast<AudioSystem*>(this)->voice(id);return v?v->options.playbackRate:0;
 }
+bool AudioSystem::seekStream(AudioVoiceId id,double value) {
+    seconds(value);const auto* v=voice(id);return v&&v->stream&&backend_->seekStream(id.value,value);
+}
+double AudioSystem::streamPosition(AudioVoiceId id) const {
+    const auto* v=const_cast<AudioSystem*>(this)->voice(id);return v&&v->stream?backend_->streamPosition(id.value):-1;
+}
+bool AudioSystem::setReverb(const AudioReverbSettings& value) {
+    value.validate();if(!backend_->reverb(value))return false;reverb_=value;return true;
+}
+void AudioSystem::setOcclusion(const AudioOcclusionSettings& value) { value.validate();occlusion_=value; }
+float AudioSystem::voiceOcclusion(AudioVoiceId id) const { const auto* v=const_cast<AudioSystem*>(this)->voice(id);return v?v->occlusion:0; }
 bool AudioSystem::isPlaying(AudioVoiceId id) const {
     return const_cast<AudioSystem*>(this)->voice(id)&&backend_->playing(id.value);
 }
@@ -178,7 +222,37 @@ void AudioSystem::update(double delta,const Scene* scene) {
         advance(v.fade,v.options.volume,dt);
         if(v.stopAfterFade&&!v.fade.running) remove=true;
         if(remove) { backend_->stop(id);it=voices_.erase(it); }
-        else { backend_->gain(id,effectiveGain(v));++it; }
+        else ++it;
+    }
+    updateEnvironment(scene,dt);refreshGains();
+}
+void AudioSystem::updateEnvironment(const Scene* scene,double dt) {
+    lastOcclusionQueries_=0;
+    const auto* physics=scene?scene->physicsIfCreated():nullptr;
+    const auto* listener=scene&&listenerBinding_?scene->findComponent(listenerBinding_):nullptr;
+    const bool usable=occlusion_.enabled&&physics&&(!listenerBinding_||(listener&&listener->isActiveInHierarchy()));
+    if(!usable)for(auto& [id,v]:voices_){(void)id;v.blocked=false;}
+    else if(backend_->active()&&!voices_.empty()) {
+        PhysicsQueryFilter filter;filter.layers=occlusion_.layers;filter.includeSensors=false;filter.excludedActors.reserve(2);
+        auto it=voices_.upper_bound(occlusionCursor_);
+        for(std::size_t visited=0;visited<voices_.size()&&lastOcclusionQueries_<occlusion_.maxQueriesPerUpdate;++visited) {
+            if(it==voices_.end())it=voices_.begin();auto& v=it->second;occlusionCursor_=it->first;++it;
+            if(!v.options.spatial||!v.options.occlusion){v.blocked=false;continue;}
+            const auto direction=v.options.position-listener_.position;const float distance=std::sqrt(dot(direction,direction));
+            v.blocked=false;if(distance<=.02f||!std::isfinite(distance))continue;
+            filter.excludedActors.clear();
+            if(listener&&listener->owner())filter.excludedActors.push_back(listener->owner()->id());
+            if(const auto* emitter=scene->findComponent(v.emitter);emitter&&emitter->owner())filter.excludedActors.push_back(emitter->owner()->id());
+            v.blocked=physics->raycast(listener_.position,direction,distance-.01f,filter).has_value();++lastOcclusionQueries_;
+        }
+    }
+    const float blend=occlusion_.transitionSeconds==0?1:float(-std::expm1(-dt/occlusion_.transitionSeconds));
+    for(auto& [id,v]:voices_) {
+        const float target=usable&&v.options.spatial&&v.options.occlusion&&v.blocked?1.f:0.f;
+        v.occlusion+=(target-v.occlusion)*blend;
+        // Exponential interpolation in frequency gives a smoother perceptual transition.
+        const float cutoff=20000*std::pow(occlusion_.lowPassHz/20000,v.occlusion);
+        backend_->environment(id,cutoff,v.options.reverbSend);
     }
 }
 } // namespace engine

@@ -1,4 +1,4 @@
-// Canvas GUI acceptance: real browser events and WebGPU pixels, not DOM widgets.
+// Canvas GUI acceptance: real browser events and WebGPU/WebGL2 pixels.
 const { chromium } = require('playwright');
 const { PNG } = require('pngjs');
 const fs = require('node:fs/promises');
@@ -27,6 +27,7 @@ function different(a,b,region) {
     page.on('console',message=>{if(message.type()==='error') result.errors.push(message.text());});
     await page.goto(url);
     await page.waitForFunction(()=>document.body.dataset.engine==='ready'&&document.body.dataset.gui==='ready'&&document.body.dataset.defaultModel==='ready',null,{timeout:60000});
+    result.backend=await page.evaluate(()=>EngineQuality.snapshot().backend);
     await page.locator('#pause').click();
     const canvas=page.locator('#viewport');
     const snapshot=()=>page.evaluate(()=>EngineGui.snapshot());
@@ -105,9 +106,13 @@ function different(a,b,region) {
     result.checks.push('Responsive logical layout and hit targets');
     await page.waitForFunction(()=>EnginePerformance.snapshot().latest?.current.guiDrawCalls>0);
     result.metrics=await page.evaluate(()=>EnginePerformance.snapshot().latest.current);
-    assert.equal(result.metrics.passes,4+result.metrics.shadowPasses);assert(result.metrics.guiTextureBytes>0&&result.metrics.guiBufferBytes>0);
+    assert.equal(result.metrics.passes,4+result.metrics.shadowPasses);
+    if(result.backend==='webgpu') assert(result.metrics.guiTextureBytes>0&&result.metrics.guiBufferBytes>0);
+    // WebGL2 currently reports GUI uploads/draws but no separate retained GUI
+    // texture/buffer byte accounting. Verify the metrics that backend supplies.
+    else assert(result.metrics.guiUploadCalls>=2&&result.metrics.guiUploadBytes>0);
     assert(result.metrics.drawCalls>=result.metrics.guiDrawCalls&&result.metrics.triangles>=result.metrics.guiTriangles);
-    result.checks.push('One GUI pass after color/shadow passes and separate resource/draw counters');
+    result.checks.push('One GUI pass after color/shadow passes and backend-reported GUI counters');
     const dpi=await browser.newContext({viewport:{width:1440,height:1040},deviceScaleFactor:2});
     const dpiPage=await dpi.newPage();dpiPage.on('pageerror',error=>result.errors.push(String(error)));
     await dpiPage.goto(url);await dpiPage.waitForFunction(()=>document.body.dataset.gui==='ready'&&document.body.dataset.engine==='ready',null,{timeout:60000});

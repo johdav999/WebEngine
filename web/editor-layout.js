@@ -45,7 +45,7 @@
   const statusbar=document.createElement('div');statusbar.className='dock-statusbar';
   const layoutStatus=document.createElement('span');layoutStatus.id='dock-layout-status';layoutStatus.textContent='Drag panel titles to dock · Window to restore panels';
   statusbar.append($('editor-status'),layoutStatus);
-  const bodies={outline:[shell.querySelector('.editor-hierarchy')],details:[shell.querySelector('.editor-inspector'),$('editor-ai'),$('editor-ai-actor'),$('editor-terrain'),$('editor-fx'),$('editor-component-inspector'),$('editor-materials'),$('editor-decals'),$('editor-structure')],assets:[$('editor-assets'),$('editor-autosave')],scene:[viewport],quick:[]};
+  const bodies={outline:[shell.querySelector('.editor-hierarchy')],details:[shell.querySelector('.editor-inspector'),$('editor-animation'),$('editor-ai'),$('editor-ai-actor'),$('editor-terrain'),$('editor-fx'),$('editor-component-inspector'),$('editor-materials'),$('editor-decals'),$('editor-structure')],assets:[$('editor-assets'),$('editor-autosave')],scene:[viewport],quick:[]};
   const panels={};
   for(const [id,title]of Object.entries(names)){
     const panel=document.createElement('section');panel.className='dock-panel';panel.dataset.panel=id;panel.setAttribute('aria-label',title);

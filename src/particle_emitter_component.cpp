@@ -107,7 +107,7 @@ void ParticleEmitterDefinition::validate() const {
         if(!std::isfinite(area)||area<=0) throw std::invalid_argument("Particle surface has no finite area");
     }
     if(!std::isfinite(startDelay)||startDelay<0||startDelay>86400) throw std::invalid_argument("Invalid particle start delay");
-    if(renderMode<ParticleRenderMode::Billboard||renderMode>ParticleRenderMode::Mesh||trailMaxPoints<2||trailMaxPoints>4096
+    if(renderMode<ParticleRenderMode::Billboard||renderMode>ParticleRenderMode::SurfaceTrail||trailMaxPoints<2||trailMaxPoints>4096
         ||!std::isfinite(trailLifetime)||trailLifetime<=0||trailLifetime>86400
         ||!std::isfinite(trailMinDistance)||trailMinDistance<.0001f
         ||!std::isfinite(trailBreakDistance)||trailBreakDistance<trailMinDistance
@@ -129,7 +129,8 @@ void ParticleEmitterDefinition::validate() const {
         if(softDistance>0)throw std::invalid_argument("Mesh particles use mesh depth testing; soft fade is not supported");
     }
     collision.validate();
-    if(collision.enabled&&renderMode==ParticleRenderMode::Ribbon)throw std::invalid_argument("Ribbon sampling does not support particle collision");
+    if(renderMode==ParticleRenderMode::SurfaceTrail&&(space!=ParticleSpace::World||std::abs(surfaceOffset)>1))throw std::invalid_argument("Surface trails require World space and offset within one metre");
+    if(collision.enabled&&(renderMode==ParticleRenderMode::Ribbon||renderMode==ParticleRenderMode::SurfaceTrail))throw std::invalid_argument("Ribbon sampling does not support particle collision");
     flipbook.validate(*texture);
 }
 float ParticleEmitterDefinition::sizeAt(float age) const {
@@ -150,7 +151,7 @@ void ParticleEmitterComponent::setDefinition(std::shared_ptr<const ParticleEmitt
         const auto& mesh=*definition->emissionMesh;areas.reserve(mesh.indices.size()/3);
         double sum=0;for(std::size_t i=0;i<mesh.indices.size();i+=3) {sum+=triangleArea(mesh,i);areas.push_back(sum);}
     }
-    std::vector<TrailPoint> trail;if(definition->renderMode==ParticleRenderMode::Ribbon)trail.resize(definition->trailMaxPoints);
+    std::vector<TrailPoint> trail;if(definition->renderMode==ParticleRenderMode::Ribbon||definition->renderMode==ParticleRenderMode::SurfaceTrail)trail.resize(definition->trailMaxPoints);
     auto collisionShape=definition->collision.enabled?CollisionShape::sphere(definition->collision.radius):nullptr;
     if(definition->collision.enabled)impacts_.reserve(definition->collision.maxImpacts);
     collisionShape_=std::move(collisionShape);
@@ -158,6 +159,7 @@ void ParticleEmitterComponent::setDefinition(std::shared_ptr<const ParticleEmitt
 }
 void ParticleEmitterComponent::play(bool restart) {
     if(restart) {
+        events_.clear();droppedEvents_=0;
         impacts_.clear();collisionQueries_=0;skippedCollisionSteps_=droppedImpacts_=0;
         particles_.clear();trailHead_=trailCount_=0;trailDistance_=0;breakTrail();time_=0;burstCycle_=0;burstIndex_=0;dropped_=0;random_=definition_->seed ? definition_->seed : 1;
         nextRate_=definition_->spawnRate>0 ? definition_->startDelay+1/definition_->spawnRate : std::numeric_limits<double>::infinity();
@@ -209,11 +211,14 @@ void ParticleEmitterComponent::spawn(double event,double end) {
         if(d.renderMode==ParticleRenderMode::Billboard&&d.alignment==ParticleAlignment::Plane){p.planeNormal=planeNormalAt(p.planeNormal,world);if(dot(p.planeNormal,p.planeNormal)<.5f){addDropped(1);return;}}p.position=transformPoint(world,p.position);p.velocity=transformDirection(world,p.velocity);p.sizeScale=scaleOf(world);
         if(d.renderMode==ParticleRenderMode::Mesh){p.meshBasis=world;p.meshBasis.m[12]=p.meshBasis.m[13]=p.meshBasis.m[14]=0;}
     }
+    if(d.space==ParticleSpace::World)p.velocity=p.velocity+inheritedVelocity_;
+    else if(dot(inheritedVelocity_,inheritedVelocity_)>0){try{p.velocity=p.velocity+transformDirection(inverseAffine(worldMatrix()),inheritedVelocity_);}catch(const std::invalid_argument&){addDropped(1);return;}}
+    this->event(ParticleEventType::Birth,p);
     deaths_.push_back(event+p.lifetime);std::push_heap(deaths_.begin(),deaths_.end(),std::greater<double>{});
-    if(end-event>=p.lifetime&&!d.collision.enabled) return;
+    if(end-event>=p.lifetime&&!d.collision.enabled&&!(eventMask_&4)) return;
     const float age=static_cast<float>(std::min(end-event,double(p.lifetime)));
     integrate(p,age);
-    if(p.age<p.lifetime)particles_.push_back(p);
+    if(p.age<p.lifetime)particles_.push_back(p);else this->event(ParticleEventType::Death,p);
 }
 void ParticleEmitterComponent::integrate(Particle& p,double seconds) {
     const auto& d=*definition_;
@@ -249,9 +254,9 @@ void ParticleEmitterComponent::integrate(Particle& p,double seconds) {
 void ParticleEmitterComponent::advance(double seconds) {
     for(std::size_t i=0;i<particles_.size();) {
         auto& p=particles_[i];
-        if(double(p.age)+seconds>=p.lifetime&&!definition_->collision.enabled) { p=particles_.back();particles_.pop_back();continue; }
+        if(double(p.age)+seconds>=p.lifetime&&!definition_->collision.enabled&&!(eventMask_&4)) { p=particles_.back();particles_.pop_back();continue; }
         integrate(p,std::min(seconds,double(p.lifetime-p.age)));
-        if(p.age>=p.lifetime){p=particles_.back();particles_.pop_back();continue;}++i;
+        if(p.age>=p.lifetime){event(ParticleEventType::Death,p);p=particles_.back();particles_.pop_back();continue;}++i;
     }
 }
 
@@ -286,9 +291,10 @@ void ParticleEmitterComponent::addDropped(long double count) {
     dropped_+=static_cast<std::uint64_t>(std::min(static_cast<long double>(room),std::max(0.0L,count)));
 }
 void ParticleEmitterComponent::tick(double delta) {
+    events_.clear();
     if(paused_) return;
     if(!std::isfinite(delta)||delta<0||time_+delta>1e12) throw std::invalid_argument("Invalid particle update delta");
-    if(definition_->renderMode==ParticleRenderMode::Ribbon){tickTrail(delta);return;}
+    if(definition_->renderMode==ParticleRenderMode::Ribbon||definition_->renderMode==ParticleRenderMode::SurfaceTrail){tickTrail(delta);return;}
     collisionQueries_=0;
     if(definition_->collision.enabled&&delta>0&&particles_.size()>1)std::rotate(particles_.begin(),particles_.begin()+1,particles_.end());
     const auto end=time_+delta;

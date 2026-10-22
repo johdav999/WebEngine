@@ -152,3 +152,5 @@ Static [mesh particles](mesh-particles.md) are now delivered with shared materia
 3D spin and archive v21 state. Soft fading remains a quad/ribbon capability.
 
 Optional particle collision and independent projected decals are now delivered; see [contact/decal contracts](fx-contacts-decals.md) for responses, queued output, authoring, budgets and persistence. Rigid-body particles and PBR decal channels remain outside this increment.
+
+Event-driven child effects and finite fading decals are now implemented; see [composition contracts](fx-composition.md). Archive v29 adds graph dependencies and live composition/decal continuation while retaining the earlier fields above.

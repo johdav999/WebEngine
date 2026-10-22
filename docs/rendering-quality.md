@@ -3,8 +3,10 @@
 `RenderQuality`, `ResolutionBudget`, `RenderCapabilities` and `resolveResolution`
 in [render_quality.hpp](../include/engine/render_quality.hpp) are portable value
 contracts. They contain no browser or WebGPU types. Applications choose a
-profile or supply a validated custom budget; these are explicit settings, not
-an FPS-based adaptive policy or device-performance classification.
+profile or supply a validated custom budget. Optional
+[adaptive quality](adaptive-quality.md) treats those settings as a ceiling and
+adjusts resolution, shadows and available LOD from sustained frame intervals.
+Profiles themselves remain explicit settings, without device classification.
 
 | Profile | Scale / maximum DPR | Maximum dimension / pixels | Shadow resolution / samples / maps |
 | --- | --- | --- | --- |
@@ -305,3 +307,11 @@ payload is 2400 bytes including up to 16 interaction records and per-view active
 count; unchanged paused staging retains the existing upload cache. WebGL 2 uses
 bounded fragment uniforms, without a float-target requirement. See water contracts
 and `scripts/water-interactions-smoke.cjs`; fragment work scales with active sources.
+
+## Shadow cascades and HDR post-processing
+
+RenderQuality now composes PostProcessing and directionalCascades/shadowDistance/
+cascadeLambda. Defaults keep post off and one authored fixed shadow volume. Both
+backends support shadowed spots; optional HDR uses backend-owned float targets and
+post resolves before GUI. Read [current contracts](lighting-post-processing.md)
+for validation, shared map budgets, capability fallback and measured scope.

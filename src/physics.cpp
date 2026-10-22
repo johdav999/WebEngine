@@ -1,3 +1,4 @@
+#include "engine/performance_timeline.hpp"
 #include "engine/physics.hpp"
 #include "engine/vehicle_component.hpp"
 #include <Jolt/Jolt.h>
@@ -526,6 +527,7 @@ void PhysicsWorld::removeCharacter(ComponentId id) noexcept {
 }
 bool PhysicsWorld::hasBody(ComponentId id) const { const auto* entry=impl_->find(id);return entry&&impl_->live(*entry); }
 void PhysicsWorld::synchronize() {
+    ProfileScope profile(ProfileCategory::Physics,"Body synchronization");
     auto& p=*impl_;
     for(std::size_t i=0;i<p.entries.size();) {
         if(!p.live(p.entries[i])) { p.remove(i);continue; }
@@ -681,6 +683,7 @@ void PhysicsWorld::stepCharacters(double seconds) {
     }
 }
 void PhysicsWorld::step(double seconds) {
+    ProfileScope profile(ProfileCategory::Physics,"Physics step");
     auto& p=*impl_;if(p.stepping||p.dispatching) throw std::logic_error("Physics steps cannot be nested");
     if(!std::isfinite(seconds)||seconds<=0||seconds>0.25) throw std::invalid_argument("Physics step must be in (0, 0.25] seconds");
     synchronize();auto& bodies=p.system.GetBodyInterface();
@@ -697,7 +700,7 @@ void PhysicsWorld::step(double seconds) {
     }
     stepVehicles(false,seconds);
     const auto start=std::chrono::steady_clock::now();p.stepping=true;
-    const auto result=p.system.Update(static_cast<float>(seconds),1,&p.temporary,&p.jobs);p.stepping=false;
+    const auto result=[&]{ProfileScope solver(ProfileCategory::Physics,"Jolt solver");return p.system.Update(static_cast<float>(seconds),1,&p.temporary,&p.jobs);}();p.stepping=false;
     p.statistics.lastStepMilliseconds=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();++p.statistics.steps;
     if(result!=JPH::EPhysicsUpdateError::None) throw std::runtime_error("Jolt physics contact/pair capacity exceeded");
     for(auto& entry:p.entries) {
@@ -731,6 +734,13 @@ PhysicsStats PhysicsWorld::stats() const {
 Vec3 PhysicsWorld::velocity(ComponentId id,bool angular) const {
     const auto& entry=impl_->require(id);auto& bodies=impl_->system.GetBodyInterface();
     return vec(angular ? bodies.GetAngularVelocity(entry.body) : bodies.GetLinearVelocity(entry.body));
+}
+PhysicsBounds PhysicsWorld::bodyBounds(ComponentId id)const{
+    if(impl_->stepping)throw std::logic_error("Cannot read body bounds during a solver step");
+    const auto& entry=impl_->require(id);JPH::BodyLockRead lock(impl_->system.GetBodyLockInterface(),entry.body);
+    if(!lock.Succeeded())throw std::logic_error("Cannot read body bounds");
+    const auto box=lock.GetBody().GetWorldSpaceBounds();
+    return {vec(box.mMin),vec(box.mMax)};
 }
 void PhysicsWorld::command(ComponentId id,Vec3 value,int command) {
     checkVector(value);const auto& entry=impl_->require(id);

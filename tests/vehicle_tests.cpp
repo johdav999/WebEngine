@@ -26,7 +26,7 @@ void driving(){
  for(int i=0;i<16;++i)check(std::abs(currentWheel.m[i]-expected.m[i])<.001f,"Wheel presentation matches solver pose");
  v.submit({0,0,1,0});steps(s,120);check(std::abs(v.state().speed)<speed*.3,"Braking");
  body.teleport(Transform{{0,.95f,0}});s.synchronize();steps(s,90);v.submit({-1,0,0,0});steps(s,150);check(v.state().speed< -2,"Reverse");
- body.teleport(Transform{{0,.95f,0}});s.synchronize();steps(s,90);v.submit({.6f,.5f,0,0});steps(s,120);check(std::abs(v.owner()->transform.rotation.y)>.05,"Steering changes heading");
+ body.teleport(Transform{{0,.95f,0}});s.synchronize();steps(s,90);v.submit({.6f,.5f,0,0});steps(s,120);check(v.owner()->transform.rotation.y>.05&&v.owner()->transform.position.x>0,"Positive steering turns right");
  body.teleport(Transform{{0,10,0}});s.synchronize();v.cancel();steps(s,2);for(auto& w:v.state().wheels)check(!w.contact,"Airborne contact clears");
  const auto pose=v.owner()->worldMatrix();s.physics().setInterpolationAlpha(.2f);SceneFrame frame;s.collect(frame);check(pose.m==v.owner()->worldMatrix().m,"Presentation does not mutate simulation");
  body.teleport(Transform{{-12,3,20}});s.synchronize();v.cancel();steps(s,180);check(v.state().wheels[0].contact||v.state().wheels[2].contact,"Hill support");check(v.owner()->transform.position.y>.8f,"Hill collision height");
@@ -51,7 +51,7 @@ void forceAndMass(){Scene s;auto car=makeVehicleExample({0,10,0});auto& a=*car;a
 }
 void transfer(){Scene source,destination;source.adoptChild(makeVehicleExample({0,5,0}));source.synchronize();auto& v=vehicle(source);const auto old=v.id();steps(source,1);auto moved=source.detachChild(*v.owner());check(!source.findComponent(old),"Transfer invalidates old handle");destination.adoptChild(std::move(moved));destination.synchronize();steps(source,1);steps(destination,1);check(v.state().active&&v.id().scene!=old.scene,"Transfer rebinds vehicle to destination world");}
 void persistenceAndEditor(){Scene s;populateVehicleCourse(s);s.synchronize();auto& v=vehicle(s);steps(s,60);v.submit({1,0,0,0});steps(s,90);const auto checkpoint=v.checkpoint();
- auto bytes=SceneArchive::save(s);check(std::to_integer<unsigned>(bytes[8])==27,"Archive version");auto restored=SceneArchive::load(bytes);auto& other=vehicle(*restored.scene);
+ auto bytes=SceneArchive::save(s);check(std::to_integer<unsigned>(bytes[8])==34,"Archive version");auto restored=SceneArchive::load(bytes);auto& other=vehicle(*restored.scene);
  check(other.command().throttle==0,"No held input restored");check(std::abs(other.checkpoint().rpm-checkpoint.rpm)<.01,"RPM retained");check(other.checkpoint().gear==checkpoint.gear,"Gear retained");steps(*restored.scene,1);check(other.state().active,"Restored vehicle registered");
  rejects([&]{auto invalid=checkpoint;invalid.gear=6;other.restore(invalid);});check(other.command().throttle==0,"Invalid restore retains neutral command");
  auto clone=SceneArchive::clone(s);check(vehicle(*clone.scene).definition()==v.definition(),"Play shares immutable definition");

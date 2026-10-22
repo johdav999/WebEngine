@@ -5,11 +5,20 @@ namespace engine {
 EM_JS(unsigned, audio_device_create, (), { return window.EngineAudioDevices.create(); });
 EM_JS(void, audio_device_destroy, (unsigned device), { window.EngineAudioDevices.dispose(device); });
 EM_JS(int, audio_device_start, (unsigned device,unsigned voice,unsigned sound,unsigned rate,unsigned channels,
-    const float* samples,unsigned count,int loop,double offset,int spatial,float x,float y,float z,float ref,float max,float rolloff,float gain,float playbackRate), {
+    const float* samples,unsigned count,int loop,double offset,int spatial,float x,float y,float z,float ref,float max,float rolloff,float gain,float playbackRate,int occlusion,float send), {
     const pcm=new Float32Array(HEAPU8.buffer,samples,count);
     return window.EngineAudioDevices.get(device).start(voice,sound,rate,channels,pcm,
-        {loop:!!loop,offset,spatial:!!spatial,position:[x,y,z],referenceDistance:ref,maxDistance:max,rolloff,playbackRate},gain);
+        {loop:!!loop,offset,spatial:!!spatial,position:[x,y,z],referenceDistance:ref,maxDistance:max,rolloff,playbackRate,occlusion:!!occlusion,reverbSend:send},gain);
 });
+EM_JS(int, audio_device_stream, (unsigned device,unsigned voice,const char* uri,int loop,double offset,int spatial,float x,float y,float z,float ref,float max,float rolloff,float gain,float rate,int occlusion,float send), {
+    return window.EngineAudioDevices.get(device).startStream(voice,UTF8ToString(uri),{loop:!!loop,offset,spatial:!!spatial,position:[x,y,z],referenceDistance:ref,maxDistance:max,rolloff,playbackRate:rate,occlusion:!!occlusion,reverbSend:send},gain);
+});
+EM_JS(int, audio_device_reverb, (unsigned device,float wet,float decay,float delay), {return window.EngineAudioDevices.get(device).reverb({wet,decaySeconds:decay,preDelaySeconds:delay});});
+EM_JS(void, audio_device_environment, (unsigned device,unsigned voice,float cutoff,float send), {window.EngineAudioDevices.get(device).environment(voice,cutoff,send);});
+EM_JS(void, audio_device_mute_output, (unsigned device,int muted), {window.EngineAudioDevices.get(device).muteOutput(!!muted);});
+EM_JS(void, audio_device_clear_effects, (unsigned device), {window.EngineAudioDevices.get(device).clearEffects();});
+EM_JS(int, audio_device_seek_stream, (unsigned device,unsigned voice,double seconds), {return window.EngineAudioDevices.get(device).seekStream(voice,seconds);});
+EM_JS(double, audio_device_stream_position, (unsigned device,unsigned voice), {return window.EngineAudioDevices.get(device).streamPosition(voice);});
 EM_JS(void, audio_device_stop, (unsigned device,unsigned voice), { window.EngineAudioDevices.get(device).stop(voice); });
 EM_JS(int, audio_device_playing, (unsigned device,unsigned voice), { return window.EngineAudioDevices.get(device).voices.has(voice); });
 EM_JS(void, audio_device_gain, (unsigned device,unsigned voice,float gain), { window.EngineAudioDevices.get(device).gain(voice,gain); });
@@ -27,8 +36,17 @@ BrowserAudioBackend::BrowserAudioBackend():device_(audio_device_create()) {}
 BrowserAudioBackend::~BrowserAudioBackend() { audio_device_destroy(device_); }
 bool BrowserAudioBackend::start(std::uint32_t id,const SoundAsset& s,const AudioPlayOptions& o,float g) {
     return audio_device_start(device_,id,s.identity(),s.sampleRate(),s.channels(),s.samples().data(),unsigned(s.samples().size()),
-        o.loop,o.offsetSeconds,o.spatial,o.position.x,o.position.y,o.position.z,o.referenceDistance,o.maxDistance,o.rolloff,g,o.playbackRate)!=0;
+        o.loop,o.offsetSeconds,o.spatial,o.position.x,o.position.y,o.position.z,o.referenceDistance,o.maxDistance,o.rolloff,g,o.playbackRate,o.occlusion,o.reverbSend)!=0;
 }
+bool BrowserAudioBackend::startStream(std::uint32_t id,const AudioStreamAsset& s,const AudioPlayOptions& o,float g) {
+    return audio_device_stream(device_,id,s.uri().c_str(),o.loop,o.offsetSeconds,o.spatial,o.position.x,o.position.y,o.position.z,o.referenceDistance,o.maxDistance,o.rolloff,g,o.playbackRate,o.occlusion,o.reverbSend)!=0;
+}
+bool BrowserAudioBackend::reverb(const AudioReverbSettings& value) {return audio_device_reverb(device_,value.wet,value.decaySeconds,value.preDelaySeconds)!=0;}
+void BrowserAudioBackend::environment(std::uint32_t id,float cutoff,float send) noexcept {audio_device_environment(device_,id,cutoff,send);}
+void BrowserAudioBackend::muteOutput(bool value) noexcept {audio_device_mute_output(device_,value);}
+void BrowserAudioBackend::clearEffects() noexcept {audio_device_clear_effects(device_);}
+bool BrowserAudioBackend::seekStream(std::uint32_t id,double seconds) noexcept {return audio_device_seek_stream(device_,id,seconds)!=0;}
+double BrowserAudioBackend::streamPosition(std::uint32_t id) const noexcept {return audio_device_stream_position(device_,id);}
 void BrowserAudioBackend::stop(std::uint32_t id) noexcept { audio_device_stop(device_,id); }
 bool BrowserAudioBackend::playing(std::uint32_t id) const noexcept { return audio_device_playing(device_,id)!=0; }
 void BrowserAudioBackend::gain(std::uint32_t id,float value) noexcept { audio_device_gain(device_,id,value); }

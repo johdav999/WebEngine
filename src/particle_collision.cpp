@@ -26,6 +26,7 @@ void ParticleEmitterComponent::collide(Particle& p,Vec3 previous,Vec3 previousVe
     if(!hit)return;
     const auto n=normalized(hit->normal);if(dot(n,n)<.5f){p.position=previous;p.velocity=previousVelocity;return;}
     const auto incoming=transformDirection(world,p.velocity+added);const float speed=std::sqrt(dot(incoming,incoming));
+    if(eventMask_&2){if(events_.size()<eventCapacity_)events_.push_back({ParticleEventType::Impact,hit->point,n,incoming});else ++droppedEvents_;}
     if(impacts_.size()<c.maxImpacts)impacts_.push_back({hit->actor,hit->body,hit->point,n,incoming,speed,p.age+dt*hit->fraction});else ++droppedImpacts_;
     const auto center=start+movement*hit->fraction+n*(.001f+hit->penetrationDepth);
     p.position=transformPoint(inverse,center);

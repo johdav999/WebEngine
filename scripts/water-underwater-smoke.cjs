@@ -63,7 +63,7 @@ const near={x0:.24,x1:.29,y0:.42,y1:.49},far={x0:.65,x1:.68,y0:.44,y1:.47},inset
   assert(pureOn.gpuTextureBytes>pureOff.gpuTextureBytes,'Pure underwater should allocate/release optional capture targets');
   if(backend==='webgpu') assert.equal(pureOn.frameUploadCalls,0,'Paused underwater must not rewrite unchanged view uniforms');
   await preset(0);const saved=await shot('before-archive');
-  assert.equal(await page.evaluate(async()=>{const bytes=EngineSceneArchive.saveSceneBytes();if(bytes[8]!==23)throw Error('Expected current archive v19');return await EngineSceneArchive.openScene(new File([bytes],'underwater.wescene'));}),true);
+  assert.equal(await page.evaluate(async()=>{const bytes=EngineSceneArchive.saveSceneBytes();if(bytes[8]!==29)throw Error('Expected current archive v19');return await EngineSceneArchive.openScene(new File([bytes],'underwater.wescene'));}),true);
   const loaded=await shot('after-archive');assert(changed(saved,loaded,undefined,3)<40,'Underwater settings/camera changed through scene archive load');
   await page.evaluate(()=>Module._engine_archive_return());await view(0);const surface=await shot('surface-return');assert(changed(surface,saved)>100000,'Surface view did not leave the underwater effect');
   await page.locator('#water-return').click();await shot('demo-return');await page.locator('#water-open').click();await frames();

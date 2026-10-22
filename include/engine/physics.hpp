@@ -66,6 +66,7 @@ struct TriggerEvent {
     ComponentId sensorBody,otherBody;
 };
 struct PhysicsDebugLine { Vec3 from,to,color; };
+struct PhysicsBounds {Vec3 minimum,maximum;};
 struct PhysicsStats {
     std::size_t bodies=0,activeBodies=0,joints=0;
     std::uint64_t steps=0,droppedEvents=0;
@@ -111,6 +112,7 @@ public:
     // Exit retains original handles even after removal; resolve before dereferencing.
     std::function<void(const TriggerEvent&)> onTrigger;
     PhysicsStats stats() const;
+    PhysicsBounds bodyBounds(ComponentId)const; // Authoritative registered body AABB; idle owner reads.
     void setInterpolationAlpha(float alpha);
     Mat4 presentationMatrix(const Node& node) const; // Same current interpolation as collection; never writes simulation.
     void setDebugDrawEnabled(bool enabled) { debugDraw_=enabled; }

@@ -18,7 +18,7 @@ void WebGlRenderer::prepareWaterTargets(bool required) {
         for(unsigned i=0;i<2;++i) {
             glGenFramebuffers(1,&framebuffers[i]);glBindFramebuffer(GL_FRAMEBUFFER,framebuffers[i]);
             glGenTextures(1,&colors[i]);glBindTexture(GL_TEXTURE_2D,colors[i]);
-            glTexImage2D(GL_TEXTURE_2D,0,GL_RGB8,w,h,0,GL_RGB,GL_UNSIGNED_BYTE,nullptr);
+            glTexImage2D(GL_TEXTURE_2D,0,hdr_?GL_RGBA16F:GL_RGB8,w,h,0,hdr_?GL_RGBA:GL_RGB,hdr_?GL_HALF_FLOAT:GL_UNSIGNED_BYTE,nullptr);
             glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
             glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
             glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,colors[i],0);
@@ -55,7 +55,7 @@ void WebGlRenderer::prepareReflectionTargets(bool required) {
     if(reflectionWidth_==w&&reflectionHeight_==h) return;
     GLuint fbo=0,color=0,depth=0;
     glGenFramebuffers(1,&fbo);glBindFramebuffer(GL_FRAMEBUFFER,fbo);
-    glGenTextures(1,&color);glBindTexture(GL_TEXTURE_2D,color);glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA8,w,h,0,GL_RGBA,GL_UNSIGNED_BYTE,nullptr);
+    glGenTextures(1,&color);glBindTexture(GL_TEXTURE_2D,color);glTexImage2D(GL_TEXTURE_2D,0,hdr_?GL_RGBA16F:GL_RGBA8,w,h,0,GL_RGBA,hdr_?GL_HALF_FLOAT:GL_UNSIGNED_BYTE,nullptr);
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
     glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,color,0);
@@ -68,7 +68,7 @@ void WebGlRenderer::prepareReflectionTargets(bool required) {
 }
 void WebGlRenderer::drawUnderwater(const UnderwaterView& water,const CameraComponent& camera,const ResolvedRenderView& resolved) {
     auto viewport=resolved.viewport;viewport.y=height_-viewport.y-viewport.height;const auto uniforms=prepareUnderwater(water,camera,viewport,waterTime_);
-    glUseProgram(underwaterProgram_);glBindVertexArray(underwaterVao_);
+    glUseProgram(underwaterProgram_);glUniform1i(glGetUniformLocation(underwaterProgram_,"hdrOutput"),hdr_);glBindVertexArray(underwaterVao_);
     glUniformMatrix4fv(glGetUniformLocation(underwaterProgram_,"inverseViewProjection"),1,GL_FALSE,uniforms.inverseViewProjection.m.data());
     glUniformMatrix4fv(glGetUniformLocation(underwaterProgram_,"worldToLocal"),1,GL_FALSE,uniforms.worldToLocal.m.data());
     const std::array<const char*,8> names={"viewport","eye","minimum","maximum","absorptionStrength","colorDensity","options","caustics"};

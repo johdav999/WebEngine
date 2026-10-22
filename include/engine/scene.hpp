@@ -39,7 +39,7 @@ struct MeshDraw {
     bool receivesDecals=true;
     std::uint32_t visibilityMask=1;
 };
-struct SceneLight { LightType type; Vec3 position, direction, color; float intensity, range; ShadowSettings shadow; Vec3 shadowCenter; };
+struct SceneLight { LightType type; Vec3 position, direction, color; float intensity, range; ShadowSettings shadow; Vec3 shadowCenter; float innerAngle=pi/9,outerAngle=pi/6; };
 struct SceneFrame {
     std::vector<MeshDraw> meshes;
     std::vector<SceneLight> lights;
@@ -57,6 +57,7 @@ public:
     explicit Scene(std::string name = "Node");
     ~Scene() override;
     SceneLifecycleState lifecycleState() const { return lifecycleState_; }
+    std::uint64_t runtimeIdentity() const { return identity_; } // Handle scope, never persisted.
     Vec3 ambient{0.14f,0.17f,0.23f};
     std::shared_ptr<const Environment> environment=Environment::studio();
     float environmentIntensity=1,environmentRotation=0; // Rotation radians about world Y.

@@ -12,6 +12,9 @@ public:
     std::shared_ptr<const SkinPose> skinPose() const;
     void synchronizeSkeleton() const;
 private:
+    friend class EditorSession;
+    // Validated staged configuration exchange; node identity and target references stay put.
+    void swapAnimationState(SkeletalMeshComponent&) noexcept;
     SkeletonComponent* skeleton_;
     AnimationComponent* animation_;
 };

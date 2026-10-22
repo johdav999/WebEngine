@@ -234,7 +234,7 @@ int main(int argc,char** argv) {try {
     auto components=actor->getComponents<TerrainComponent>();check(components.size()==4,"Terrain component count");
     MaterialInstance override;override.tint={.6f,.8f,.2f};components[0]->setMaterial(0,override);
     auto library=SceneArchive::collectAssets(scene);check(library.terrains.size()==1,"Terrain asset collection loses sharing");
-    const auto bytes=SceneArchive::save(scene,{},library);check(bytes[8]==std::byte{27},"Terrain archive version");
+    const auto bytes=SceneArchive::save(scene,{},library);check(bytes[8]==std::byte{34},"Terrain archive version");
     auto restored=SceneArchive::load(bytes);check(SceneArchive::save(*restored.scene,{},restored.assets)==bytes,"Terrain archive not stable");
     auto* copy=dynamic_cast<Actor*>(restored.scene->findSavedNode(actor->savedId()));auto chunks=copy->getComponents<TerrainComponent>();
     check(chunks.size()==4&&chunks[0]->asset()==chunks[3]->asset()&&chunks[0]->asset()==restored.assets.terrains[0],"Restored terrain source sharing lost");

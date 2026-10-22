@@ -172,3 +172,5 @@ frame/mesh/plane/trail suites cover these contracts. Browser acceptance uses
 `scripts/fx-contact-smoke.cjs` with Playwright/pngjs, NODE_PATH, BROWSER_EXECUTABLE,
 DEMO_URL, EVIDENCE_DIR and optional DEVICE_SCALE_FACTOR=2. Physical mobile and
 sustained performance require separate acceptance.
+
+Event-driven child effects and finite fading decals are now implemented; see [composition contracts](fx-composition.md). Archive v29 adds graph dependencies and live composition/decal continuation while retaining the earlier fields above.

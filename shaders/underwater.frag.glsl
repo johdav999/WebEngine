@@ -1,5 +1,8 @@
 #version 300 es
 precision highp float;
+uniform bool hdrOutput;
+vec3 hdrEncode(vec3 c){return hdrOutput?c:pow(c,vec3(1.0/2.2));}
+
 uniform highp sampler2D sourceColor,sourceDepth;
 uniform mat4 inverseViewProjection,worldToLocal;
 uniform vec4 viewport,eye,minimum,maximum,absorptionStrength,colorDensity,options,caustics;
@@ -48,6 +51,6 @@ void main() {
     vec3 start=options.y>0.5 ? point(gl_FragCoord.xy,0.0) : eye.xyz;
     float path=distanceInWater(start,end)*absorptionStrength.w;
     vec3 attenuation=exp(-absorptionStrength.xyz*path);float transmission=exp(-colorDensity.w*path);
-    vec3 linear=pow(source.rgb,vec3(2.2))*(1.0+light)*attenuation*transmission+colorDensity.xyz*(1.0-transmission);
-    outputColor=vec4(pow(linear,vec3(1.0/2.2)),source.a);
+    vec3 linear=(hdrOutput?source.rgb:pow(source.rgb,vec3(2.2)))*(1.0+light)*attenuation*transmission+colorDensity.xyz*(1.0-transmission);
+    outputColor=vec4(hdrEncode(linear),source.a);
 }

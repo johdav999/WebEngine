@@ -60,7 +60,7 @@ int main(int argc,char** argv) {try {
     rejects([&]{link.setSavedId("target");},"Disabled node identity collision rejected");
     rejects([&]{link.setSavedId("invalid id");},"Invalid identity rejected");
     auto bytes=SceneArchive::save(original,{},{},{},{},codecs);
-    check(bytes[8]==std::byte{27},"Persistence uses archive version 27");
+    check(bytes[8]==std::byte{34},"Persistence uses archive version 34");
     rejects([&]{SceneArchive::load(bytes);},"Unregistered custom type rejected");
     auto loaded=SceneArchive::load(bytes,{},codecs);
     auto* restored=dynamic_cast<Link*>(loaded.scene->findSavedNode("link"));

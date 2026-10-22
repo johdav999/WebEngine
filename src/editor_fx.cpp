@@ -22,7 +22,7 @@ bool EditorSession::setEffectAsset(std::shared_ptr<const EffectAsset> asset) {
     asset->validate();if(&effect->asset()==asset.get()) return true;
     auto candidate=std::make_unique<EffectComponent>(effect->name,std::move(asset));
     candidate->setSavedId(effect->savedId());candidate->transform=effect->transform;candidate->enabled=effect->enabled;
-    candidate->setTickEnabled(effect->tickEnabled());candidate->setFixedTickEnabled(effect->fixedTickEnabled());
+    candidate->setTickEnabled(effect->tickEnabled()||(!candidate->asset().triggers.empty()&&effect->asset().triggers.empty()));candidate->setFixedTickEnabled(effect->fixedTickEnabled());
     for(const auto& tag:effect->tags())candidate->addTag(tag);
     for(std::size_t i=0;i<std::min(candidate->emitters().size(),effect->emitters().size());++i) {
         candidate->emitters()[i]->setSavedId(effect->emitters()[i]->savedId());

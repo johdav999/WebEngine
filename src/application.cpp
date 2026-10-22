@@ -1,3 +1,4 @@
+#include "engine/performance_timeline.hpp"
 #include "engine/application.hpp"
 #include <atomic>
 #include <limits>
@@ -175,6 +176,7 @@ bool Application::commitTransition() {
     return true;
 }
 const ApplicationFrame& Application::advance(double timestamp,const ApplicationFrameCallbacks& callbacks) {
+    ProfileScope profile(ProfileCategory::Simulation,"Application advance");
     requireIdle();
     if(!std::isfinite(timestamp)||timestamp<0||(lastTimestamp_&&timestamp<*lastTimestamp_))
         throw std::invalid_argument("Expected a monotonic finite timestamp in seconds");

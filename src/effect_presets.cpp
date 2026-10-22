@@ -84,6 +84,16 @@ std::shared_ptr<const EffectAsset> ribbonEffect(){
     }();return asset;
 }
 
+std::shared_ptr<const EffectAsset> surfaceTrailEffect(){
+    static const auto asset=[] {auto a=std::make_shared<EffectAsset>();a->name="Surface trail";
+        auto d=std::make_shared<ParticleEmitterDefinition>();d->name="Contact strip";d->renderMode=ParticleRenderMode::SurfaceTrail;
+        d->space=ParticleSpace::World;d->maxParticles=1;d->spawnRate=0;d->trailLifetime=12;d->trailMinDistance=.05f;d->trailBreakDistance=2;
+        d->trailMaxPoints=512;d->surfaceOffset=.015f;d->size={{0,.32f},{1,.32f}};
+        d->color={{0,{.03f,.025f,.02f,.85f}},{.8f,{.03f,.025f,.02f,.85f}},{1,{.03f,.025f,.02f,0}}};
+        a->emitters.push_back({d,{}});a->validate();return a;
+    }();return asset;
+}
+
 std::shared_ptr<const EffectAsset> groundRingEffect(){
     static const auto asset=[] {auto a=std::make_shared<EffectAsset>();a->name="Ground ring";
         auto texture=std::make_shared<Texture>();texture->name="Procedural ground ring";texture->width=texture->height=64;texture->pixels.resize(64*64*4);
@@ -97,6 +107,16 @@ std::shared_ptr<const EffectAsset> groundRingEffect(){
     }();return asset;
 }
 
+std::shared_ptr<const EffectAsset> impactChainEffect(){
+    static const auto asset=[] {
+        auto a=std::make_shared<EffectAsset>();a->name="Impact chain";
+        auto source=std::make_shared<ParticleEmitterDefinition>();source->name="Falling debris";source->space=ParticleSpace::World;source->spawnRate=0;source->bursts={{0,3}};source->looping=false;source->duration=.1;source->lifetimeMin=source->lifetimeMax=2;source->positionMin={-.7f,0,-.5f};source->positionMax={.7f,0,.5f};source->velocityMin=source->velocityMax={0,-3,0};source->collision.enabled=true;source->collision.response=ParticleCollisionResponse::Kill;source->size={{0,.12f}};source->color={{0,{1,.5f,.1f,1}}};a->emitters.push_back({source,{{0,1,0},{},{1,1,1}}});
+        auto child=std::make_shared<EffectAsset>();child->name="Sparks and dust";
+        auto sparks=std::make_shared<ParticleEmitterDefinition>();sparks->name="Sparks";sparks->space=ParticleSpace::World;sparks->spawnRate=0;sparks->bursts={{0,8}};sparks->looping=false;sparks->duration=.1;sparks->lifetimeMin=.3f;sparks->lifetimeMax=.6f;sparks->velocityMin={-1,.7f,-1};sparks->velocityMax={1,2,1};sparks->gravity={0,-2,0};sparks->blend=BlendMode::Additive;sparks->size={{0,.07f},{1,.01f}};sparks->color={{0,{1,.4f,.03f,1}},{1,{1,.2f,0,0}}};child->emitters.push_back({sparks,{}});
+        auto dust=std::make_shared<ParticleEmitterDefinition>(*sparks);dust->name="Dust";dust->texture=radialAtlas(false);dust->blend=BlendMode::Alpha;dust->bursts={{0,4}};dust->lifetimeMin=.6f;dust->lifetimeMax=1;dust->velocityMin={-.3f,.1f,-.3f};dust->velocityMax={.3f,.5f,.3f};dust->gravity={};dust->size={{0,.12f},{1,.7f}};dust->color={{0,{.4f,.3f,.2f,.5f}},{1,{.4f,.3f,.2f,0}}};child->emitters.push_back({dust,{}});
+        EffectTrigger trigger;trigger.effect=child;trigger.decal.emplace();trigger.decal->settings.texture=radialAtlas(false);trigger.decal->settings.color={.03f,.015f,.005f};trigger.decal->settings.lifetime=2;trigger.decal->settings.fadeOut=1;trigger.decal->scale={.65f,.2f,.65f};a->triggers.push_back(std::move(trigger));a->validate();return a;
+    }();return asset;
+}
 std::shared_ptr<const EffectAsset> debrisEffect(){
     static const auto asset=[] {auto a=std::make_shared<EffectAsset>();a->name="Mesh debris";
         auto mesh=std::make_shared<Mesh>(*Mesh::cube());auto material=std::make_shared<Material>();material->name="Debris material";material->roughness=.85f;mesh->materials={material};

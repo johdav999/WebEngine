@@ -1,5 +1,6 @@
 #include "engine/decal.hpp"
 #include "engine/scene.hpp"
+#include "engine/effect_component.hpp"
 #include <limits>
 namespace engine {
 void DecalSettings::validate() const {
@@ -7,15 +8,23 @@ void DecalSettings::validate() const {
         ||!std::isfinite(color.x)||!std::isfinite(color.y)||!std::isfinite(color.z)||color.x<0||color.y<0||color.z<0
         ||!std::isfinite(opacity)||opacity<0||opacity>1||!std::isfinite(normalOffset)||normalOffset<0||normalOffset>1
         ||!std::isfinite(normalThreshold)||normalThreshold< -1||normalThreshold>1
+        ||!std::isfinite(lifetime)||lifetime<0||lifetime>86400||!std::isfinite(fadeOut)||fadeOut<0||fadeOut>lifetime
         ||(blend!=BlendMode::Alpha&&blend!=BlendMode::Additive)||!maxSourceTriangles||maxSourceTriangles>1000000||!maxTriangles||maxTriangles>100000)
         throw std::invalid_argument("Invalid decal settings");
 }
 bool DecalSettings::operator==(const DecalSettings& o) const {
-    return texture==o.texture&&color.x==o.color.x&&color.y==o.color.y&&color.z==o.color.z&&opacity==o.opacity&&normalOffset==o.normalOffset
+    return texture==o.texture&&lifetime==o.lifetime&&fadeOut==o.fadeOut&&color.x==o.color.x&&color.y==o.color.y&&color.z==o.color.z&&opacity==o.opacity&&normalOffset==o.normalOffset
         &&normalThreshold==o.normalThreshold&&blend==o.blend&&receiverMask==o.receiverMask&&maxSourceTriangles==o.maxSourceTriangles&&maxTriangles==o.maxTriangles;
 }
 DecalComponent::DecalComponent(std::string name,DecalSettings settings):Component(std::move(name)){setSettings(std::move(settings));}
-void DecalComponent::setSettings(DecalSettings settings){settings.validate();settings_=std::move(settings);cached_=false;}
+void DecalComponent::setSettings(DecalSettings settings){settings.validate();if(settings.lifetime>0&&age_>settings.lifetime)throw std::invalid_argument("Decal lifetime precedes its current age");settings_=std::move(settings);setTickEnabled(settings_.lifetime>0);cached_=false;}
+float DecalComponent::effectiveOpacity() const{return settings_.opacity*(settings_.lifetime>0&&settings_.fadeOut>0?float(std::clamp((settings_.lifetime-age_)/settings_.fadeOut,0.0,1.0)):1.f);}
+void DecalComponent::tick(double seconds){
+    if(settings_.lifetime<=0)return;
+    if(effectSpawned_)try{setWorldTransform(spawnPose_);}catch(const std::invalid_argument&){if(scene())destroy();return;}
+    for(auto* p=parent();p;p=p->parent())if(auto* effect=dynamic_cast<EffectComponent*>(p);effect&&effect->paused())return;
+    age_=std::min(double(settings_.lifetime),age_+seconds);if(age_>=settings_.lifetime&&scene())destroy();
+}
 void DecalComponent::appendDraw(SceneFrame& frame,const Mat4& world) const {
     Mat4 inverse;
     try{inverse=inverseAffine(world);}catch(const std::invalid_argument&){return;}
@@ -63,7 +72,7 @@ void DecalComponent::appendDraw(SceneFrame& frame,const Mat4& world) const {
     if(!projected_)return;
     Material material;material.shader=MaterialShader::Unlit;material.baseColorTexture=settings_.texture;material.doubleSided=true;
     material.alphaMode=settings_.blend==BlendMode::Alpha?AlphaMode::Blend:AlphaMode::Additive;
-    MeshDraw draw{projected_,world,settings_.color,RenderLayer::World,settings_.texture,0,std::uint32_t(projected_->indices.size()),transpose(inverse),{},settings_.blend,settings_.opacity,material,false,false,false,true,{},false,projected_,projected_->localBounds(),id(),0,{}};
+    MeshDraw draw{projected_,world,settings_.color,RenderLayer::World,settings_.texture,0,std::uint32_t(projected_->indices.size()),transpose(inverse),{},settings_.blend,effectiveOpacity(),material,false,false,false,true,{},false,projected_,projected_->localBounds(),id(),0,{}};
     draw.receivesDecals=false;draw.visibilityMask=visibilityMask;
     const auto layer=std::size_t(RenderLayer::World),mc=frame.meshes.capacity(),lc=frame.layerDraws[layer].capacity();
     frame.layerDraws[layer].push_back(std::uint32_t(frame.meshes.size()));frame.meshes.push_back(std::move(draw));++frame.meshCount;++frame.decalCount;

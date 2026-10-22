@@ -15,6 +15,9 @@ std::uint32_t get(std::span<const std::byte> b,std::size_t p) {
 }
 }
 std::vector<std::byte> decodeAssetBytes(std::span<const std::byte> b,AssetDecodeKind kind,const ArchiveLimits& limits) {
+    if(kind==AssetDecodeKind::Fingerprint){const auto stamp=fingerprintAsset(b);std::vector<std::byte> result;
+        put(result,0x31504857);for(auto value:{stamp.hash,stamp.bytes}){put(result,std::uint32_t(value));put(result,std::uint32_t(value>>32));}
+        if(result.size()>limits.maxBytes)throw std::invalid_argument("Fingerprint transport exceeds limit");return result;}
     AssetLibrary assets;
     switch(kind) {
     case AssetDecodeKind::Fbx: assets.meshes.push_back(FbxImporter::loadMemory(b));break;
@@ -35,13 +38,15 @@ std::vector<std::byte> decodeAssetBytes(std::span<const std::byte> b,AssetDecode
     if(result.size()>limits.maxBytes) throw std::invalid_argument("Decoded transport exceeds limit");
     return result;
 }
-void completeDecodedAsset(std::span<const std::byte> b,AssetDecodeKind kind,const AssetLoadContext& context,const ArchiveLimits& limits) {
+DecodedAsset hydrateDecodedAsset(std::span<const std::byte> b,AssetDecodeKind kind,const ArchiveLimits& limits) {
+    if(kind==AssetDecodeKind::Fingerprint){if(b.size()!=20||b.size()>limits.maxBytes||get(b,0)!=0x31504857)throw std::invalid_argument("Invalid fingerprint transport");
+        return std::make_shared<const AssetFingerprint>(AssetFingerprint{std::uint64_t(get(b,4))|(std::uint64_t(get(b,8))<<32),std::uint64_t(get(b,12))|(std::uint64_t(get(b,16))<<32)});}
     if(b.size()>limits.maxBytes||get(b,0)!=0x31434457) throw std::invalid_argument("Invalid decode transport");
     const auto size=get(b,4),count=get(b,8);if(size>b.size()-12||count>9) throw std::invalid_argument("Invalid decode transport size");
     auto assets=SceneArchive::loadAssets(b.subspan(12,size),limits);std::size_t p=12+size;
     if(kind==AssetDecodeKind::Fbx||kind==AssetDecodeKind::Glb) {
         if(count||p!=b.size()||assets.meshes.size()!=1) throw std::invalid_argument("Invalid mesh decode result");
-        context.complete<Mesh>(assets.meshes.front());return;
+        return assets.meshes.front();
     }
     if((kind!=AssetDecodeKind::Image&&kind!=AssetDecodeKind::TextureBundle)||assets.textures.size()!=1)
         throw std::invalid_argument("Invalid texture decode result");
@@ -60,6 +65,10 @@ void completeDecodedAsset(std::span<const std::byte> b,AssetDecodeKind kind,cons
         texture->compressed.push_back(std::move(variant));p+=length;
     }
     if(p!=b.size()) throw std::invalid_argument("Trailing decode data");
-    context.complete<Texture>(std::move(texture));
+    return std::shared_ptr<const Texture>(std::move(texture));
+}
+void completeDecodedAsset(std::span<const std::byte> b,AssetDecodeKind kind,const AssetLoadContext& context,const ArchiveLimits& limits) {
+    auto resource=hydrateDecodedAsset(b,kind,limits);
+    std::visit([&](auto value){context.complete(std::move(value));},std::move(resource));
 }
 }

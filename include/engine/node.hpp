@@ -11,6 +11,7 @@
 
 namespace engine {
 class Scene;
+class RegionStream;
 class Actor;
 struct TerrainEdit;
 class Actor;
@@ -47,6 +48,7 @@ public:
     bool isActiveInHierarchy() const;
     bool isPendingRemoval() const;
     bool isProtectedChild() const { return protectedChild_; } // Read-only authoring metadata.
+    bool archiveTransient() const {for(auto* n=this;n;n=n->parent_)if(n->archiveTransient_)return true;return false;}
     // Persistent identity, independent of names and scene-scoped runtime handles.
     const std::string& savedId() const { return savedId_; }
     void setSavedId(std::string identity); // Idle hierarchy; rejects duplicates in this root.
@@ -68,11 +70,15 @@ protected:
     // Required implementation children cannot be removed or reparented independently.
     void protectChild(Node& descendant);
 private:
+    friend class ReplayGhost;
     friend class ArchiveCodec;
     friend class Scene;
     friend class SelectionSystem;
     friend class Prefab;
+    friend class AnimationLibrary;
     friend class RouteComponent;
+    friend class RegionStream;
+    friend class RegionManifestComponent;
     friend class TerrainStream;
     friend class TerrainPagedStream;
     friend void applyTerrainEdit(Actor&,const TerrainEdit&);
@@ -96,6 +102,7 @@ private:
     Node* parent_=nullptr;
     Scene* scene_=nullptr;
     bool pendingRemoval_=false,protectedChild_=false,detaching_=false;
+    bool archiveTransient_=false; // Runtime region residency; omitted as a subtree from built-in archives.
     mutable std::size_t traversalDepth_=0;
     std::vector<std::unique_ptr<Node>> children_;
 };

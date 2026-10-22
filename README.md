@@ -1,5 +1,63 @@
 # WebEngine
 
+## Native Windows desktop host
+
+Build an offline-installable ZIP with `./scripts/package-windows.ps1` after the
+Windows build. It includes a dependency-checking launcher, app-local runtimes,
+per-user installer and support logs. See [distribution](docs/windows-distribution.md)
+and [recorded validation](docs/windows-distribution-validation.md); clean-machine
+and publisher-signing acceptance remain separate gates.
+
+The optional [broader Windows acceptance runner](docs/windows-acceptance.md)
+checks animation, terrain, water, particles, shadows, HDR post and GPU recovery
+on Dawn, with framebuffer comparisons and explicit hardware coverage gaps.
+
+An optional SDL3 + Dawn/D3D12 executable shares the portable C++ engine, WebGPU
+renderer and shaders with the browser. Run `./scripts/setup-windows.ps1`, then
+`./scripts/build-windows.ps1`, and launch `./build/windows/Release/webengine_windows.exe`.
+Requires Windows x64, Visual Studio C++ tools, CMake and Python 3.12+.
+WASD/arrows drive; Space brakes; Shift handbrakes; R resets; P/Escape opens the
+interactive pause/settings menu. Click controls or use Tab/Enter/arrows. The shared
+GUI supports native Unicode text entry/selection and Ctrl+A/C/X/V clipboard
+shortcuts. Edit the local driver name in Settings; use controller D-pad/A/B/Start
+for menu navigation. See [desktop GUI acceptance](docs/windows-desktop-gui-validation.md).
+Applications link `WebEngine::Desktop` and include `engine/desktop.hpp`; see the
+[public desktop API](docs/windows-desktop.md).
+Optional [Windows platform services](docs/windows-platform-services.md) add SDL
+audio playback, asset-directory loaders, user saves/settings and native open/save
+dialogs. The vehicle menu previews WAV sounds, opens content and saves/restores
+checkpoints and settings across launches, using the shared audio/archive contracts.
+See [build, controls and scope](docs/windows-native.md) and
+[validation](docs/windows-native-validation.md). Browser builds remain unchanged;
+`WEBENGINE_BUILD_WINDOWS` is OFF by default.
+
+## Native Windows editor and environmental audio
+
+Run `./scripts/build-windows.ps1`, then
+`./build/windows/Release/webengine_editor.exe [scene.wescene]` for the native scene
+workbench: Outline/Details, atomic transforms, component properties, quick creation,
+GLB import, undo/redo, native files and isolated Play. Browser/native scene files
+interoperate. Specialized graphical panels remain browser-only; see
+[scope and API](docs/windows-editor.md).
+
+Windows AudioSystem now supports local encoded music streaming, wall low-pass
+filtering and prepared room reverb. The vehicle settings expose streaming, seek
+and room controls. Native WAV/MP3 acceptance and browser WebGPU/WebGL2 checks are
+separate; see [audio contracts](docs/windows-audio-environment.md) and
+[parity validation](docs/windows-parity-validation.md).
+
+## Formula 1 driving demo
+
+Open **`?scene=formula`** for a closed circuit through rolling terrain, using the
+supplied Formula car model. Drive with **WASD / arrow keys**, **Space** to brake,
+**Shift** for handbrake, and **R** to reset. Complete the circuit to start the next
+timed lap. Click the track and move the mouse left/right to steer, or use the
+Mouse steering toggle to switch it off. The cursor centre straightens the wheels.
+Includes a chase camera, minimap, best lap, touch controls and gamepad
+mapping. The default easy preset adds smoother speed-sensitive steering, more
+grip and gentler acceleration. Build/serve below; see [Formula demo](docs/formula-demo.md)
+for the handling parameters and details.
+
 Optional chunked heightfield terrain supports float samples or image heightmaps,
 four-layer materials with normal maps, height blending and optional triplanar projection,
 seamless chunk LOD with independent shadow detail,
@@ -17,12 +75,21 @@ See [Persistence and browser storage](docs/persistence.md).
 Asset identifiers, asynchronous loading, caching, progress, cancellation, unloading
 and preparation before scene activation are available through `AssetManager`,
 `AssetPreparation` and `Application::prepareScene`. See [asset resource contracts](docs/assets.md).
+Windows also supplies an explicitly owned background file/decode executor with
+bounded workers/queue, progress, timeout and cancellation using the same asset
+requests and preparation API. The vehicle menu imports models asynchronously and
+can cancel an import while retaining its previous preview. See
+[Windows background assets](docs/windows-background-assets.md).
+
 Optional isolated decode workers, GPU upload admission and KTX2/fallback packaging
 are documented in [Mobile asset pipeline](docs/mobile-assets.md).
 
 Reusable object definitions are available through `Prefab`: instantiate configured
 actor/component hierarchies with shared assets, per-instance overrides and
 application-registered component factories. See [prefab usage and contracts](docs/prefabs.md).
+The [prefab asset editor](docs/prefab-editor.md) saves `.weprefab` definitions,
+creates variants and updates linked instances while preserving local overrides.
+Try `?scene=prefabs&editor=1`.
 
 Selection and interaction is available through `InteractionComponent` and
 `Scene::selection()`: bounds or precise triangle picking, optional visible-mesh
@@ -76,7 +143,7 @@ Prerequisites: Git, Python 3, CMake 3.22+, and Ninja on PATH. Use PowerShell fro
 ./scripts/serve.ps1                  # http://localhost:8080; Ctrl+C to stop
 ```
 
-Open [the demo](http://localhost:8080) in a browser supporting WebGPU or WebGL 2. WebGPU requires HTTPS or localhost; automatic mode can use WebGL 2 without WebGPU. The status and capability panel identify the selected backend. Use `?renderer=webgl2` to force fallback or `?renderer=webgpu` to require WebGPU. The fallback supports textured scenes, animation, particles, ordered camera views and the canvas GUI with basic lighting; shadows, full PBR, instancing and GPU timing remain WebGPU features. See [rendering fallback contracts and validation](docs/rendering-fallback.md).
+Open [the demo](http://localhost:8080) in a browser supporting WebGPU or WebGL 2. WebGPU requires HTTPS or localhost; automatic mode can use WebGL 2 without WebGPU. The status and capability panel identify the selected backend. Use `?renderer=webgl2` to force fallback or `?renderer=webgpu` to require WebGPU. The fallback supports textured scenes, animation, particles, ordered camera views and the canvas GUI with basic lighting; full PBR, instancing and GPU timing remain WebGPU features; directional/spot shadows are supported on both backends. See [rendering fallback contracts and validation](docs/rendering-fallback.md).
 
 The setup script does not install global SDK environment settings. `.tools`, `build`, and `dist` are ignored by Git. First setup downloads the compiler toolchain; the first browser build also downloads the SDK-pinned Dawn port.
 
@@ -147,6 +214,12 @@ GPU connection status are reported in the panel and performance JSON. Device
 loss automatically rebuilds GPU resources while retaining scene and pause state;
 exhausted recovery exposes an explicit retry. Visibility, frozen pages and
 pagehide/pageshow share the existing suspension/clock contract.
+
+Optional **Adaptive graphics quality** gradually adjusts resolution, shadows and
+available mesh detail toward a chosen **4–100 ms frame-time target**. The selected
+settings remain its ceiling; slower recovery and settling periods limit rapid
+oscillation. Try `?scene=terrain&adaptive=1&targetMs=16.67` on either backend.
+See [adaptive quality contracts and validation](docs/adaptive-quality.md).
 
 Optional LOD reuses prepared shared meshes. Authored semantic BC7/ETC2/ASTC mip
 variants can use supported devices with retained RGBA fallback; ordinary asset
@@ -248,7 +321,7 @@ environment below; optional `DEMO_URL` and `EVIDENCE_DIR` select the server and
 evidence directory. Chromium mobile emulation does not establish physical Android,
 iOS Safari, native keyboard or OS IME acceptance; those remain device checks.
 
-## Directional shadow maps
+## Directional and spot shadow maps
 
 The demo sun casts shadows by default. **Sun shadows** toggles the depth passes;
 `?shadows=off` starts with them disabled. Lighting and shadows use the same
@@ -268,9 +341,9 @@ mesh.receivesShadow = true;
 renderer.setShadowsEnabled(true);
 ```
 
-Each view renders up to four opted-in directional lights among its first eight
-active lights into a shared 1024×1024 `Depth32Float` texture array (16 MiB nominal
-depth payload). Each light has an orthographic volume centered at `shadow.center`;
+Each view budgets up to four maps among its first eight active lights. WebGPU
+uses a `Depth32Float` array and WebGL2 a depth24 array, 1024x1024 by default.
+Directional lights default to an orthographic volume centered at `shadow.center`;
 configure its extent and depth to cover the relevant scene. XY translation snaps
 to shadow texels. The shader uses a 3×3 percentage-closer filter with a linear
 comparison sampler, raster depth bias, and configurable receiver bias. Receivers
@@ -283,12 +356,13 @@ opacity and alpha cutoff in both passes. Alpha/additive meshes can receive shado
 but do not cast; particles and Background/Overlay geometry do not participate.
 Camera-frustum culling retains off-screen casters for the shadow pass. Casters use
 separate instance batches without reducing color-pass batching or repacking slots.
-Point-light shadows and cascaded directional maps are not implemented. Enabling
+Camera-fitted cascades and shadowed spotlights are optional on both backends; see
+[lighting and HDR post-processing](docs/lighting-post-processing.md). Enabling
 shadows on a point light or supplying invalid settings raises an error; lights
-beyond the four-map budget stay lit and emit a one-time diagnostic.
+beyond the four-map budget stay lit.
 
 Performance exports include `shadowPasses`, `shadowDrawCalls`, `shadowInstances`,
-the shadow depth allocation, and `gpu.shadowMs`. `gpu.totalMs` includes shadows
+the shadow depth allocation, and WebGPU-only `gpu.shadowMs`. `gpu.totalMs` includes shadows
 plus all color layers; `gpu.layersMs` retains the three color-layer durations.
 Unchanged shadow camera matrices and instance data are not uploaded again.
 
@@ -344,7 +418,7 @@ mesh.texture.reset(); // Use the mesh's imported material textures again.
 
 The shared decoder supports PNG, JPEG, TGA, and BMP in native builds and WebAssembly using pinned [stb_image v2.30](https://github.com/nothings/stb/tree/013ac3beddff3dbffafd5177e7972067cd2b5083). Source pixels use a top-left UV origin and RGBA8 storage. Material slots choose the GPU interpretation: base color and emission are sRGB, while metallic–roughness, occlusion and tangent-space normal maps are linear. Color mips average in linear light, normal mips renormalize vectors, and odd dimensions retain edge texels. Cube, plane, sphere and FBX geometry provide UVs and tangents. Explicit alpha modes control mesh transparency; particle effects retain their dedicated shaders.
 
-`CameraComponent` supports perspective and orthographic projection and derives its view from its world transform. `OrbitController` operates in its camera parent's coordinate system and can be used with another camera. A `LightComponent` supports directional or point lighting with color, intensity, and point range. Position and direction inherit the hierarchy. The starter shader supports the first eight enabled, visible lights and warns if more are supplied.
+`CameraComponent` supports perspective and orthographic projection and derives its view from its world transform. `OrbitController` operates in its camera parent's coordinate system and can be used with another camera. A `LightComponent` supports directional, point or spot lighting with color, intensity, range and authored cone half angles. Position and direction inherit the hierarchy. The starter shader supports the first eight enabled, visible lights and warns if more are supplied.
 
 Camera lens setters validate the complete update before changing state:
 
@@ -902,7 +976,7 @@ Alpha particles and transparent meshes sort together by camera-space center,
 back to front; texture batching never changes that order. Additive particles draw
 after alpha. Large intersecting transparent meshes can still need triangle sorting
 or order-independent transparency; sorting uses mesh origins. FX use premultiplied
-blending and the current renderer's display conversion. HDR compositing, bloom,
+blending and the current renderer's display conversion. Optional HDR compositing and bloom are described in [lighting](docs/lighting-post-processing.md);
 collision and fluid simulation are not included. Optional soft-particle depth fading,
 shaped emission, drag/wind/gusts, vector motion curves and velocity-stretched
 billboards are described in [particle FX contracts](docs/fx.md).
@@ -997,10 +1071,35 @@ Shader edits trigger CMake regeneration and rebuild the embedded shader. `build/
 
 ## Skeletal meshes and animation
 
+Select a skeletal mesh in **Details → Animation library & state machine** to
+organize named clips by folder/tags, import same-rig animations, author a visual
+parameter/condition graph, and preview it on an isolated Play scene. Apply is
+undoable; save `.weanim` for library organization/layout and save the scene for
+the assigned controller/playback. See [animation authoring](docs/animation-authoring.md).
+
+[Animation retargeting](docs/animation-retargeting.md) reuses clips across compatible
+characters with different proportions and bind orientations. **Retarget clips**
+loads FBX/GLB or `.weanim`, offers named joint mappings and translation scaling,
+and bakes destination clips with undo, preview and reusable `.weretarget` profiles.
+Try `?scene=retarget&editor=1` for the short blue and tall gold characters.
+
 Optional [animation controllers and clip events](docs/animation-control.md) add
 typed parameters, ordered state transitions, parameter-driven blends and queued
 markers to the existing player. `consumeOutput()` drains owned events and root
 motion together; gameplay owns marker responses and collision-aware movement.
+
+[Inverse kinematics](docs/inverse-kinematics.md) adds weighted two-bone limb placement,
+pole targets, optional tip alignment, bounded look-at and a physics ground-probe
+helper. Constraints run after animation layers; each character owns its targets.
+Try `?scene=ik&editor=1`, select **IK character**, and open the animation editor's
+**Inverse kinematics** panel. Preview supports live target editing and diagnostics.
+
+[Animation layers and blend trees](docs/animation-layers.md) add 1D speed and 2D
+Cartesian direction samples, optional phase synchronization, and ordered masked
+override/additive poses. Author them in the animation editor, drive weights with
+Number parameters and use `restartLayer(name)` for one-shot overlays. Base
+locomotion alone owns markers/root motion; scene and library saves retain the
+composition.
 
 `SkeletalMeshComponent` extends the texture/material/layer behavior of
 `MeshComponent` and owns child `SkeletonComponent` and `AnimationComponent`
@@ -1159,6 +1258,23 @@ warm animated updates/collections allocate zero ordinary heap blocks.
 `node scripts/skeletal-animation-smoke.cjs` verifies real WebGPU deformation,
 exact blend endpoints, bind-pose stop, playback/fade controls and buffer release.
 
+## Replay and ghost recording
+
+Open **`?scene=replay`** to record a driving session, review poses/telemetry/events
+on a scrubbable timeline and race its non-colliding ghost. The Formula demo and
+native Windows vehicle app use the same portable capture/playback policy, with
+`.weghost` files shared across compatible scenes. Review pauses live physics;
+recorded commands are diagnostics and are not rerun through the solver.
+See [workflow, APIs and limits](docs/replay-recording.md).
+
+## Cinematic sequencer
+
+Open **`?scene=cinematic`** to author camera shots, object motion, skeletal
+animation, sound and FX together on a scrubbable timeline. Drag clips/keys, edit
+exact values, undo/redo and save `.wecin` assets. Isolated preview preserves the
+source scene; scrubbing and frame stepping are silent. The sequencer panel also
+works with scenes in the editor. See [usage, APIs and limits](docs/cinematic-sequencer.md).
+
 ## Audio system
 
 The reusable C++ `AudioSystem` provides shared immutable sounds, simultaneous
@@ -1169,7 +1285,9 @@ in the inspector for overlapping effects, looping music, bus controls, fade-out,
 positional playback and local MP3/WAV sound imports.
 
 See [audio contracts, usage and validation](docs/audio.md) for lifetime rules,
-PCM decoding, frame ordering, browser activation and persistence scope.
+PCM decoding, frame ordering, browser activation and persistence scope, and
+[environmental audio](docs/environmental-audio.md) for wall muffling, room reverb
+and streamed music. Open `?scene=audio` for comparisons and local music streaming.
 
 The vehicle course also provides **Driving audio and rate preview** in Details:
 RPM/load loops, contact-slip/gravel and impact examples, isolated preview and
@@ -1258,6 +1376,11 @@ and point-light visibility changes. These are submission reductions, not FPS cla
 
 ## Performance measurements
 
+The [detailed CPU timeline](docs/profiling-timeline.md) records nested physics,
+animation, AI, loading and rendering work, with inclusive/self timings, slow-frame
+selection, filtering and trace export. Open **Performance → Detailed CPU timeline**,
+or use `?scene=physics&timeline=1`. Capture is optional and off by default.
+
 The renderer retains a `RenderFrame` with reusable scene draw/light vectors,
 per-layer index/batch lists, and instance staging bytes. `Scene::collect(frame)`
 clears previous references and refills caller-owned storage while preserving
@@ -1334,7 +1457,7 @@ asset memory, not one copy per ship. Derived LOD caches are not serialized by th
 current archive format. [Implementation, profiling and validation](docs/mesh-detail-validation.md)
 include the reusable API contracts and test procedure.
 
-The inspector's **Performance** panel reports rolling mean, nearest-rank p95, and (in JSON) maximum durations across the latest 120 submitted frames. It shows frame interval separately from CPU engine work. Expand **Timing and memory details** for animation update, scene collection, preparation/uploads, command encoding, and CPU queue-submission time. The CPU total includes renderer bookkeeping and resizing, but excludes the inspector's aggregation/display work and GPU execution. Frame intervals include browser scheduling and synchronous import stalls; the first callback and callbacks after a visibility change have no interval sample.
+The inspector's **Performance** panel reports rolling mean, nearest-rank p95, and (in JSON) maximum durations across the latest 120 submitted frames. It shows frame interval separately from CPU engine work. Expand **Timing and memory details** for simulation/host update, scene collection, preparation/uploads, command encoding, and CPU queue-submission time. The CPU total includes renderer bookkeeping and resizing, but excludes the inspector's aggregation/display work and GPU execution. Frame intervals include browser scheduling and synchronous import stalls; the first callback and callbacks after a visibility change have no interval sample.
 
 Draw calls, submitted instances/triangles, passes, actual queue-write calls/bytes, resource cache counts, and memory estimates are collected from the render path. Shared resources are counted once. Instance uploads occur only when their shader data changes or the GPU instance buffer is recreated; camera/light uniforms upload when changed. CPU asset payload counts vertex/index buffers and retained decoded image pixels. GPU payload estimates include mesh/instance buffers, all mip levels, uniforms, timing readback buffers, and nominal four-byte depth pixels. They exclude surface images, object/allocator overhead, query-object storage, temporary import allocations, and driver overhead. Wasm capacity is the allocated linear-memory buffer, not live heap usage.
 
@@ -1362,6 +1485,25 @@ The portable API is in `include/engine/gui.hpp`; browser integration is in
 for examples, packaging, performance accounting and the first-version text scope.
 `tests/gui_tests.cpp` runs with the native core suite;
 `scripts/gui-smoke.cjs` checks actual canvas pixels and browser interaction.
+
+Open `?gui=1&guiSettings=1` for a settings preview with `Checkbox`, a stepped
+horizontal `Slider`, and an application-defined painted/interactive widget.
+Portable widget hooks share system-owned clipping, scaling, focus and capture;
+native browser checkbox/range semantics share the C++ values. See
+[custom GUI widgets](docs/gui-widgets.md) and `scripts/gui-widgets-smoke.cjs`
+for usage and WebGPU/WebGL 2 acceptance.
+
+Open `?gui=1&guiTheme=1` for dark/light theme switching, component defaults, local
+overrides and hovered/focused/pressed/checked/disabled appearances. Shared
+`GuiTheme` values and partial widget state styles also reach custom painters.
+See [GUI themes](docs/gui-themes.md) and `scripts/gui-theme-smoke.cjs` for
+portable APIs and both-renderer/DPR acceptance.
+
+Open `?gui=1&guiLayout=1` for minimum/maximum size constraints, content-sized
+text/nested panels, group/cell alignment and a two/three-column grid. Layout is
+staged before bounds publication and shares clipping, scrolling and input across
+both renderers. See [measured GUI layout](docs/gui-layout.md) and
+`scripts/gui-layout-smoke.cjs` for usage and acceptance.
 
 ## Hansa ship stress test
 
@@ -1397,10 +1539,15 @@ and full planned paths. See [navmesh contracts](docs/navmesh.md) and
 stops active routes when collision changes; explicit revision-checked rebaking
 replans original goals without resetting deadlines or retry limits. The demo
 includes passage and floor-bridge controls. See
-[navigation update validation](docs/navigation-updates-validation.md). Dynamic carving, crowd avoidance and
-built-in AI persistence remain future extensions.
+[navigation update validation](docs/navigation-updates-validation.md).
+Optional **Crowd & changing obstacles** adds coordinated passing and tracked-body
+footprint rebakes over those same navigators and motors. Open `?scene=crowd` for
+head-on passing, eight opposing characters and a movable gate. See
+[crowd/dynamic navigation contracts](docs/crowd-navigation.md) and
+[validation](docs/crowd-navigation-validation.md). Incremental/worker rebuilding
+and built-in AI runtime checkpoints remain extensions.
 
-Reusable flat `StateMachine` instances execute immutable state/transition graphs
+Reusable `StateMachine` instances execute immutable state/transition graphs
 with named game behavior/condition bindings, explicit enter/update/exit and bounded
 work. The AI demo uses this runtime. In **Scene editor → Details → AI state
 machines**, open the graphical editor to drag/connect states, edit guards/delays,
@@ -1410,6 +1557,14 @@ bindings. See [state machines and editor](docs/ai-state-machines.md). Actor-boun
 `AiControllerComponent` assignments add typed binding forms, scene save/load,
 codec-aware Play reconstruction and a live state/time/transition debugger. See
 [actor AI controllers](docs/ai-controllers.md).
+Graphs can declare typed per-agent blackboards; runtime updates preserve active
+state/timers, parameter sources bind live inputs, and the Play debugger watches
+values and transition guards. See [AI blackboards](docs/ai-blackboards.md).
+[Hierarchical states](docs/ai-hierarchy.md) add nested groups, parent interrupts,
+per-ancestor timers, collapsible graph editing and active-path debugging.
+[Typed gameplay events](docs/ai-events.md) add bounded queues, event-triggered
+guards, state-scoped cancellation and editor/Play injection with payload traces.
+[State task sequences](docs/ai-tasks.md) add reusable wait, event-wait, navigation and facing tasks, application task factories, cancellation/timeouts and graphical sequence editing with live Play diagnostics.
 
 ## Physics
 
@@ -1442,7 +1597,7 @@ cmake --build build/native
 ctest --test-dir build/native --output-on-failure
 ```
 
-Tests cover nested transforms, scene/actor/component ownership, disabled subtrees, shared meshes, triangle winding, inverse-transpose normals, parented lights, and camera projection/orbit behavior. Importer tests add binary and ASCII fixtures, instancing, units/axis conversion, geometry offsets, mirrored scales, missing-normal generation, malformed indices, singular transforms, import limits, native path loading, and preservation of component state on failure. Texture tests cover image orientation, UV seams, shared embedded images, external resolution, material ranges/tints, resource overrides, image limits, corrupt-image recovery, and Knarr's seven textured materials. A native build provides the core and tests; the renderer targets the browser.
+Tests cover nested transforms, scene/actor/component ownership, disabled subtrees, shared meshes, triangle winding, inverse-transpose normals, parented lights, and camera projection/orbit behavior. Importer tests add binary and ASCII fixtures, instancing, units/axis conversion, geometry offsets, mirrored scales, missing-normal generation, malformed indices, singular transforms, import limits, native path loading, and preservation of component state on failure. Texture tests cover image orientation, UV seams, shared embedded images, external resolution, material ranges/tints, resource overrides, image limits, corrupt-image recovery, and Knarr's seven textured materials. A default native build provides the core and tests. The opt-in Windows target also renders the vehicle proof through SDL3/Dawn; see [native Windows](docs/windows-native.md).
 
 `scripts/browser-smoke.cjs` is an optional acceptance check using Playwright and pngjs. Supply those packages through `NODE_PATH` or install them in a separate test environment. With the development server running and a WebGPU-capable Chrome/Edge installation:
 
@@ -1467,6 +1622,13 @@ soft depth fades and archive v19 continuation. In Scene editor -> Details ->
 Particle FX choose **Ribbon trail**, then **Open preview** for isolated source motion.
 See [API and limitations](docs/trails.md) and [validation](docs/trails-validation.md).
 
+Driving Stage 6 adds optional surface-following contact strips. Applications supply
+world positions/normals; the engine owns bounded distance sampling, gaps, fading
+and camera-independent geometry on WebGPU/WebGL2. Particle FX -> **Surface trail**
+provides immutable authoring and isolated sloped preview. Archive v28 retains
+definitions and bounded live continuation. See [contracts](docs/surface-trails.md)
+and [validation](docs/surface-trails-validation.md).
+
 
 ### Ground-aligned particles
 
@@ -1475,7 +1637,7 @@ sloped contact flashes and wall-aligned effects. Existing flipbooks, curves, rot
 fog and soft fading work on both renderers. In Scene editor -> Details -> Particle FX,
 choose **Ground ring**, or set Appearance -> Alignment to Plane / supplied normal.
 [API and limitations](docs/plane-particles.md) · [Validation](docs/plane-particles-validation.md).
-Current scene/effect/application archives use v21; host and worker codecs must match.
+Ribbon state began in v21; current scene/effect/application archives use v34; host and worker codecs must match.
 
 
 ### Mesh particles
@@ -1486,7 +1648,7 @@ mesh renderer supplies materials, lighting, fog, opaque instancing and transpare
 ordering. Scene editor -> Details -> Particle FX -> **Mesh debris** previews the
 feature; import GLB/FBX geometry through Assets and select it under Mesh particles.
 [API and limits](docs/mesh-particles.md) · [Validation](docs/mesh-particles-validation.md).
-Current archives use v23, including matching host/worker codecs.
+Animated-particle state began in v23; current archives use v34, including matching host/worker codecs.
 
 ### Particle collision and projected decals
 
@@ -1530,3 +1692,23 @@ snapping, surface selection, duplication, collision preview and explicit terrain
 point sampling. Scene v27 preserves source resources/sharing and rebuilds geometry
 under budgets. Open `?editor=1&scene=route` for the banked driving example.
 See [contracts and validation](docs/splines-routes.md).
+
+### Event-driven FX composition
+
+Particle FX now includes **Impact chain** and **Event composition**: Birth/Impact/Death child effects, optional fading projected decals, shared spawn/active/depth limits and isolated previews. Existing effect history, .wefx and scene persistence retain the complete graph through archive v29. See [API and ownership](docs/fx-composition.md) and [validation](docs/fx-composition-validation.md).
+
+
+Driving Stage 7 adds spotlights with optional shadows on WebGPU/WebGL2, sharing eight light
+slots per view. Light type/direction/range/half angles, selected cone outlines,
+history/Play and v30 persistence are integrated in the editor. Open
+`?editor=1&scene=spotlight` for the headlight example, or `?scene=lighting` to compare
+shadowed headlights, a torch and cascaded sunlight with HDR bloom/color grading. See
+[spotlight contracts](docs/spotlights.md) and [validation](docs/spotlights-validation.md).
+
+Driving Stage 8 adds optional general static region streaming: immutable manifests,
+separate visual/collision readiness, staged publication, bounded admissions and body
+pins, editor history/bounds/source files and isolated vehicle traversal preview.
+Archive v31 saves authored references and selected restoration requirements, omitting
+resident caches. Open `?editor=1&scene=regions`; applications own loaders, predictive
+movement gating and restore handoff. See [contracts](docs/region-streaming.md) and
+[validation](docs/region-streaming-validation.md).

@@ -13,17 +13,23 @@
   <link rel="stylesheet" href="audio-system.css">
   <link rel="stylesheet" href="editor-route.css">
   <script src="performance.js" defer></script>
+  <script src="performance-timeline.js" defer></script>
   <script src="animation.js" defer></script>
   <script src="morphs.js" defer></script>
   <script src="audio.js" defer></script>
   <script src="audio-panel.js" defer></script>
   <script src="audio-system.js" defer></script>
   <script src="audio-system-panel.js" defer></script>
+  <script src="cinematic.js" defer></script>
+    <script src="replay.js" defer></script>
+    <link rel="stylesheet" href="replay.css">
+  <link rel="stylesheet" href="cinematic.css">
   <script src="driving-audio.js" defer></script>
   <script src="gui.js" defer></script>
   <script src="input.js" defer></script>
   <script src="gamepad.js" defer></script>
   <script src="quality.js" defer></script>
+  <script src="crowd.js" defer></script>
   <script src="app.js" defer></script>
   <script src="ship-stress.js" defer></script>
   <script src="fx.js" defer></script>
@@ -42,16 +48,25 @@
   <script src="editor-structure.js" defer></script>
   <script src="editor-terrain.js" defer></script>
   <script src="editor-fx.js" defer></script>
+    <script src="editor-fx-composition.js" defer></script>
   <script src="editor-ai.js" defer></script>
   <script src="editor-ai-controller.js" defer></script>
+  <script src="editor-ai-blackboard.js" defer></script>
+  <script src="editor-ai-events.js" defer></script>
+  <script src="editor-ai-tasks.js" defer></script>
+  <script src="editor-animation.js" defer></script>
+  <script src="editor-prefab.js" defer></script>
   <script src="editor-layout.js" defer></script>
   <script src="editor-camera.js" defer></script>
   <script src="vehicle.js" defer></script>
+  <script src="formula.js" defer></script>
   <script src="editor-physics.js" defer></script>
   <script src="editor-route.js" defer></script>
+  <script src="editor-spotlight.js" defer></script>
+  <script src="editor-region.js" defer></script>
 </head>
 <body>
-  <header><a class="brand" href="./"><span class="brand-icon">W</span> WebEngine <span class="tag">PLAYGROUND / 001</span></a><a href="?gui=1">In-engine GUI demo</a><span class="stack">C++20 <span>→</span> WebAssembly <span>→</span> WebGPU</span></header>
+  <header><a class="brand" href="./"><span class="brand-icon">W</span> WebEngine <span class="tag">PLAYGROUND / 001</span></a><a href="?gui=1">In-engine GUI demo</a><a href="?gui=1&amp;guiSettings=1">GUI settings demo</a><a href="?gui=1&amp;guiTheme=1">GUI themes demo</a><a href="?gui=1&amp;guiLayout=1">GUI layout demo</a><span class="stack">C++20 <span>→</span> WebAssembly <span>→</span> WebGPU</span></header>
   <main>
     <section class="viewport-panel" aria-label="Interactive 3D scene">
       <div class="scene-title"><span class="eyebrow">LIVE SCENE</span><h1>A small world.<br>A solid foundation.</h1><p id="scene-description">Loading Knarr…</p></div>
@@ -226,6 +241,19 @@
         <label for="sound-effects">Effects bus volume</label><input id="sound-effects" type="range" min="0" max="1" step="0.01" value="1">
         <label for="sound-music">Music bus volume</label><input id="sound-music" type="range" min="0" max="1" step="0.01" value="1">
         <label for="sound-x">Emitter X position</label><input id="sound-x" type="range" min="-10" max="10" step="0.1" value="2">
+        <details id="sound-environment">
+          <summary>Environmental audio and streamed music</summary>
+          <p>Listen to a bright repeating sound, then put a wall between the emitter and listener or change the room.</p>
+          <button id="sound-environment-play" type="button">Play environment sound</button>
+          <button id="sound-environment-stop" type="button">Stop environment sound</button>
+          <label><input id="sound-occlusion" type="checkbox" checked> Muffle behind walls</label>
+          <label><input id="sound-wall" type="checkbox"> Obstruction wall</label>
+          <label for="sound-room">Room reverb</label><select id="sound-room"><option value="0">Dry / outdoors</option><option value="1">Small room</option><option value="2">Hall</option></select>
+          <div class="buttons"><button id="sound-stream-sample" type="button">Stream sample</button><button id="sound-stream-import" type="button">Stream music file</button><button id="sound-stream-stop" type="button">Stop track</button></div>
+          <input id="sound-stream-file" type="file" accept="audio/*,.mp3,.wav,.ogg,.m4a" hidden>
+          <label for="sound-stream-seek">Track position (seconds)</label><input id="sound-stream-seek" type="number" min="0" step="1" value="0"><button id="sound-stream-jump" type="button">Seek track</button>
+          <p id="sound-environment-status" role="status">No obstruction · dry room · no streamed track</p>
+        </details>
         <p id="sound-status" role="status" aria-live="polite">Enable audio with a click or key press.</p>
       </section>
       <section class="inspector-section audio-panel" aria-labelledby="audio-heading">
@@ -259,7 +287,7 @@
           <dt>GPU payload estimate</dt><dd data-perf="gpuMemory">—</dd>
         </dl>
         <details class="perf-breakdown"><summary>Timing and memory details</summary><dl class="perf-values">
-          <dt>Animation update</dt><dd data-perf="update">—</dd>
+          <dt>Simulation / host update</dt><dd data-perf="update">—</dd>
           <dt>Scene collection</dt><dd data-perf="collect">—</dd>
           <dt>Prepare &amp; upload</dt><dd data-perf="prepare">—</dd>
           <dt>Command encoding</dt><dd data-perf="encode">—</dd>
@@ -398,5 +426,6 @@
     </section>
   </main>
   <footer><span>WEBENGINE <span class="version">v0.1</span></span><span>A browser engine, built from reusable parts.</span></footer>
+<script src="content-iteration.js"></script>
 </body>
 </html>

@@ -54,7 +54,7 @@ function changed(a,b,rect={x0:.03,x1:.97,y0:.03,y1:.97},threshold=8) {
   if(backend==='webgpu') assert.equal(costOn.frameUploadCalls,0,'Paused caustics should retain unchanged uniforms');
   await preset(28);const only=await shot('caustics-only');await preset(24);assert(changed(only,await shot('all-off'))>10000,'Caustics-only material was skipped');
   await preset(0);const saved=await shot('before-archive');
-  assert.equal(await page.evaluate(async()=>{const bytes=EngineSceneArchive.saveSceneBytes();if(bytes[8]!==23)throw Error('Expected archive v19');return await EngineSceneArchive.openScene(new File([bytes],'caustics.wescene'));}),true);
+  assert.equal(await page.evaluate(async()=>{const bytes=EngineSceneArchive.saveSceneBytes();if(bytes[8]!==29)throw Error('Expected archive v19');return await EngineSceneArchive.openScene(new File([bytes],'caustics.wescene'));}),true);
   assert(changed(saved,await shot('after-archive'),undefined,3)<40,'Caustics settings were lost in archive');await page.evaluate(()=>Module._engine_archive_return());
   await page.locator('#water-return').click();await shot('demo-return');await page.locator('#water-open').click();await frames();
   result.backends[backend]={receiverPixels,passes:costOn.passes,textureBytes:costOn.gpuTextureBytes,quality:await page.evaluate(()=>EngineQuality.snapshot())};

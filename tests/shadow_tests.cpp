@@ -1,4 +1,6 @@
 #include "engine/shadow.hpp"
+#include "engine/render_quality.hpp"
+#include "engine/camera_component.hpp"
 #include "engine/render_frame.hpp"
 #include "engine/mesh_component.hpp"
 #include "engine/performance.hpp"
@@ -31,6 +33,28 @@ int main() {
         auto bad=settings;bad.halfExtent=0;rejects([&] { bad.validate(); });
         bad=settings;bad.depthBias=-1;rejects([&] { bad.validate(); });
         bad=settings;bad.center.x=std::numeric_limits<float>::quiet_NaN();rejects([&] { bad.validate(); });
+        const auto spot=spotShadowMatrix({1,2,3},{0,0,-1},pi/6,20);
+        auto projectSpot=[&](Vec3 p){return transformPoint(spot,p)*(1/(spot.m[3]*p.x+spot.m[7]*p.y+spot.m[11]*p.z+spot.m[15]));};
+        check(near(projectSpot({1,2,3-20}).z,1),"Spot far plane");
+        check(near(projectSpot({1,2,3-.02f}).z,0),"Spot near plane");
+        check(std::abs(projectSpot({1+std::tan(pi/6)*10,2,-7}).x-1)<1e-5f,"Spot cone bounds");
+        rejects([&]{spotShadowMatrix({}, {},pi/6,20);});
+        Scene planning;auto& cam=planning.addChild<CameraComponent>();cam.setPerspective(pi/3,.1f,100);
+        auto& sunLight=planning.addChild<LightComponent>("Sun",LightType::Directional);sunLight.shadow.enabled=true;
+        auto& spotLight=planning.addChild<LightComponent>("Spot",LightType::Spot);spotLight.shadow.enabled=true;
+        const auto collected=planning.collect();RenderQuality quality;quality.directionalCascades=3;quality.shadowDistance=60;
+        auto plan=planShadows(collected.lights,cam,1.5f,quality,1024);
+        check(plan.count==4&&plan.maps[0].cascade&&plan.maps[2].cascade&&!plan.maps[3].cascade&&plan.maps[3].light==1,"Cascades and spots share budget");
+        check(near(plan.maps[2].farDistance,60),"Cascades stop at requested distance");
+        for(unsigned j=0;j<3;++j) {
+            const auto& map=plan.maps[j];check(map.farDistance>map.nearDistance,"Strictly ordered splits");
+            for(float d:{map.nearDistance,map.farDistance})for(float y:{-1.f,1.f})for(float x:{-1.f,1.f}) {
+                auto point=cam.forward()*d+cam.right()*(x*std::tan(pi/6)*d*1.5f)+cam.up()*(y*std::tan(pi/6)*d);
+                const auto p=transformPoint(map.matrix,point);check(std::abs(p.x)<=1.001&&std::abs(p.y)<=1.001&&p.z>=0&&p.z<=1,"Cascade contains frustum slice");
+            }
+        }
+        quality.maxShadowMaps=2;check(planShadows(collected.lights,cam,1.5f,quality,1024).count==2,"Bounded map budget");
+        quality.maxShadowMaps=0;check(planShadows(collected.lights,cam,1.5f,quality,1024).count==0,"Zero budget disables maps");
         Scene scene;auto& parent=scene.addChild<Actor>("Light parent");parent.transform.position={5,6,7};parent.transform.rotation.z=pi/2;
         auto& light=parent.addComponent<LightComponent>("Sun",LightType::Directional);light.shadow=settings;light.shadow.center={1,0,0};
         auto& caster=scene.addChild<MeshComponent>("Caster",Mesh::cube());

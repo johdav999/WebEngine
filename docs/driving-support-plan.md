@@ -1,7 +1,7 @@
 # Staged engine support for driving games
 
-Status: Stages 1–5 implemented and validated, 2026-10-18; see [vehicle contracts](vehicles.md)
-and [recorded validation](vehicles-validation.md). Stages 6–9 remain planned. Stage 5: [splines/routes](splines-routes.md) and [validation](splines-routes-validation.md). Stage 4 contracts/evidence: [driving audio](driving-audio.md) and [validation](driving-audio-validation.md). Stage 2 contracts/evidence are in
+Status: Stages 1–8 implemented and validated, 2026-10-19; see [vehicle contracts](vehicles.md)
+and [recorded validation](vehicles-validation.md). Stage 9 remains planned. Stage 8: [region streaming](region-streaming.md) and [validation](region-streaming-validation.md). Stage 7: [spotlights](spotlights.md) and [validation](spotlights-validation.md). Stage 6: [surface trails](surface-trails.md) and [validation](surface-trails-validation.md). Stage 5: [splines/routes](splines-routes.md) and [validation](splines-routes-validation.md). Stage 4 contracts/evidence: [driving audio](driving-audio.md) and [validation](driving-audio-validation.md). Stage 2 contracts/evidence are in
 [physical surfaces](physical-surfaces.md) and [validation](physical-surfaces-validation.md).
 Proposed API names in later stages are illustrative until their contract review. This plan follows `architecture.md`; it does not change its implemented
 feature inventory.
@@ -284,7 +284,7 @@ documented CPU/GPU budgets without affecting collision.
 Exit gate: headlights visibly illuminate a test scene on each backend within its
 reported lighting limits; no claim of spotlight shadow support.
 
-## Stage 8 — General region streaming
+## Stage 8 — General region streaming (implemented)
 
 **Outcome:** optional scene-content and collision residency beyond terrain pages.
 

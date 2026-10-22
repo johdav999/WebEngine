@@ -49,7 +49,12 @@ void FxFrame::prepare(const SceneFrame& scene,const Mat4& view) {
         } else if(e.kind==Kind::Ribbon) {
             const auto& r=scene.ribbons[e.index];const auto first=std::uint32_t(ribbons_.size());
             auto side=[&](Vec3 tangent,float width){auto s=normalized(cross(tangent,forward));if(dot(s,s)<.5f)s=right;return s*(width*.5f);};
-            const auto a=side(r.beginTangent,r.beginWidth),b=side(r.endTangent,r.endWidth);
+            Vec3 a,b;
+            if(r.surfaceAligned){
+                const auto sa=normalized(cross(r.beginTangent,r.beginNormal)),sb=normalized(cross(r.endTangent,r.endNormal));
+                if(dot(sa,sa)<.5f||dot(sb,sb)<.5f||dot(sa,sb)<=0)continue;
+                a=sa*(r.beginWidth*.5f);b=sb*(r.endWidth*.5f);
+            }else{a=side(r.beginTangent,r.beginWidth);b=side(r.endTangent,r.endWidth);}
             auto vertex=[&](Vec3 p,Color4 color,float u,float v){ribbons_.push_back({{p.x,p.y,p.z,r.blend==BlendMode::Additive?1.f:0.f},{color.r,color.g,color.b,color.a},{u,v,r.softDistance,0}});};
             vertex(r.begin-a,r.beginColor,r.uBegin,1);vertex(r.end-b,r.endColor,r.uEnd,1);vertex(r.begin+a,r.beginColor,r.uBegin,0);
             vertex(r.begin+a,r.beginColor,r.uBegin,0);vertex(r.end-b,r.endColor,r.uEnd,1);vertex(r.end+b,r.endColor,r.uEnd,0);

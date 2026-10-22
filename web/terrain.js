@@ -4,7 +4,7 @@
   let request=0,clearingPages=false;
   const status=text=>{$('terrain-status').textContent=text;};
   window.engineTerrainMessage=status;
-  const ready=()=>!!window.Module?._engine_terrain_demo&&document.body.dataset.engine==='ready';
+  const ready=()=>!!window.Module?._engine_terrain_demo&&document.body.dataset.engine==='ready'&&document.body.dataset.applicationState!=='stopped';
   const coordinates=()=>[Number($('terrain-x').value),Number($('terrain-z').value)];
   const applyTool=()=>ready()&&Module._engine_terrain_tool(Number($('terrain-tool').value),Number($('terrain-radius').value),Number($('terrain-strength').value),Number($('terrain-flatten').value),Number($('terrain-layer').value));
   for(const id of ['terrain-tool','terrain-radius','terrain-strength','terrain-flatten','terrain-layer']) $(id).addEventListener('change',()=>{

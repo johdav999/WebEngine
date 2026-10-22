@@ -18,6 +18,14 @@ public:
     bool active() const noexcept override;
     void activate() noexcept override;
     void suspend(bool) noexcept override;
+    AudioCapabilities capabilities() const noexcept override { return {true,true,true}; }
+    bool startStream(std::uint32_t,const AudioStreamAsset&,const AudioPlayOptions&,float) override;
+    bool reverb(const AudioReverbSettings&) override;
+    void environment(std::uint32_t,float,float) noexcept override;
+    void muteOutput(bool) noexcept override;
+    void clearEffects() noexcept override;
+    bool seekStream(std::uint32_t,double) noexcept override;
+    double streamPosition(std::uint32_t) const noexcept override;
 private:
     std::uint32_t device_;
 };

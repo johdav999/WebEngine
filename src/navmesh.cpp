@@ -1,3 +1,4 @@
+#include "engine/performance_timeline.hpp"
 #include "engine/navmesh.hpp"
 #include "engine/scene.hpp"
 #include "engine/collider_component.hpp"
@@ -47,10 +48,17 @@ bool NavMesh::compatible(const CharacterMotorSettings& m) const noexcept {
         &&m.maxSlopeAngle+1e-5f>=settings_.maxSlopeAngle&&m.stepHeight+1e-5f>=settings_.maxStepHeight;
 }
 std::shared_ptr<const NavMesh> NavMesh::bake(const Scene& scene,NavMeshBuildSettings settings,PhysicsQueryFilter filter) {
+    return bakeWithObstacles(scene,{},settings,std::move(filter));
+}
+std::shared_ptr<const NavMesh> NavMesh::bakeWithObstacles(const Scene& scene,std::span<const NavMeshObstacle> obstacles,NavMeshBuildSettings settings,PhysicsQueryFilter filter) {
     settings.validate();const auto* world=scene.physicsIfCreated();require(world!=nullptr,"Synchronize static collision before baking navigation");
+    require(obstacles.size()<=64,"Navigation obstacle limit exceeded");
+    for(const auto& b:obstacles)require(finite(b.minimum)&&finite(b.maximum)&&b.minimum.x<b.maximum.x&&b.minimum.y<b.maximum.y&&b.minimum.z<b.maximum.z,"Invalid navigation obstacle bounds");
     filter.includeDynamic=filter.includeKinematic=filter.includeSensors=false;
     const auto probe=CollisionShape::sphere(.01f);
     return bakeGeometry(world->triangleGeometry(filter),settings,[&](Vec3 p) {
+        for(const auto& b:obstacles)if(p.x>=b.minimum.x&&p.x<=b.maximum.x&&p.z>=b.minimum.z&&p.z<=b.maximum.z&&
+            p.y+settings.agentHeight>b.minimum.y&&p.y+settings.maxStepHeight<b.maximum.y)return false;
         Transform pose;pose.position=p+Vec3{0,.03f,0};
         return world->overlap(*probe,pose,filter).empty();
     });
@@ -167,7 +175,18 @@ std::optional<NavMeshLocation> NavMesh::project(Vec3 p,float range) const {
     if(std::hypot(double(projected.x)-p.x,double(projected.z)-p.z)>double(range)+1e-5||std::abs(projected.y-p.y)>settings_.verticalSnap+1e-5f) return {};
     return NavMeshLocation{projected,std::uint32_t(ref-impl_->base)};
 }
+bool NavMesh::canTraverseSegment(Vec3 from,Vec3 to) const {
+    require(finite(from)&&finite(to),"Invalid navmesh segment");
+    dtNavMeshQuery query;if(dtStatusFailed(query.init(impl_->nav.get(),256)))throw std::bad_alloc();
+    dtQueryFilter filter;const std::array half={.08f,settings_.verticalSnap,.08f};
+    auto nearest=[&](Vec3 p,dtPolyRef& ref,std::array<float,3>& result){const auto origin=array(p);if(dtStatusFailed(query.findNearestPoly(origin.data(),half.data(),&filter,&ref,result.data()))||!ref)return false;return std::hypot(double(result[0])-p.x,double(result[2])-p.z)<=.08001&&std::abs(result[1]-p.y)<=settings_.verticalSnap+1e-5f;};
+    dtPolyRef start=0,end=0;std::array<float,3> a{},b{},normal{};if(!nearest(from,start,a)||!nearest(to,end,b))return false;
+    float fraction=0;std::array<dtPolyRef,256> polygons{};int count=0;
+    const auto status=query.raycast(start,a.data(),b.data(),&filter,&fraction,normal.data(),polygons.data(),&count,int(polygons.size()));
+    return !dtStatusFailed(status)&&!dtStatusDetail(status,DT_BUFFER_TOO_SMALL)&&fraction>=1-1e-4f;
+}
 WaypointPath NavMesh::findPath(Vec3 start,Vec3 goal,const WaypointSearchSettings& settings) const {
+    ProfileScope profile(ProfileCategory::AI,"Navmesh path search");
     settings.validate();require(finite(start)&&finite(goal),"Invalid navmesh query endpoints");
     WaypointPath result;const auto range=std::min(settings.snapDistance,settings_.endpointSnap);
     const auto from=project(start,range),to=project(goal,range);if(!from||!to) return result;

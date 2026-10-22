@@ -1,5 +1,9 @@
 # Animation control, markers and movement output
 
+The [animation library and visual state machine editor](animation-authoring.md)
+authors these existing runtime contracts, including gameplay-driven parameters,
+clip organization, same-rig imports, isolated preview and `.weanim` files.
+
 `AnimationComponent` remains the per-instance player owned by a skeletal mesh's
 skeleton child. An optional `shared_ptr<const AnimationControllerDefinition>` adds
 parameter-driven control to the same player. Definitions, skeletons and clips can
@@ -67,11 +71,12 @@ resetting the clock or discarding pending movement. Transitions can crossfade in
 single clips or blended states. Fades use simulation seconds, freeze the outgoing
 pose, and interpolate translation/scale and shortest-arc quaternion rotation.
 Interrupting a fade starts at its current pose. Target state speed applies on
-entry. These are two-clip blends; layers, additive poses and multi-point blend
-trees are outside this interface.
+entry. For multi-clip speed/direction blending and ordered masked override/additive
+poses, see [animation layers and blend trees](animation-layers.md).
 
 Manual `play`, `blend`, `crossFade`, `setBlendWeight` and `stop` detach control.
-`clearController()` detaches it while retaining the current playback. Seek and
+`clearController()` detaches it and removes overlays; tree states continue their
+fallback clip on the next playback tick. Seek and
 pause/resume retain the definition. Replacing a skeleton cancels control,
 extraction and queued output on the next animation update. A shared definition
 does not retain a scene, actor or component.
@@ -190,3 +195,7 @@ frustum culling. Browser evidence is in
 `build/evidence/animation-control-browser/skeletal-animation-results.json`.
 The full repository native suite and physical mobile devices were not run for this
 change. Other feature work was present in the shared checkout during validation.
+
+[Inverse kinematics](inverse-kinematics.md) runs after animation layers. Controllers
+own immutable constraints; players own live targets. IK changes pose only and
+cannot rotate the extracted root-motion joint or its ancestors.

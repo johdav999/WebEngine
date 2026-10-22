@@ -49,7 +49,8 @@ void syncAccessibility() {
     for(const auto& n:activeGui->accessibilityNodes()) {
         if(!first) out<<',';first=false;
         out<<"{\"id\":"<<n.id<<",\"role\":"<<int(n.role)<<",\"name\":"<<quote(n.name)<<",\"description\":"<<quote(n.description)
-           <<",\"value\":"<<quote(n.value)<<",\"disabled\":"<<(n.disabled ? "true" : "false")<<",\"focused\":"<<(n.focused ? "true" : "false")<<",\"live\":"<<(n.live ? "true" : "false")<<'}';
+           <<",\"value\":"<<quote(n.value)<<",\"disabled\":"<<(n.disabled ? "true" : "false")<<",\"focused\":"<<(n.focused ? "true" : "false")<<",\"live\":"<<(n.live ? "true" : "false")
+           <<",\"checked\":"<<(n.checked ? "true" : "false")<<",\"minimum\":"<<n.minimum<<",\"maximum\":"<<n.maximum<<",\"number\":"<<n.number<<",\"step\":"<<n.step<<'}';
     }
     out<<']';auto candidate=out.str();if(candidate!=accessibilityJson) { accessibilityJson=std::move(candidate);gui_accessibility(accessibilityJson.c_str()); }
 }
@@ -70,8 +71,13 @@ EMSCRIPTEN_KEEPALIVE int engine_gui_scale(float value) {
     if(!activeGui) return 0;
     try { activeGui->setScale(value);syncBrowserGui();return 1; }catch(const std::invalid_argument&) { return 0; }
 }
+EMSCRIPTEN_KEEPALIVE int engine_gui_value(double id,float value) {
+    if(!activeGui||!std::isfinite(id)||id<1||id>9007199254740991.0||std::floor(id)!=id) return 0;
+    layout();const bool result=activeGui->setAccessibleValue(static_cast<std::uint64_t>(id),value);
+    syncBrowserGui();return result;
+}
 EMSCRIPTEN_KEEPALIVE int engine_gui_key(int key,int shift,int repeat) {
-    if(!activeGui||key<0||key>9) return 0;
+    if(!activeGui||key<0||key>11) return 0;
     layout();const bool consumed=activeGui->key(static_cast<GuiKey>(key),shift!=0,repeat!=0);
     syncBrowserGui(consumed);return consumed;
 }
@@ -102,19 +108,30 @@ EMSCRIPTEN_KEEPALIVE const char* engine_gui_snapshot() {
         layout();
         const auto visit=[&](auto&& self,const Widget& widget)->void {
             if(!first) out<<',';first=false;
-            const char* type="root";std::string_view text;
+            const char* type=&widget==&activeGui->root() ? "root" : "widget";std::string_view text;
             if(const auto* label=dynamic_cast<const TextLabel*>(&widget)) { type="label";text=label->text(); }
             if(const auto* button=dynamic_cast<const Button*>(&widget)) { type="button";text=button->text(); }
             if(const auto* input=dynamic_cast<const TextInput*>(&widget)) { type="input";text=input->text(); }
             if(dynamic_cast<const Panel*>(&widget)) type="panel";
             if(dynamic_cast<const Image*>(&widget)) type="image";
+            if(const auto* checkbox=dynamic_cast<const Checkbox*>(&widget)) { type="checkbox";text=checkbox->text(); }
+            if(dynamic_cast<const Slider*>(&widget)) type="slider";
             const auto r=widget.bounds(),clip=widget.clip();
-            out<<"{\"id\":"<<widget.id()<<",\"type\":"<<quote(type)<<",\"text\":"<<quote(text)<<",\"focused\":"<<(&widget==activeGui->focused() ? "true" : "false")
+            out<<"{\"id\":"<<widget.id()<<",\"type\":"<<quote(type)<<",\"text\":"<<quote(text)<<",\"name\":"<<quote(widget.accessibleName())<<",\"layout\":"<<int(widget.layoutType())<<",\"gridColumns\":"<<widget.gridColumns()<<",\"focused\":"<<(&widget==activeGui->focused() ? "true" : "false")
                <<",\"active\":"<<(widget.active() ? "true" : "false")<<",\"bounds\":{\"x\":"<<r.x<<",\"y\":"<<r.y<<",\"width\":"<<r.width<<",\"height\":"<<r.height
                <<"},\"clip\":{\"x\":"<<clip.x<<",\"y\":"<<clip.y<<",\"width\":"<<clip.width<<",\"height\":"<<clip.height<<"}";
             if(const auto* input=dynamic_cast<const TextInput*>(&widget)) out<<",\"selectionStart\":"<<input->selectionStart()<<",\"selectionEnd\":"<<input->selectionEnd()<<",\"selectionBackward\":"<<(input->selectionBackward() ? "true" : "false")<<",\"composing\":"<<(input->composing() ? "true" : "false");
             if(const auto* scroll=dynamic_cast<const ScrollPanel*>(&widget)) out<<",\"scrollOffset\":"<<scroll->scrollOffset()<<",\"maxScrollOffset\":"<<scroll->maxScrollOffset();
             if(const auto* label=dynamic_cast<const TextLabel*>(&widget)) out<<",\"lineCount\":"<<label->lineCount();
+            if(const auto* checkbox=dynamic_cast<const Checkbox*>(&widget)) out<<",\"checked\":"<<(checkbox->checked() ? "true" : "false");
+            if(const auto* slider=dynamic_cast<const Slider*>(&widget)) out<<",\"value\":"<<slider->value()<<",\"minimum\":"<<slider->minimum()<<",\"maximum\":"<<slider->maximum()<<",\"step\":"<<slider->step();
+            const auto state=activeGui->visualState(widget);const auto style=activeGui->resolvedStyle(widget);
+            out<<",\"hovered\":"<<(state.hovered ? "true" : "false")<<",\"pressed\":"<<(state.pressed ? "true" : "false")
+               <<",\"disabled\":"<<(state.disabled ? "true" : "false")<<",\"styleKind\":"<<int(widget.styleKind())<<",\"style\":{";
+            const auto color=[&](const char* name,GuiColor c){ out<<quote(name)<<":["<<c.r<<','<<c.g<<','<<c.b<<','<<c.a<<"],"; };
+            color("background",style.background);color("foreground",style.foreground);color("border",style.border);color("accent",style.accent);
+            color("focusRing",style.focusRing);color("selection",style.selection);color("placeholder",style.placeholder);
+            out<<"\"opacity\":"<<style.opacity<<'}';
             out<<'}';for(const auto& child:widget.children()) self(self,*child);
         };visit(visit,activeGui->root());
     }

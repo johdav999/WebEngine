@@ -1,3 +1,4 @@
+#include "engine/performance_timeline.hpp"
 #include "engine/ai.hpp"
 #include "engine/scene.hpp"
 #include "engine/collider_component.hpp"
@@ -119,7 +120,7 @@ void PathFollower::follow(std::span<const Vec3> points) {
 void PathFollower::cancel(CharacterMotorComponent& motor) noexcept {
     motor.stop();status_=FollowStatus::Cancelled;points_.clear();next_=0;tracking_=false;stuck_=elapsed_=0;
 }
-void PathFollower::step(CharacterMotorComponent& motor,double seconds) {
+void PathFollower::step(CharacterMotorComponent& motor,double seconds,bool yielding) {
     if(!std::isfinite(seconds)||seconds<=0||seconds>.25) throw std::invalid_argument("Invalid AI fixed step");
     if(status_!=FollowStatus::Moving) return;
     const auto* actor=motor.owner();
@@ -127,7 +128,7 @@ void PathFollower::step(CharacterMotorComponent& motor,double seconds) {
     const auto p=position(*actor);
     if(!finite(p)) { motor.stop();status_=FollowStatus::Blocked;return; }
     if(!tracking_) { tracking_=true;progressOrigin_=p; }
-    elapsed_+=seconds;stuck_+=seconds;
+    elapsed_+=seconds;if(!yielding)stuck_+=seconds;
     if(distance(p,progressOrigin_)>=settings_.progressDistance) { progressOrigin_=p;stuck_=0; }
     while(next_<points_.size()) {
         const auto d=points_[next_]-p;
@@ -206,7 +207,8 @@ bool Navigator::clearSegment(CharacterMotorComponent& motor,Vec3 from,Vec3 to) {
     const Vec3 direction{float((double(to.x)-from.x)/length),float((double(to.y)-from.y)/length),float((double(to.z)-from.z)/length)};
     return !world->sweep(*probe_,pose,direction,float(length),filter);
 }
-void Navigator::step(CharacterMotorComponent& motor,double seconds) {
+void Navigator::step(CharacterMotorComponent& motor,double seconds,bool yielding) {
+    ProfileScope profile(ProfileCategory::AI,"Navigation step",motor.name);
     if(!std::isfinite(seconds)||seconds<=0||seconds>.25) throw std::invalid_argument("Invalid navigation fixed step");
     stats_.queriesLastStep=stats_.expandedLastStep=0;
     if(status_==NavigationStatus::Idle||status_==NavigationStatus::Cancelled||status_==NavigationStatus::Arrived
@@ -257,7 +259,7 @@ void Navigator::step(CharacterMotorComponent& motor,double seconds) {
             &&std::abs(double(points[next].y)-p.y)<=settings_.following.heightTolerance) ++next;
         if(next<points.size()&&!clearSegment(motor,p,points[next])) { wait(motor);return; }
     }
-    follower_.step(motor,seconds);
+    follower_.step(motor,seconds,yielding);
     if(follower_.status()==FollowStatus::Arrived) status_=NavigationStatus::Arrived;
     else if(follower_.status()==FollowStatus::Cancelled) status_=NavigationStatus::Cancelled;
     else if(follower_.status()==FollowStatus::Blocked) {

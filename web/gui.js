@@ -51,7 +51,8 @@
   document.addEventListener('keydown',event => {
     if (!ready() || (event.target!==canvas && event.target!==editor&&!semantics.contains(event.target)) || event.isComposing || composing) return;
     if(semantics.contains(event.target)&&event.target.tagName==='BUTTON'&&['Enter',' '].includes(event.key))return;
-    const keys = {Tab:0,Enter:1,' ':2,Escape:3,ArrowUp:4,ArrowDown:5,PageUp:6,PageDown:7,Home:8,End:9};
+    if(semantics.contains(event.target)&&event.target.type==='checkbox'&&event.key===' ')return;
+    const keys = {Tab:0,Enter:1,' ':2,Escape:3,ArrowUp:4,ArrowDown:5,PageUp:6,PageDown:7,Home:8,End:9,ArrowLeft:10,ArrowRight:11};
     if (!(event.key in keys)) return;
     if (Module._engine_gui_key(keys[event.key],Number(event.shiftKey),Number(event.repeat))) event.preventDefault();
   });
@@ -152,7 +153,7 @@
         for(const n of nodes) {
           let el=semanticNodes.get(n.id);
           if(!el) {
-            el=document.createElement(n.role===3?'button':n.role===4?'input':'div');
+            el=document.createElement(n.role===3?'button':[4,6,7].includes(n.role)?'input':'div');
             el.id=`engine-widget-${n.id}`;el.dataset.widgetId=String(n.id);el.tabIndex=-1;
             if(n.role===3) {el.type='button';el.addEventListener('click',()=>{if(ready())Module._engine_gui_focus(n.id,1);});el.addEventListener('keydown',e=>{if(e.repeat&&['Enter',' '].includes(e.key))e.preventDefault();});}
             if(n.role===4) {
@@ -161,6 +162,14 @@
               el.addEventListener('select',()=>edit(el));
               el.addEventListener('compositionstart',()=>{composing=true;compositionField=fieldId;edit(el);});
               el.addEventListener('compositionend',()=>{if(compositionField===fieldId){composing=false;edit(el);}});
+            }
+            if(n.role===6) {
+              el.type='checkbox';
+              el.addEventListener('change',()=>{if(ready())Module._engine_gui_focus(n.id,1);});
+            }
+            if(n.role===7) {
+              el.type='range';
+              el.addEventListener('input',()=>{if(ready())Module._engine_gui_value(n.id,Number(el.value));});
             }
             el.addEventListener('focus',()=>{if(!ready()||syncing)return;semanticFocus=true;Module._engine_gui_focus(n.id,0);});
             semantics.append(el);semanticNodes.set(n.id,el);
@@ -171,6 +180,13 @@
           if(n.live)el.setAttribute('aria-live','polite');else el.removeAttribute('aria-live');
           el.setAttribute('aria-disabled',String(n.disabled));if('disabled' in el)el.disabled=n.disabled;
           if(n.role===4) {if(document.activeElement!==el&&el.value!==n.value)el.value=n.value;}
+          else if(n.role===6) {el.checked=n.checked;el.setAttribute('aria-checked',String(n.checked));}
+          else if(n.role===7) {
+            el.min=String(n.minimum);el.max=String(n.maximum);
+            // C++ owns step quantization, including an explicitly reachable maximum.
+            el.step='any';el.value=String(n.number);
+            el.setAttribute('aria-valuemin',String(n.minimum));el.setAttribute('aria-valuemax',String(n.maximum));el.setAttribute('aria-valuenow',String(n.number));
+          }
           else if(n.role!==2&&el.textContent!==n.name)el.textContent=n.name;
           // The native text service represents this field while canvas editing
           // is active. Avoid announcing two simultaneous copies of the textbox.
@@ -187,7 +203,7 @@
       // canvas button/region. Textboxes keep their current native editing path.
       if(!request)return;
       const node=accessibleNodes.find(n=>n.focused);
-      if(node&&[3,5].includes(node.role)) {
+      if(node&&[3,5,6,7].includes(node.role)) {
         syncing=true;try{semanticFocus=true;semanticNodes.get(node.id)?.focus({preventScroll:true});}finally{syncing=false;}
       }
     },

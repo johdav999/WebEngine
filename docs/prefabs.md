@@ -158,6 +158,10 @@ does not perform pointer conversions.
 
 ## Persistence and scope
 
+For saved built-in definitions, variants and linked-instance propagation, use the
+separate [prefab asset editor](prefab-editor.md) / `PrefabAsset` API. It reuses
+scene codecs rather than serializing this factory API's `std::any` payloads.
+
 Definitions/configurations are in-memory C++ authoring data. This API does not
 serialize `std::any`, callbacks, a factory registry, definition links or overrides.
 Constructed built-in scene instances use the existing

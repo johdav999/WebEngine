@@ -1,4 +1,6 @@
+#include "engine/performance_timeline.hpp"
 #include "engine/asset_browser.hpp"
+#include "asset_fresh_url.hpp"
 #include <emscripten.h>
 #include <limits>
 #include <cstdlib>
@@ -72,20 +74,25 @@ EMSCRIPTEN_KEEPALIVE void engine_asset_worker_result(int id,const void* bytes,in
             job.context.fail(bytes&&size<0 ? std::string(static_cast<const char*>(bytes),-size) : "Asset worker bridge failure");return;
         }
         ArchiveLimits limits;limits.maxBytes=limits.maxAllocatedBytes=job.maxBytes;
+        ProfileScope profile(ProfileCategory::Loading,"Worker result hydration");
         completeDecodedAsset({static_cast<const std::byte*>(bytes),static_cast<std::size_t>(size)},job.kind,job.context,limits);
     }catch(const std::exception& error){job.context.fail(error.what());}
     catch(...){job.context.fail("Asset hydration failed");}
 }
 }
 AssetLoader browserDecodedAssetLoader(std::string url,AssetDecodeKind kind,BrowserDecodeOptions options) {
-    if(url.empty()||url.find('\0')!=std::string::npos||options.workerUrl.empty()||options.workerUrl.find('\0')!=std::string::npos||
+    return browserDecodedAssetLoader(std::move(url),kind,AssetDecodeOptions{options.source,options.maxResultBytes},std::move(options.workerUrl));
+}
+AssetLoader browserDecodedAssetLoader(std::string url,AssetDecodeKind kind,AssetDecodeOptions options,std::string workerUrl) {
+    if(url.empty()||url.find('\0')!=std::string::npos||workerUrl.empty()||workerUrl.find('\0')!=std::string::npos||
        !options.source.maxBytes||options.source.maxBytes>std::numeric_limits<int>::max()||!options.source.timeoutMilliseconds||
        options.source.timeoutMilliseconds>std::numeric_limits<int>::max()||!options.maxResultBytes||options.maxResultBytes>std::numeric_limits<int>::max()||
-       kind<AssetDecodeKind::Fbx||kind>AssetDecodeKind::TextureBundle) throw std::invalid_argument("Invalid worker asset configuration");
-    return [url=std::move(url),kind,options=std::move(options)](AssetLoadContext context)->AssetCancel {
+       kind<AssetDecodeKind::Fbx||kind>AssetDecodeKind::Fingerprint) throw std::invalid_argument("Invalid worker asset configuration");
+    return [url=std::move(url),kind,options,workerUrl=std::move(workerUrl)](AssetLoadContext context)->AssetCancel {
         if(nextId==std::numeric_limits<int>::max())throw std::runtime_error("Asset worker ID space exhausted");
         const auto id=++nextId;pending.emplace(id,Pending{context,kind,options.maxResultBytes});
-        try{startWorker(id,url.c_str(),options.workerUrl.c_str(),static_cast<int>(kind),options.source.maxBytes,options.maxResultBytes,options.source.timeoutMilliseconds);}
+        const auto location=options.source.fresh?asset_detail::freshUrl(url):url;
+        try{startWorker(id,location.c_str(),workerUrl.c_str(),static_cast<int>(kind),options.source.maxBytes,options.maxResultBytes,options.source.timeoutMilliseconds);}
         catch(...){pending.erase(id);cancelWorker(id);throw;}
         return [id]{pending.erase(id);cancelWorker(id);};
     };

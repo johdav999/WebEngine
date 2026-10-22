@@ -110,8 +110,10 @@ separate host action.
 ## Format and limits
 
 Instances created by [prefabs](prefabs.md) follow the same supported-type and
-resource-sharing rules. Prefab definitions, definition-local keys, instance
-override records and factory registries are not stored. Registering a prefab
+resource-sharing rules. The optional [prefab asset path](prefab-editor.md) stores
+definitions, variant bases and inert instance key bindings in v34. Overrides are
+inferred from the saved instance and its previous definition. Factory registries
+and arbitrary executable definitions are not stored. Registering a prefab
 component factory does not register an archive codec for a custom subclass.
 
 The archive begins with eight-byte `WESCENE\0` magic, a little-endian uint32 version,
@@ -265,7 +267,7 @@ See [terrain surfaces](terrain.md#surface-relief-and-projection).
 
 See [vehicle contracts](vehicles.md) for the optional four-wheel component,
 COM/inertia and point-force body APIs, typed editor/preset/Play support and supported
-checkpoint state. Current scene/application/effect envelope writer version is 27;
+checkpoint state. Current scene/application/effect envelope writer version is 32;
 older formats remain readable. Vehicle configuration/checkpoints and visual saved
 references persist; commands, solver listeners and contact history do not.
 
@@ -286,3 +288,58 @@ Archive v27 adds built-in RouteComponent and shared spline/profile/route source
 resources. Generated meshes/collision are rebuilt once per route identity under
 allocation budgets; required implementation-child IDs persist. Old records retain
 their layouts. See [route persistence](splines-routes.md#editor-and-persistence).
+
+
+Archive v28 adds SurfaceTrail mode with supplied world contact normals, bounded
+live ring/source normal continuation and existing age/sampler state. Pending
+contact input and renderer caches are excluded; resubmit a contact before the next
+variable update to continue. Older trail normals default +Y. Effect resources
+retain definitions only; scenes/application envelopes retain instance state. See
+[surface trail persistence](surface-trails.md#editor-and-persistence).
+
+## Format 29: FX composition and managed decals
+
+EffectAsset stores bounded acyclic trigger dependencies, source emitter/event, child effect and/or decal preset, orientation/velocity inheritance and root limits. Live EffectComponent records retain pause/stop, generated-child depth/world anchor; emitters retain inherited world velocity. Decals retain optional lifetime/fade, age and generated world anchors. Owned generated children use normal node/pool records. Event queues, diagnostics and projection caches remain transient. Versions 1-28 keep empty composition and persistent decal defaults. See [contracts](fx-composition.md).
+
+
+Archive v30 appends inner/outer cone half angles and enables Spot LightComponent
+records. Readers 1..30 default older lights to 20/30 degrees without changing old
+layouts. Node transforms/directions, range, mask and appearance persist through
+scene/application saves, duplication and isolated Play. Invalid cones/shadow
+combinations are rejected before publication. See [spotlight persistence](spotlights.md#persistence-and-validation).
+
+General region streaming uses immutable authored manifests and separate static
+visual/collision sources. Stage 8 integrates editor bounds/reference/budget forms,
+exact-state history and isolated residency diagnostics. Archive v31 reads v1..31
+and persists manifests/selected restore keys, omitting managed resident subtrees
+and resource caches. Applications drive IO and gate restore/play on required
+collision; source asset buffers remain separately registered files. See
+[region streaming](region-streaming.md) and [validation](region-streaming-validation.md).
+
+## Animation composition format 32
+
+Version 32 adds state/layer 1D/2D trees, masks, additive references, weight bindings
+and per-instance layer clocks. Older archives load with composition disabled.
+Indices use fixed-width archive encoding across native and Wasm. Pose buffers are
+regenerated on load; scene clone/editor undo preserve the same evaluated state.
+See [animation composition](animation-layers.md).
+
+## Inverse kinematics format 33
+
+Format v33 added ordered controller IK constraints/defaults and
+per-player live targets. Indices have fixed-width encoding across native/Wasm.
+Readers accept v1–32 with no IK. Derived pre-IK/solved poses and diagnostics are
+rebuilt from playback state; physics providers and application contact policy are
+not serialized. Library metadata is ANIM3 (reads1–2) within WEANIM1. See
+[inverse kinematics](inverse-kinematics.md).
+
+## Prefab assets format 34
+
+Current writers use v34. The new PrefabInstance node kind stores an immutable
+prefab asset resource and definition-key to saved-node bindings. Asset records
+contain identity, name, revision, optional variant base and a bounded built-in
+actor definition. Template node IDs have an isolated scope while immutable
+resources use the existing shared resource table. Readers accept v1–33; older
+scenes have no prefab links. The common node record layout is unchanged.
+Prefab files use WEPREFAB1 around the checksummed scene carrier. See
+[prefab asset contracts](prefab-editor.md) and [validation](prefab-editor-validation.md).

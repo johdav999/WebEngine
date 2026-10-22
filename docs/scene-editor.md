@@ -6,6 +6,11 @@ HTML/SVG tool interface. Edit mode pauses simulation while camera navigation and
 rendering continue; exit restores the previous pause policy. It edits the displayed
 scene directly. **Play** creates an isolated runtime copy; **Stop** returns to the retained authoring document.
 
+A separate [native Windows scene workbench](windows-editor.md) now reuses the
+portable commands, archive files and isolated Play behaviour. Its initial GUI
+covers ordinary scene editing; the specialized graphical panels described here
+remain browser-only.
+
 ## Camera navigation
 
 Right-drag in Scene to look from a fixed camera position. While holding right mouse,
@@ -212,7 +217,8 @@ and validated setters. Supported built-ins include:
 | Interaction providers | Selectable and focusable flags |
 
 Particle effects have a dedicated [FX authoring section](fx-authoring.md).
-Other components expose common fields; asset definitions and advanced animation,
+Skeletal meshes have a dedicated [animation library/state machine editor](animation-authoring.md).
+Other components expose common fields; other asset definitions,
 collider-shape and water-specific settings are not generated
 inspectors in this increment. Component creation/removal uses the supported types below.
 
@@ -405,7 +411,8 @@ Repeat at `DEVICE_SCALE_FACTOR=2`. See [third-increment validation](scene-editor
 
 Further increments can add arbitrary actor creation/removal, advanced component
 factories/inspectors, marquee selection, explicit sibling ordering, apply-back Play
-changes, custom runtime reconstruction and editable prefab definitions.
+changes and custom runtime reconstruction. [Prefab asset authoring](prefab-editor.md)
+now supplies saved definitions, variants and explicit override-preserving updates.
 Extend the existing typed commands/property registry rather than adding mutations
 which bypass history, dirty revision or staged loading. Preserve shared immutable
 assets, saved-vs-runtime identities and document-generation cancellation.
@@ -450,3 +457,27 @@ Route source authoring, grouped rebuild history, point/tangent preview, physical
 profile selection and explicit terrain point baking are now in Details. New route
 actors use protected static collision children; generic manipulation of those
 children remains read-only. See [splines/routes](splines-routes.md).
+
+
+Particle FX now offers Surface trail for bounded world contact strips, immutable
+parameter/curve history and an isolated sloped receiver preview with airborne gaps
+and point/drop/segment diagnostics. Play and source persistence reuse existing
+ownership; see [surface trails](surface-trails.md#editor-and-persistence).
+
+
+Light properties now include Spot type, half angles in degrees, range/direction
+and visibility mask with native history/rollback. The docked Spotlights panel
+toggles bounded selected cone outlines and links a separate headlight example.
+Spot shadows remain unsupported; see [spotlights](spotlights.md#editor-and-example).
+
+General region streaming uses immutable authored manifests and separate static
+visual/collision sources. Stage 8 integrates editor bounds/reference/budget forms,
+exact-state history and isolated residency diagnostics. Archive v31 reads v1..31
+and persists manifests/selected restore keys, omitting managed resident subtrees
+and resource caches. Applications drive IO and gate restore/play on required
+collision; source asset buffers remain separately registered files. See
+[region streaming](region-streaming.md) and [validation](region-streaming-validation.md).
+
+[Prefab asset editor](prefab-editor.md): capture selected actors, author reusable
+definitions in an independent workbench, save `.weprefab`, derive variants and
+update linked instances through one scene history command.

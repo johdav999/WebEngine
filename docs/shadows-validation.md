@@ -1,5 +1,8 @@
 # Directional shadow maps: implementation and validation
 
+Historical evidence below describes the original fixed-volume WebGPU path.
+Current spot/cascade and WebGL2 contracts are in [lighting](lighting-post-processing.md).
+
 Verified locally on 2026-10-10 in the existing checkout. Changes remain
 uncommitted alongside the pre-existing untracked project. Concurrent physics,
 camera culling and view-compositing work was preserved.

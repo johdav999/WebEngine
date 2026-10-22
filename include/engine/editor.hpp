@@ -5,8 +5,11 @@
 #include "engine/editor_properties.hpp"
 #include "engine/terrain.hpp"
 #include "engine/route.hpp"
+#include "engine/region_stream.hpp"
 #include "engine/decal.hpp"
 #include "engine/ai_controller.hpp"
+#include "engine/animation_library.hpp"
+#include "engine/prefab_asset.hpp"
 
 namespace engine {
 enum class EditorGizmo { Move, Rotate, Scale };
@@ -25,6 +28,13 @@ public:
     EditorSession(const EditorSession&)=delete;
     EditorSession& operator=(const EditorSession&)=delete;
     Node* selected() const;
+    SkeletalMeshComponent* selectedSkeletalMesh() const;
+    Actor* selectedPrefabRoot() const;
+    bool placePrefab(std::shared_ptr<const PrefabAsset>,Vec3 position={},Node* parent=nullptr);
+    bool linkPrefab(std::shared_ptr<const PrefabAsset>);
+    bool updatePrefabs(std::span<const std::shared_ptr<const PrefabAsset>>,bool revertSelected=false);
+    bool unpackPrefab();
+    bool setAnimationLibrary(std::shared_ptr<const AnimationLibrary>);
     AiControllerComponent* selectedAiController() const;
     bool setAiController(AiControllerSettings,std::shared_ptr<const AiBindingRegistry> registry=AiBindingRegistry::builtins());
     bool select(std::string_view savedId); // Empty clears; invalid selection preserves it.
@@ -32,6 +42,9 @@ public:
     bool toggleSelection(std::string_view id);
     std::vector<std::string> selectionIds() const;
     std::vector<Node*> selectionRoots() const; // Ancestor selection covers descendants once.
+    bool createRegionManifest(std::shared_ptr<const RegionManifest>);
+    RegionManifestComponent* selectedRegionManifest() const;
+    bool setRegionManifest(std::shared_ptr<const RegionManifest>);
     bool createRoute(std::shared_ptr<const RouteAsset>,Vec3 position={});
     RouteComponent* selectedRoute() const;
     bool setRoute(std::shared_ptr<const RouteAsset>); // One exact-state grouped edit; source/collision published together.
@@ -115,6 +128,7 @@ private:
     };
     struct StructureEdit { std::vector<StructureItem> items;std::vector<std::string> beforeSelection,afterSelection; };
     struct PropertyEdit { EditorPropertyDefinition definition;EditorValue before,after; };
+    struct RegionManifestEdit {std::shared_ptr<const RegionManifest> before,after;};
     struct RouteEdit {std::shared_ptr<const RouteAsset> before,after;};
     struct ColliderEdit {std::shared_ptr<const CollisionShape> before,after;std::shared_ptr<const PhysicalSurface> beforeSurface,afterSurface;};
     struct DecalEdit { DecalSettings before,after; };
@@ -139,10 +153,17 @@ private:
         std::uint64_t beforeFingerprint=0,afterFingerprint=0;
     };
     struct AiControllerEdit {AiControllerSettings before,after;};
+    struct AnimationEdit {std::unique_ptr<Node> parked;std::uint64_t expected=0;};
+    struct PrefabSwap {std::string target,parent;Mat4 parentWorld;std::size_t index;std::uint64_t expected;std::unique_ptr<Node> parked;};
+    struct PrefabEdit {std::vector<PrefabSwap> items;std::vector<std::string> selection;};
+    struct Command;
+    bool replayPrefab(Command& command);
+    bool replacePrefabRoots(const std::vector<Actor*>&,std::vector<std::unique_ptr<Node>>);
     struct Command {
         Change change;
-        std::variant<std::monostate,PropertyEdit,MaterialEdit,CreationEdit,LibraryEdit,BatchTransform,StructureEdit,TerrainChange,EffectEdit,DecalEdit,ColliderEdit,RouteEdit,AiControllerEdit> edit;
+        std::variant<std::monostate,PropertyEdit,MaterialEdit,CreationEdit,LibraryEdit,BatchTransform,StructureEdit,TerrainChange,EffectEdit,DecalEdit,ColliderEdit,RouteEdit,AiControllerEdit,RegionManifestEdit,AnimationEdit,PrefabEdit> edit;
     };
+    bool replayAnimation(Command& command);
     Scene& scene_;
     std::string selection_;
     std::vector<std::string> selections_;

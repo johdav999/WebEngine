@@ -67,7 +67,7 @@ function changed(a,b,threshold=12,rect={x0:.06,x1:.75,y0:.4,y1:.95}) {
    const box=await page.locator('#viewport').boundingBox();await page.mouse.move(box.x+box.width*.45,box.y+box.height*.5);await page.mouse.down();await page.mouse.move(box.x+box.width*.6,box.y+box.height*.55,{steps:8});await page.mouse.up();
    const orbited=await shot('orbited');assert(changed(orbited,restarted)>3000,'Demo orbit gesture has no effect');
    const saved=await shot('archive-original');
-   const archiveSize=await page.evaluate(()=>{const bytes=EngineSceneArchive.saveSceneBytes();if(!bytes||bytes[8]!==23)throw Error('Expected water archive format 19');window.__waterArchive=bytes;return bytes.length;});
+   const archiveSize=await page.evaluate(()=>{const bytes=EngineSceneArchive.saveSceneBytes();if(!bytes||bytes[8]!==31)throw Error('Expected current water archive format 31');window.__waterArchive=bytes;return bytes.length;});
    await preset(2);assert.equal(await page.evaluate(()=>EngineSceneArchive.openScene(new File([window.__waterArchive],'water.wescene'))),true);
    const loaded=await shot('archive-loaded');assert(changed(saved,loaded,3)<30,'Saved water scene pixels/settings changed on load');
    await page.evaluate(()=>Module._engine_archive_return());await preset(0);const archiveReturn=await shot('archive-returned');

@@ -15,6 +15,7 @@ public:
     void resetPose();
 private:
     friend class ArchiveCodec;
+    friend class SkeletalMeshComponent;
     std::shared_ptr<const Skeleton> skeleton_;
     std::shared_ptr<SkinPose> skinPose_=std::make_shared<SkinPose>();
     std::vector<Mat4> worlds_;

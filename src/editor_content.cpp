@@ -9,6 +9,21 @@
 #include <cstring>
 
 namespace engine {
+RegionManifestComponent* EditorSession::selectedRegionManifest()const{
+    auto* n=selected();if(auto* r=dynamic_cast<RegionManifestComponent*>(n))return r;
+    if(auto* a=dynamic_cast<Actor*>(n))return a->getComponent<RegionManifestComponent>();return nullptr;
+}
+bool EditorSession::createRegionManifest(std::shared_ptr<const RegionManifest> manifest){
+    cancel();if(scene_.worldMatrix().m!=Mat4::identity().m)throw std::invalid_argument("Region manifest scene transform must be identity");auto actor=std::make_unique<Actor>("Region manifest");actor->addComponent<RegionManifestComponent>("Regions",std::move(manifest));return create(std::move(actor),scene_);
+}
+bool EditorSession::setRegionManifest(std::shared_ptr<const RegionManifest> manifest){
+    cancel();auto* r=selectedRegionManifest();if(!r||!manifest||!r->parent()||!propertyReadOnlyReason(*r).empty())return false;
+    if(r->manifest()==manifest)return true;
+    history_.reserve(history_.size()+1);Command command;command.change={r->savedId(),r->parent()->savedId(),r->parent()->worldMatrix(),r->transform,r->transform};
+    RegionManifestEdit edit{r->manifest(),std::move(manifest)};r->configure(edit.after);
+    try{r->validate();scene_.synchronize();}catch(...){r->configure(edit.before);scene_.synchronize();throw;}
+    command.edit=std::move(edit);push(std::move(command));return true;
+}
 RouteComponent* EditorSession::selectedRoute()const{
     auto* node=selected();if(auto* r=dynamic_cast<RouteComponent*>(node))return r;
     if(auto* a=dynamic_cast<Actor*>(node))return a->getComponent<RouteComponent>();return nullptr;
@@ -46,6 +61,7 @@ void EditorSnap::validate() const {
 }
 std::string EditorSession::propertyReadOnlyReason(const Node& node) const {
     if(node.scene()!=&scene_||node.isPendingRemoval()) return "Node is no longer in this document";
+    if(node.archiveTransient())return "Resident region content is managed by its stream";
     if(&node==&scene_) return "Scene root properties are read-only";
     for(const Node* p=&node;p;p=p->parent()) if(p->isProtectedChild()) return "This implementation subtree is managed by its owning component";
     return {};
@@ -134,12 +150,14 @@ std::uint64_t EditorSession::fingerprint(const Node& root) const {
     auto text=[&](const std::string& value){const auto n=value.size();bytes(&n,sizeof(n));bytes(value.data(),value.size());};
     auto pointer=[&](const void* value){const auto n=reinterpret_cast<std::uintptr_t>(value);bytes(&n,sizeof(n));};
     auto walk=[&](auto&& self,const Node& node)->void {
+        if(const auto* link=dynamic_cast<const PrefabInstanceComponent*>(&node)){pointer(link->asset().get());for(const auto& b:link->bindings()){text(b.key);text(b.node);}}
         text(node.savedId());text(node.name);text(typeid(node).name());bytes(&node.transform,sizeof(node.transform));bytes(&node.enabled,sizeof(node.enabled));
         if(auto* ai=dynamic_cast<const AiControllerComponent*>(&node))text(AiControllerArchive::save(ai->settings()));
         const auto count=node.children().size();bytes(&count,sizeof(count));
         for(const auto& property:properties_->describe(node)) {
             text(property.key);std::visit([&](const auto& value){using T=std::decay_t<decltype(value)>;if constexpr(std::is_same_v<T,std::string>)text(value);else bytes(&value,sizeof(value));},property.value);
         }
+        if(const auto* r=dynamic_cast<const RegionManifestComponent*>(&node))pointer(r->manifest().get());
         if(const auto* r=dynamic_cast<const RouteComponent*>(&node))pointer(r->asset().get());
         if(const auto* t=dynamic_cast<const TerrainComponent*>(&node))pointer(t->asset().get());
         if(const auto* mesh=dynamic_cast<const MeshComponent*>(&node)) {
@@ -157,7 +175,7 @@ std::uint64_t EditorSession::fingerprint(const Node& root) const {
         if(const auto* emitter=dynamic_cast<const ParticleEmitterComponent*>(&node)) {
             pointer(&emitter->definition());bytes(&emitter->visibilityMask,sizeof(emitter->visibilityMask));
             for(const auto& particle:emitter->particles()) bytes(&particle,sizeof(particle));
-            for(std::size_t i=0;i<emitter->trailPointCount();++i){const auto& p=emitter->trailPoint(i);bytes(&p.position,sizeof(p.position));bytes(&p.birth,sizeof(p.birth));bytes(&p.distance,sizeof(p.distance));bytes(&p.scale,sizeof(p.scale));bytes(&p.breakBefore,sizeof(p.breakBefore));}
+            for(std::size_t i=0;i<emitter->trailPointCount();++i){const auto& p=emitter->trailPoint(i);bytes(&p.position,sizeof(p.position));bytes(&p.birth,sizeof(p.birth));bytes(&p.distance,sizeof(p.distance));bytes(&p.scale,sizeof(p.scale));bytes(&p.breakBefore,sizeof(p.breakBefore));bytes(&p.normal,sizeof(p.normal));}
         }
         for(const auto& child:node.children()) self(self,*child);
     };
@@ -209,6 +227,8 @@ bool EditorSession::duplicateSelected(Vec3 offset) {
     history_.reserve(history_.size()+1);if(!replayStructure(edit,true))return false;Command command;command.edit=std::move(edit);push(std::move(command));return true;
 }
 bool EditorSession::replay(Command& command,bool redo) {
+    if(std::holds_alternative<PrefabEdit>(command.edit))return replayPrefab(command);
+    if(std::holds_alternative<AnimationEdit>(command.edit))return replayAnimation(command);
     if(std::holds_alternative<EffectEdit>(command.edit))return replayEffect(command);
     if(std::holds_alternative<TerrainChange>(command.edit))return replayTerrain(command,redo);
     if(auto* batch=std::get_if<BatchTransform>(&command.edit)) {
@@ -241,6 +261,9 @@ bool EditorSession::replay(Command& command,bool redo) {
     } else if(auto* property=std::get_if<PropertyEdit>(&command.edit)) {
         if(!propertyReadOnlyReason(*node).empty()||!property->definition.accepts(*node)||property->definition.get(*node)!=(redo?property->before:property->after)) return false;
         writeProperty(*node,property->definition,redo?property->after:property->before);
+    } else if(auto* region=std::get_if<RegionManifestEdit>(&command.edit)){
+        auto* r=dynamic_cast<RegionManifestComponent*>(node);if(!r||r->manifest()!=(redo?region->before:region->after))return false;
+        r->configure(redo?region->after:region->before);
     } else if(auto* routeEdit=std::get_if<RouteEdit>(&command.edit)){
         auto* route=dynamic_cast<RouteComponent*>(node);if(!route||route->asset()!=(redo?routeEdit->before:routeEdit->after))return false;
         const auto previous=route->asset();route->configure(redo?routeEdit->after:routeEdit->before);

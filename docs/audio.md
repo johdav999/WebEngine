@@ -4,6 +4,9 @@
 `engine_core`. It owns its `AudioBackend`, buses and independent playback voices.
 `engine_audio_browser` implements that backend through `web/audio-system.js` and
 Web Audio. Scene construction alone never opens an audio device.
+The optional Windows DesktopAudioBackend implements the same interface with lazy
+SDL output and bounded PCM/float WAV decoding. AudioSystem buses/fades, scene
+handles and update policy remain shared; see [native audio contracts](windows-platform-services.md#audio-playback).
 
 ```cpp
 #include "engine/audio.hpp"
@@ -40,7 +43,8 @@ handles select master. Effective gain multiplies voice volume and every ancestor
 bus volume; a mute anywhere on the path sets gain to zero without losing volume
 or advancing/ending a voice. Volume and fade targets are finite numbers in [0,1].
 The browser applies this composed gain per voice; these buses do not currently
-offer DSP insert chains. Buses persist for the system lifetime.
+offer arbitrary DSP insert chains. Optional shared room sends are described in
+[environmental audio](environmental-audio.md). Buses persist for the system lifetime.
 
 Fades are linear and interruptible. New volume/fade commands replace the current
 fade, starting from the last published volume. New voice volume/fade commands
@@ -111,8 +115,10 @@ foreign listeners reset to an origin listener; a malformed transform retains the
 last valid pose. `setListenerPose` supplies a manual world pose and clears binding.
 Direct spatial voices use `options.spatial` and `setVoicePosition`. Browser
 spatialization uses HRTF and inverse distance attenuation with configurable
-reference/max distance and rolloff. Emitters are omnidirectional; occlusion,
-cones, Doppler and audio-driven gameplay are future extensions.
+reference/max distance and rolloff. Optional physics-ray occlusion, room reverb
+and streamed music are documented in [environmental audio](environmental-audio.md).
+Emitters remain omnidirectional; cones, Doppler and audio-driven gameplay remain
+future extensions.
 
 ## Activation, decoding and ownership
 
@@ -128,7 +134,8 @@ and [resume behavior](https://developer.mozilla.org/en-US/docs/Web/API/AudioCont
 remain platform responsibilities.
 
 The adapter lazily owns one AudioContext and its output node. Each active voice
-owns a BufferSource, GainNode and optional PannerNode. Simultaneous voices sharing
+owns a BufferSource, GainNode and optional PannerNode, low-pass and room send.
+Stream voices use a media element source instead of BufferSource. Simultaneous PCM voices sharing
 one sound identity reuse one AudioBuffer; the last voice completion/stop evicts
 that buffer. Future playback uploads it again from the retained shared PCM asset.
 The adapter disconnects nodes and nulls completion handlers on explicit stop;
@@ -182,7 +189,8 @@ bus gains, one-shot release, looping, HRTF channel balance, fade-stop, MP3/WAV
 imports, corrupt replacement, suspension and shutdown. Evidence goes to
 `build/evidence/audio-system/`. These sample-based checks do not establish
 physical speaker output, physical Android/iOS acceptance or sustained mobile
-performance. No native audio output backend is implemented; native tests use a
-deterministic backend to validate portable contracts.
+performance. Portable tests use a deterministic backend; the optional Windows
+adapter also has real SDL output, local encoded streams and native filtering/reverb.
+See [Windows audio](windows-audio-environment.md) and its separate platform evidence.
 
 See [recorded validation](audio-validation.md) for the checks actually run.

@@ -5,6 +5,15 @@
 #include <stdexcept>
 
 namespace engine {
+struct PostProcessing {
+    bool enabled=false;
+    float exposure=0, bloomStrength=.15f, bloomThreshold=1, saturation=1, contrast=1;
+    void validate() const {
+        if(!std::isfinite(exposure)||exposure< -8||exposure>8||!std::isfinite(bloomStrength)||bloomStrength<0||bloomStrength>2||
+           !std::isfinite(bloomThreshold)||bloomThreshold<0||bloomThreshold>32||!std::isfinite(saturation)||saturation<0||saturation>2||
+           !std::isfinite(contrast)||contrast<0||contrast>2) throw std::invalid_argument("Invalid post-processing settings");
+    }
+};
 enum class QualityProfile { Low, Balanced, High };
 enum class RenderBackend { WebGpu, WebGl2 };
 enum class RenderBackendPreference { Automatic, WebGpu, WebGl2 };
@@ -14,6 +23,8 @@ struct RenderCapabilities {
     bool timestampQuery=false, compressionBC=false, compressionETC2=false, compressionASTC=false;
     RenderBackend backend=RenderBackend::WebGpu;
     bool shadowMaps=true, pbr=true, instancing=true;
+    std::uint32_t maxLights=8; // First enabled masked lights per view, shared across types.
+    bool spotLights=true,spotLightShadows=true, hdrPostProcessing=false;
     bool msaa4x=false; // Actual color/depth attachment support; false before acquisition.
 };
 struct ResolutionBudget {
@@ -27,12 +38,20 @@ struct ResolutionBudget {
     }
 };
 struct RenderQuality {
+    PostProcessing post;
+    std::uint32_t directionalCascades=1; // 1 preserves authored fixed volumes; 2..4 fit camera slices.
+    float shadowDistance=80, cascadeLambda=.6f;
     ResolutionBudget resolution;
     std::uint32_t shadowResolution=1024, shadowFilterTaps=9, maxShadowMaps=4;
     bool lod=true, shadowLod=true, compressedTextures=true;
+    float detailScale=1; // Projected LOD pixels/texels multiplier; .25..1, presentation only.
     std::uint32_t msaaSamples=1; // Presentation only: 1 (off) or 4.
     void validate() const {
+        post.validate();
+        if(directionalCascades<1||directionalCascades>4||!std::isfinite(shadowDistance)||shadowDistance<=0||
+           !std::isfinite(cascadeLambda)||cascadeLambda<0||cascadeLambda>1) throw std::invalid_argument("Invalid shadow cascades");
         resolution.validate();
+        if(!std::isfinite(detailScale)||detailScale<.25f||detailScale>1)throw std::invalid_argument("Invalid rendering detail scale");
         if(msaaSamples!=1&&msaaSamples!=4)
             throw std::invalid_argument("MSAA requires 1 or 4 samples");
         if((shadowResolution!=256&&shadowResolution!=512&&shadowResolution!=1024&&shadowResolution!=2048)||

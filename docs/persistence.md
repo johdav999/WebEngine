@@ -7,8 +7,16 @@ document. Browser adapters in `web/storage.js` only store bytes. The playground
 offers **Scenes & assets → Browser saves → Save progress / Open progress** for
 one explicit IndexedDB checkpoint, with deletion. It never autosaves or restores
 without a request; the existing file workflow remains available.
+Optional Windows DesktopFiles supplies per-user save/settings directories and
+atomic byte replacement for these same archives; DesktopHost adds native open/save
+dialogs. See [native storage and checkpoint example](windows-platform-services.md).
 
 ## Stable saved identities
+
+Replay recordings use separate [WEGHOST 1 files](replay-recording.md) containing
+poses/events/context references. They are not scene/application snapshots or
+solver checkpoints. Runtime ReplayGhost actors and resources referenced only by
+them are omitted through the existing transient subtree rule.
 
 Every `Node` receives a generated `savedId()`, independent of its display name and
 scene-scoped `ActorId`/`ComponentId`. A random 64-bit process prefix and monotonic
@@ -121,7 +129,7 @@ Migration outputs count against allocation budgets. Existing archive accounting
 excludes object/allocator overhead, callback allocations and GPU/Jolt internals.
 CRC32 detects accidental corruption; it does not authenticate data.
 
-Application envelopes write `WESCENE\0` format version 23 (readers also accept versions 4-22), content kind 3, and the same
+Application envelopes write `WESCENE\0` format version 34 (readers also accept versions 4-33), content kind 3, and the same
 length/CRC header as scenes/assets. Application schema version is separate from
 engine format version. Scene and asset readers reject application content and vice
 versa. Store the returned bytes through any host byte adapter; native applications
@@ -193,7 +201,7 @@ Wasm, browser and downloaded-file interchange results from this change.
 
 See [vehicle contracts](vehicles.md) for the optional four-wheel component,
 COM/inertia and point-force body APIs, typed editor/preset/Play support and supported
-checkpoint state. Current scene/application/effect envelope writer version is 27;
+checkpoint state. Current scene/application/effect envelope writer version is 32;
 older formats remain readable. Vehicle configuration/checkpoints and visual saved
 references persist; commands, solver listeners and contact history do not.
 
@@ -220,3 +228,28 @@ Stage 5 writes archive envelope v27 with bounded source-only spline/profile/rout
 resources and built-in RouteComponent reconstruction. Runtime GPU/derived caches
 are rebuilt, while route-instance source sharing and required child saved IDs
 persist. See [route persistence](splines-routes.md#editor-and-persistence).
+
+
+Archive v28 adds SurfaceTrail mode with supplied world contact normals, bounded
+live ring/source normal continuation and existing age/sampler state. Pending
+contact input and renderer caches are excluded; resubmit a contact before the next
+variable update to continue. Older trail normals default +Y. Effect resources
+retain definitions only; scenes/application envelopes retain instance state. See
+[surface trail persistence](surface-trails.md#editor-and-persistence).
+
+Archive v29 persists FX composition definitions and live descendants/world anchors plus managed decal age; transient events/counters never replay after loading. See [composition persistence](fx-composition.md).
+
+
+Archive v30 appends inner/outer cone half angles and enables Spot LightComponent
+records. Readers 1..30 default older lights to 20/30 degrees without changing old
+layouts. Node transforms/directions, range, mask and appearance persist through
+scene/application saves, duplication and isolated Play. Invalid cones/shadow
+combinations are rejected before publication. See [spotlight persistence](spotlights.md#persistence-and-validation).
+
+General region streaming uses immutable authored manifests and separate static
+visual/collision sources. Stage 8 integrates editor bounds/reference/budget forms,
+exact-state history and isolated residency diagnostics. Archive v31 reads v1..31
+and persists manifests/selected restore keys, omitting managed resident subtrees
+and resource caches. Applications drive IO and gate restore/play on required
+collision; source asset buffers remain separately registered files. See
+[region streaming](region-streaming.md) and [validation](region-streaming-validation.md).

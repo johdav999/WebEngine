@@ -1,4 +1,5 @@
 #include "engine/asset_browser.hpp"
+#include "asset_fresh_url.hpp"
 #include <emscripten/fetch.h>
 #include <cstring>
 #include <stdexcept>
@@ -60,9 +61,11 @@ AssetLoader browserAssetLoader(std::string url,AssetByteDecoder decoder,BrowserA
         attributes.attributes=EMSCRIPTEN_FETCH_LOAD_TO_MEMORY|EMSCRIPTEN_FETCH_REPLACE;
         attributes.timeoutMSecs=options.timeoutMilliseconds;attributes.userData=transfer.get();
         attributes.onsuccess=succeeded;attributes.onerror=failed;attributes.onprogress=progressed;
-        transfer->fetch=emscripten_fetch(&attributes,url.c_str());
+        const auto location=options.fresh?asset_detail::freshUrl(url):url;
+        transfer->fetch=emscripten_fetch(&attributes,location.c_str());
         if(!transfer->fetch) context.fail("Could not start asset HTTP request");
         return [transfer]{transfer->close();};
     };
 }
+AssetLoader browserAssetFingerprintLoader(std::string url,AssetSourceOptions options){options.fresh=true;return browserDecodedAssetLoader(std::move(url),AssetDecodeKind::Fingerprint,AssetDecodeOptions{options,4096},"asset-worker.js");}
 } // namespace engine

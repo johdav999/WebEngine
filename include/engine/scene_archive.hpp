@@ -67,6 +67,8 @@ public:
     // Clone built-in subtrees, share immutable assets, regenerate all saved identities.
     // No callbacks/custom behavior, scene roots or independently protected children.
     static std::unique_ptr<Node> duplicateSubtree(const Node& node,const ArchiveLimits& limits={});
+    // Detached copy retaining saved IDs and shared immutable resources; adopt only into a different root.
+    static std::unique_ptr<Node> cloneSubtree(const Node& node,const ArchiveLimits& limits={});
 #ifndef __EMSCRIPTEN__
     // Write a sibling temporary file and atomically replace the destination.
     static void saveFile(const std::filesystem::path& path,const Scene& scene,std::span<const RenderView> views={},

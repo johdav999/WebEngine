@@ -59,7 +59,7 @@ struct Output {
     }
     let alpha=texel.a*in.color.a*fade;
     let linear=texel.rgb*in.color.rgb;
-    let mapped=linear/(vec3f(1)+linear);
+    let mapped=select(linear/(vec3f(1)+linear),linear,hdrOutput);
     // Match the current mesh renderer's display conversion, premultiply for blending.
-    return vec4f(pow(fogApply(camera.fog,mapped,in.world,in.additive>0.5),vec3f(1.0/2.2))*alpha,alpha);
+    return vec4f(hdrEncode(fogApply(camera.fog,mapped,in.world,in.additive>0.5))*alpha,alpha);
 }

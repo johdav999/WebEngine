@@ -28,10 +28,21 @@ public:
     void clearController(); // Keep the current pose/playback; discard control state.
     const auto& controller() const { return controller_; }
     std::size_t controllerState() const { return controllerState_; }
+    // Transient diagnostics, reset on controller replacement; not a gameplay queue.
+    std::optional<std::size_t> lastTransition() const { return lastTransition_; }
+    std::uint64_t transitionCount() const { return transitionCount_; }
     void setParameter(std::string_view name,AnimationParameterValue value);
     AnimationParameterValue parameter(std::string_view name) const;
     void trigger(std::string_view name);
     void resetTrigger(std::string_view name);
+    void restartLayer(std::string_view name); // Reset only this overlay's clock.
+    double layerTime(std::string_view name) const;
+    void setIkTarget(std::string_view name,const IkTarget&);
+    void setIkTargets(std::span<const IkTarget>); // Atomic; also evaluates while paused.
+    std::span<const IkTarget> ikTargets() const { return ikTargets_; }
+    const IkResult& ikResult() const { return ikResult_; }
+    // Borrowed until the next pose/control update; empty without controller IK.
+    std::span<const JointPose> poseBeforeIk() const { return ikTargets_.empty()?std::span<const JointPose>{}:composed_; }
     // Owned copies; no callbacks or borrowed scene pointers. Controls/seek clear events.
     std::span<const AnimationEvent> events() const { return events_; }
     std::vector<AnimationEvent> consumeEvents();
@@ -57,6 +68,8 @@ protected:
     void tick(double deltaSeconds) override { update(deltaSeconds); }
 private:
     friend class ArchiveCodec;
+    friend class SkeletalMeshComponent;
+    void swapPlayback(AnimationComponent&) noexcept;
     SkeletonComponent& target_;
     std::shared_ptr<const Skeleton> asset_;
     std::vector<JointPose> pose_,second_,fadeFrom_;
@@ -71,8 +84,22 @@ private:
     std::shared_ptr<const AnimationControllerDefinition> controller_;
     std::vector<AnimationParameterValue> parameters_;
     std::size_t controllerState_=0;
+    std::optional<std::size_t> lastTransition_;
+    std::uint64_t transitionCount_=0;
     bool completed_=false;
     std::vector<AnimationEvent> events_;
+    std::vector<double> layerTimes_;
+    std::vector<JointPose> composed_;
+    std::vector<JointPose> ikPose_;
+    std::vector<IkTarget> ikTargets_;
+    IkResult ikResult_;
+    struct Source { std::size_t clip=0;float weight=1;double rate=1; };
+    struct Sources { std::array<Source,64> values{};std::size_t count=0; };
+    Sources motionSources(const AnimationControllerState&) const;
+    Sources baseSources() const;
+    double playbackDuration() const;
+    JointPose sampleSources(const Sources&,double time,bool loop,std::size_t joint) const;
+    void applyLayers();
     std::size_t parameterIndex(std::string_view name) const;
     float controllerWeight(std::size_t state) const;
     void enterControllerState(std::size_t state,double fadeSeconds);

@@ -95,5 +95,5 @@ fn cloudLayer(d:vec3f,background:vec3f) -> vec3f {
         radiance=textureSampleLevel(panorama,panoramaSampler,uv,0).rgb;
     }
     let linear=cloudLayer(d,radiance)*sky.horizon.w;
-    return vec4f(pow(fogApply(sky.fog,linear/(vec3f(1)+linear),sky.fog.eye.xyz+o.offset+d*(sky.fog.height.w/max(dot(d,sky.fog.forward.xyz),0.001)),false),vec3f(1.0/2.2)),1);
+    return vec4f(hdrEncode(fogApply(sky.fog,select(linear/(vec3f(1)+linear),linear,hdrOutput),sky.fog.eye.xyz+o.offset+d*(sky.fog.height.w/max(dot(d,sky.fog.forward.xyz),0.001)),false)),1);
 }

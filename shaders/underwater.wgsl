@@ -27,8 +27,8 @@ fn distanceInWater(start: vec3f,end: vec3f) -> f32 {
     else {interval.x=max(interval.x,-origin.y/delta.y);}
     return min(fog.options.x,max(0.0,interval.y-interval.x)*length(end-start));
 }
-fn decode(c: vec3f) -> vec3f {return select(c/12.92,pow((c+0.055)/1.055,vec3f(2.4)),c>vec3f(0.04045));}
-fn encode(c: vec3f) -> vec3f {return select(c*12.92,1.055*pow(max(c,vec3f(0)),vec3f(1.0/2.4))-0.055,c>vec3f(0.0031308));}
+fn decode(c: vec3f) -> vec3f {if(hdrOutput){return c;}return select(c/12.92,pow((c+0.055)/1.055,vec3f(2.4)),c>vec3f(0.04045));}
+fn encode(c: vec3f) -> vec3f {if(hdrOutput){return c;}return select(c*12.92,1.055*pow(max(c,vec3f(0)),vec3f(1.0/2.4))-0.055,c>vec3f(0.0031308));}
 // Smooth animated cellular ridges, projected in the water plane's coordinates.
 fn causticPattern(p: vec2f,t: f32) -> f32 {
     let cell=floor(p);let f=fract(p);var nearest=vec2f(8,8);

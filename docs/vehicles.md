@@ -91,6 +91,10 @@ body on reconciliation, and persist in v24. Zero/negative scale is invalid.
 
 ## Wheel presentation
 
+Pose/event session recording and non-colliding ghosts are now available in the
+browser and Windows examples. Capture uses authoritative chassis/current wheel
+poses, not the presentation interpolation below. See [replay contracts](replay-recording.md).
+
 `setVisuals(array<string,4>)` binds optional stable saved IDs of direct nonphysics
 chassis children; empty entries mean no mesh. Visual nodes remain ordinary nodes.
 Their authored local transforms are offsets/scale after the sampled wheel pose.

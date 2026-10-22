@@ -29,8 +29,12 @@ No shared memory, pthreads or cross-origin-isolation headers are needed.
 their default resource limits. Importing embedded textures is supported; this
 adapter does not perform implicit companion-file discovery or serialize arbitrary
 decoder callbacks. Existing `browserAssetLoader` still accepts custom synchronous
-decoders. Native hosts can run `decodeAssetBytes` on their own executor and use
-`completeDecodedAsset` with the synchronized completion endpoint.
+decoders. Windows now supplies an explicitly owned `DesktopAssetExecutor` over
+the same `AssetLoader`, request/progress/preparation contracts, portable
+`AssetSourceOptions`/`AssetDecodeOptions`, decode transport and hydration validator.
+See [Windows background assets](windows-background-assets.md) for native bounds,
+noninterruptible importer cancellation and joining teardown. Other native hosts
+may supply their own executors.
 
 Each main Wasm module admits at most two active workers, in request order. Queued
 operations hold URLs/options, not source bytes. A worker owns HTTP, source parsing,
@@ -51,7 +55,7 @@ Owner hydration still copies and validates resource data, so this is not a promi
 of zero main-thread load cost. Isolated heaps, source chunks, archive staging,
 transfer buffers and owner resources can coexist temporarily. Worker concurrency
 and per-operation caps are not a total application memory budget. No implicit
-native thread pool or automatic LRU is introduced.
+global native thread pool or automatic LRU is introduced.
 
 ## GPU upload admission
 

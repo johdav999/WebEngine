@@ -4,6 +4,7 @@
 // Application example, deliberately outside engine_core.
 void audioDemoCommand(engine::Scene&,int command,float value);
 bool audioDemoLoad(std::uint32_t rate,std::uint32_t channels,std::span<const float> samples);
+bool audioDemoStream(const char* uri);
 void updateAudioDemo(const engine::Scene&,double seconds);
 void suspendAudioDemo(bool value);
 void stopAudioPreview();

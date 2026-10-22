@@ -76,7 +76,8 @@ struct Fixture {
             check(bool(retried.get<Mesh>()),"Retry resource missing");record("Retry starts a fresh HTTP operation after failure");
             auto& assets=app.assets();
             assets.registerAsset<Mesh>(AssetId{"worker"},browserDecodedAssetLoader("Knarr.fbx",AssetDecodeKind::Fbx));
-            assets.registerAsset<Mesh>(AssetId{"worker-glb"},browserDecodedAssetLoader("fixture.glb",AssetDecodeKind::Glb));
+            AssetDecodeOptions sharedPolicy;sharedPolicy.source.maxBytes=32*1024*1024;
+            assets.registerAsset<Mesh>(AssetId{"worker-glb"},browserDecodedAssetLoader("fixture.glb",AssetDecodeKind::Glb,sharedPolicy,"asset-worker.js"));
             assets.registerAsset<Texture>(AssetId{"worker-bundle"},browserDecodedAssetLoader("fixture.wetex",AssetDecodeKind::TextureBundle));
             assets.registerAsset<Texture>(AssetId{"worker-image"},browserDecodedAssetLoader("fixture.tga",AssetDecodeKind::Image));
             assets.registerAsset<Mesh>(AssetId{"worker-bad"},browserDecodedAssetLoader("corrupt.fbx",AssetDecodeKind::Fbx));

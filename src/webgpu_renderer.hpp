@@ -7,7 +7,7 @@
 #include "engine/render_view.hpp"
 #include "engine/render_quality.hpp"
 #include "engine/upload_budget.hpp"
-#include <webgpu/webgpu_cpp.h>
+#include "webgpu_host.hpp"
 #include <array>
 #include <unordered_map>
 #include <map>
@@ -17,8 +17,11 @@ class GuiSystem;
 class GuiRenderer;
 class WebGpuRenderer {
 public:
+    WebGpuRenderer(Scene& scene,WebGpuHost& host);
+#ifdef __EMSCRIPTEN__
     explicit WebGpuRenderer(Scene& scene);
     WebGpuRenderer(Scene& scene, CameraComponent& camera);
+#endif
     void setScene(Scene& scene,std::span<const RenderView> views); // Validates before switching; caller retains ownership.
     void setViews(std::span<const RenderView> views);
     std::span<const RenderView> views() const { return views_.views(); }
@@ -61,6 +64,7 @@ public:
     void abandon() { releaseGpu();failed_=true; }
     void setFallbackAllowed(bool allowed) { fallbackAllowed_=allowed; }
 private:
+    WebGpuHost& host_;
     struct CallbackState { WebGpuRenderer* owner; };
     std::shared_ptr<CallbackState> callbacks_=std::make_shared<CallbackState>(CallbackState{this});
     struct GpuMesh {
@@ -128,6 +132,17 @@ private:
     wgpu::Device device_;
     wgpu::Surface surface_;
     wgpu::TextureFormat format_{};
+    bool hdr_=false;
+    wgpu::TextureFormat colorFormat() const {return hdr_?wgpu::TextureFormat::RGBA16Float:format_;}
+    wgpu::Texture bloomTexture_;
+    wgpu::TextureView bloomView_;
+    wgpu::BindGroupLayout postLayout_;
+    wgpu::RenderPipeline bloomPipeline_,postPipeline_;
+    wgpu::Buffer postBuffer_;
+    std::array<float,8> postValues_{};
+    std::uint32_t postWidth_=0,postHeight_=0;
+    void drawPost(wgpu::CommandEncoder&,wgpu::TextureView);
+
     wgpu::Texture depth_;
     wgpu::TextureView depthView_;
     bool waterCapture_=false;
@@ -201,7 +216,7 @@ private:
         std::vector<ParticleInstance> particleShadow;
         std::vector<RibbonVertex> ribbonShadow;
         FogUniform fog;
-        std::array<std::byte,2464> frameUniformShadow{};
+        std::array<std::byte,2336> frameUniformShadow{};
         std::array<wgpu::Buffer,maxShadowLights> shadowBuffers;
         std::array<wgpu::BindGroup,maxShadowLights> shadowBindings;
         std::array<Mat4,maxShadowLights> shadowMatrices{};

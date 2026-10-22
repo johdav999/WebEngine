@@ -20,12 +20,14 @@ struct ParticleCollisionSettings {
     void validate() const;
 };
 struct ParticleImpact { ActorId actor;ComponentId body;Vec3 point,normal,velocity;float speed=0,particleAge=0; };
+enum class ParticleEventType { Birth, Impact, Death };
+struct ParticleEvent { ParticleEventType type;Vec3 position,normal,velocity; };
 struct Color4 { float r=1,g=1,b=1,a=1; };
 struct SizeKey { float time=0,value=1; };
 struct ColorKey { float time=0; Color4 value; };
 struct VectorKey { float time=0; Vec3 value; };
 enum class ParticleShape { Box, Sphere, Disc, Cone, MeshSurface };
-enum class ParticleRenderMode { Billboard, Ribbon, Mesh };
+enum class ParticleRenderMode { Billboard, Ribbon, Mesh, SurfaceTrail };
 enum class ParticleAlignment { Camera, Velocity, Plane };
 struct ParticleBurst { double time=0; std::uint32_t count=1; };
 enum class ParticleSpace { Local, World };
@@ -76,13 +78,15 @@ struct ParticleEmitterDefinition {
     float sizeAt(float age) const;
     Color4 colorAt(float age) const;
 };
-struct TrailPoint { Vec3 position{}; double birth=0,distance=0; float scale=1; bool breakBefore=true; };
+struct TrailPoint { Vec3 position{}; double birth=0,distance=0; float scale=1; bool breakBefore=true; Vec3 normal{0,1,0}; };
 struct RibbonDraw {
     Vec3 begin{},end{},beginTangent{},endTangent{};
     float beginWidth=1,endWidth=1,uBegin=0,uEnd=1,softDistance=0;
     Color4 beginColor{},endColor{};
     std::shared_ptr<const Texture> texture;
     BlendMode blend=BlendMode::Alpha;
+    bool surfaceAligned=false;
+    Vec3 beginNormal{0,1,0},endNormal{0,1,0};
 };
 // Pooled CPU records, independent of scene nodes and GPU allocations.
 struct Particle {
@@ -124,11 +128,17 @@ public:
     std::uint64_t droppedParticles() const { return dropped_; }
     std::uint32_t visibilityMask=1;
     std::span<const ParticleImpact> impacts() const { return impacts_; }
+    void captureEvents(std::uint32_t mask,std::uint32_t capacity=256);
+    std::span<const ParticleEvent> events() const { return events_; }
+    std::uint64_t droppedEvents() const { return droppedEvents_; }
     void clearImpacts() { impacts_.clear(); } // Queued output is transient, never invoked as callbacks.
     std::uint32_t collisionQueries() const { return collisionQueries_; }
     std::uint64_t skippedCollisionSteps() const { return skippedCollisionSteps_; }
     std::uint64_t droppedImpacts() const { return droppedImpacts_; }
-    void breakTrail() { trailSourceValid_=false;trailCarry_=0; }
+    void breakTrail() { trailSourceValid_=false;trailCarry_=0;surfaceContactPending_=false; }
+    // Owner-thread world contact for the next variable update. No submission means a gap.
+    // Last submission wins. Normals are normalized; receiver identity/lifetime is application policy.
+    void submitSurfaceContact(Vec3 position,Vec3 normal);
     std::size_t trailPointCount() const { return trailCount_; }
     const TrailPoint& trailPoint(std::size_t index) const;
     void appendRibbons(std::vector<RibbonDraw>& output,const Mat4& world) const;
@@ -138,11 +148,19 @@ protected:
     void tick(double deltaSeconds) override;
 private:
     friend class ArchiveCodec;
+    friend class EffectComponent;
+    std::vector<ParticleEvent> events_;
+    std::uint32_t eventMask_=0,eventCapacity_=256;
+    std::uint64_t droppedEvents_=0;
+    Vec3 inheritedVelocity_{};
+    void event(ParticleEventType type,const Particle& particle);
     std::shared_ptr<const ParticleEmitterDefinition> definition_;
     std::vector<Particle> particles_;
     std::vector<TrailPoint> trail_; // Fixed-capacity ring, oldest-first through trailPoint().
     std::size_t trailHead_=0,trailCount_=0;
     Vec3 trailSource_{};
+    Vec3 trailSourceNormal_{0,1,0},surfaceContact_{},surfaceNormal_{0,1,0};
+    bool surfaceContactPending_=false; // Transient input, excluded from archives.
     double trailCarry_=0,trailDistance_=0;
     bool trailSourceValid_=false;
     void tickTrail(double seconds);

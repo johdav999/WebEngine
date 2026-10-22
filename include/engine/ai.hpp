@@ -75,7 +75,7 @@ class PathFollower {
 public:
     explicit PathFollower(PathFollowSettings settings={});
     void follow(std::span<const Vec3> points); // Copies atomically; 1..4098 points.
-    void step(CharacterMotorComponent& motor,double seconds);
+    void step(CharacterMotorComponent& motor,double seconds,bool yielding=false);
     void cancel(CharacterMotorComponent& motor) noexcept;
     FollowStatus status() const { return status_; }
     std::size_t nextPoint() const { return next_; }
@@ -112,7 +112,7 @@ public:
     void navigate(std::shared_ptr<const NavigationSurface> surface,Vec3 goal); // Atomic validation; takes effect on next step.
     void navigateSource(std::shared_ptr<const NavigationSource> source,Vec3 goal);
     bool retry(); // Explicit fresh budget for terminal failure; keeps graph and goal.
-    void step(CharacterMotorComponent& motor,double seconds);
+    void step(CharacterMotorComponent& motor,double seconds,bool yielding=false);
     void cancel(CharacterMotorComponent& motor) noexcept;
     NavigationStatus status() const { return status_; }
     const PathFollower& follower() const { return follower_; }

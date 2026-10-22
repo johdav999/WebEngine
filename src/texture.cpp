@@ -1,3 +1,4 @@
+#include "engine/performance_timeline.hpp"
 #include "engine/texture.hpp"
 #include "engine/math.hpp"
 #include <stb_image.h>
@@ -21,6 +22,7 @@ void CompressedTexture::validate(std::uint32_t width,std::uint32_t height) const
     if(!complete) throw std::invalid_argument("Compressed texture requires a complete mip chain");
 }
 std::shared_ptr<const Texture> Texture::loadMemory(std::span<const std::byte> bytes,std::string name,const TextureLimits& limits) {
+    ProfileScope profile(ProfileCategory::Loading,"Image decode",name);
     if(!limits.maxFileBytes || !limits.maxDimension || !limits.maxDecodedBytes)
         throw std::invalid_argument("Invalid texture limits");
     if(bytes.empty() || bytes.size()>limits.maxFileBytes || bytes.size()>std::size_t(std::numeric_limits<int>::max()))

@@ -1,27 +1,12 @@
+#include "engine/performance_timeline.hpp"
 #include "webgpu_renderer.hpp"
 #include "engine/mesh_optimizer.hpp"
 #include "shaders.hpp"
+#include "hdr_shader.hpp"
 #include "gui_renderer.hpp"
-#include <emscripten.h>
-#include <emscripten/html5.h>
 #include <cstddef>
 #include <cstring>
 #include <limits>
-
-EM_JS(void, report_status, (const char* text, int error), {
-    window.engineStatus(UTF8ToString(text), !!error);
-});
-EM_JS(void, report_stats, (int meshes, int lights, int layers), {
-    window.engineStats(meshes, lights, layers);
-});
-EM_JS(void, report_performance, (const char* json,const char* build), { const snapshot=JSON.parse(UTF8ToString(json));snapshot.build=UTF8ToString(build);window.enginePerformance(snapshot); });
-EM_JS(int, gpu_timing_requested, (), { return new URLSearchParams(location.search).get('gpuTiming') !== 'off'; });
-EM_JS(int, webgpu_available, (), { return isSecureContext && !!navigator.gpu; });
-
-EM_JS(void, report_render_state, (const char* json), { window.EngineQuality?.report(JSON.parse(UTF8ToString(json))); });
-EM_JS(double, canvas_css_width, (), { return document.querySelector('#viewport').clientWidth; });
-EM_JS(double, canvas_css_height, (), { return document.querySelector('#viewport').clientHeight; });
-EM_JS(double, canvas_pixel_ratio, (), { return window.devicePixelRatio || 1; });
 
 namespace engine {
 namespace { struct UploadDeferred {}; }
@@ -30,12 +15,13 @@ std::string messageText(wgpu::StringView message) {
     return message.data ? std::string(message.data, message.length == WGPU_STRLEN ? std::strlen(message.data) : message.length) : std::string{};
 }
 struct alignas(16) Float4 { float x=0,y=0,z=0,w=0; };
-struct GpuLight { Float4 positionType,directionRange,colorIntensity; };
-struct GpuShadow { Mat4 viewProjection; Float4 options; };
-struct FrameUniform { Mat4 viewProjection; Float4 ambientCount; std::array<GpuLight,WebGpuRenderer::maxLights> lights; Float4 cameraEnvironment,environmentOptions; std::array<GpuShadow,WebGpuRenderer::maxLights> shadows; Float4 waterClock; Mat4 inverseViewProjection; Float4 viewport,extent,viewForward; Mat4 reflectionViewProjection; Float4 reflectionPlane,reflectionOptions; WaterInteractionParameters interactions; FogUniform fog; };
+struct GpuLight { Float4 positionType,directionRange,colorIntensity,cone; };
+static_assert(sizeof(GpuLight)==64);
+struct GpuShadow { Mat4 viewProjection; Float4 options,selection; };
+struct FrameUniform { Mat4 viewProjection; Float4 ambientCount; std::array<GpuLight,WebGpuRenderer::maxLights> lights; Float4 cameraEnvironment,environmentOptions; std::array<GpuShadow,WebGpuRenderer::maxShadowLights> shadows; Float4 waterClock; Mat4 inverseViewProjection; Float4 viewport,extent,viewForward; Mat4 reflectionViewProjection; Float4 reflectionPlane,reflectionOptions; WaterInteractionParameters interactions; FogUniform fog; };
 struct ParticleCamera { Mat4 viewProjection;Float4 right,up; FogUniform fog; Mat4 inverseVp;Float4 viewport,forward; };
 static_assert(sizeof(ParticleCamera)==256);
-static_assert(sizeof(FrameUniform)==2464 && sizeof(ObjectUniform)==160);
+static_assert(sizeof(FrameUniform)==2336 && sizeof(ObjectUniform)==160);
 constexpr std::uint32_t objectStride=RenderFrame::objectStride;
 wgpu::Buffer makeBuffer(const wgpu::Device& device,std::uint64_t size,wgpu::BufferUsage usage,const char* label) {
     wgpu::BufferDescriptor desc{}; desc.label=label; desc.size=size; desc.usage=usage|wgpu::BufferUsage::CopyDst;
@@ -54,7 +40,7 @@ wgpu::BlendState fxBlend(bool additive) {
 void WebGpuRenderer::reportState(const char* state) {
     const auto& c=capabilities_;const auto& q=quality_;
     const auto compressedCount=std::count_if(textures_.begin(),textures_.end(),[](const auto& entry){return entry.second.compressed;});
-    const auto json=std::string("{\"backend\":\"webgpu\",\"shadows\":true,\"pbr\":true,\"instancing\":true,\"state\":\"")+state+"\",\"generation\":"+std::to_string(deviceGeneration_)+
+    const auto json=std::string("{\"spotLights\":true,\"spotLightShadows\":true,\"maxLights\":8,\"backend\":\"webgpu\",\"shadows\":true,\"pbr\":true,\"instancing\":true,\"state\":\"")+state+"\",\"generation\":"+std::to_string(deviceGeneration_)+
         ",\"recoveryAttempts\":"+std::to_string(recoveryAttempts_)+",\"maxTextureDimension2D\":"+std::to_string(c.maxTextureDimension2D)+
         ",\"maxTextureArrayLayers\":"+std::to_string(c.maxTextureArrayLayers)+",\"maxBufferSize\":"+std::to_string(c.maxBufferSize)+
         ",\"timestampQuery\":"+(c.timestampQuery?"true":"false")+",\"compressionBC\":"+(c.compressionBC?"true":"false")+
@@ -64,29 +50,31 @@ void WebGpuRenderer::reportState(const char* state) {
         ",\"maxDimension\":"+std::to_string(q.resolution.maxDimension)+",\"maxPixels\":"+std::to_string(q.resolution.maxPixels)+
         ",\"shadowResolution\":"+std::to_string(shadowResolution_)+",\"shadowFilterTaps\":"+std::to_string(shadowFilterTaps_)+
         ",\"msaaSamples\":"+std::to_string(q.msaaSamples)+",\"effectiveMsaaSamples\":"+std::to_string(effectiveMsaaSamples())+",\"msaa4x\":"+(c.msaa4x?"true":"false")+
-        ",\"maxShadowMaps\":"+std::to_string(q.maxShadowMaps)+",\"lod\":"+(lodEnabled_?"true":"false")+
+        ",\"detailScale\":"+std::to_string(q.detailScale)+",\"maxShadowMaps\":"+std::to_string(q.maxShadowMaps)+",\"lod\":"+(lodEnabled_?"true":"false")+
         ",\"shadowLod\":"+(shadowLodEnabled_?"true":"false")+",\"compressedTextures\":"+(q.compressedTextures?"true":"false")+"}";
-    report_render_state(json.c_str());
+    auto report=json;report.pop_back();report+=",\"postEnabled\":"+std::string(q.post.enabled?"true":"false")+",\"hdrPostProcessing\":true,\"effectivePost\":"+(hdr_?"true":"false")+",\"directionalCascades\":"+std::to_string(q.directionalCascades)+",\"shadowDistance\":"+std::to_string(q.shadowDistance)+",\"postExposure\":"+std::to_string(q.post.exposure)+",\"postBloom\":"+std::to_string(q.post.bloomStrength)+",\"postThreshold\":"+std::to_string(q.post.bloomThreshold)+",\"postSaturation\":"+std::to_string(q.post.saturation)+",\"postContrast\":"+std::to_string(q.post.contrast)+"}";
+    host_.renderState(report.c_str());
 }
 void WebGpuRenderer::fail(const std::string& message) {
     ready_=false;initializing_=false;
     if(recoveryAttempts_ && recoveryAttempts_<3) {
-        recoveryPending_=true;retryAtMs_=emscripten_get_now()+250*recoveryAttempts_;reportState("recovering");
-        report_status(message.c_str(),0);
-    } else { recoveryPending_=false;failed_=true;reportState("failed");report_status(message.c_str(),canvasAcquired_||!fallbackAllowed_?1:0); }
+        recoveryPending_=true;retryAtMs_=host_.nowMs()+250*recoveryAttempts_;reportState("recovering");
+        host_.status(message.c_str(),0);
+    } else { recoveryPending_=false;failed_=true;reportState("failed");host_.status(message.c_str(),canvasAcquired_||!fallbackAllowed_?1:0); }
 }
 void WebGpuRenderer::deviceLost(const std::string& message) {
     ready_=false;initializing_=false;
     if(recoveryAttempts_>=3) { fail("GPU recovery exhausted: "+message);return; }
-    recoveryPending_=true;retryAtMs_=emscripten_get_now()+250;reportState("recovering");
-    report_status("GPU disconnected. Reconnecting…",0);
+    recoveryPending_=true;retryAtMs_=host_.nowMs()+250;reportState("recovering");
+    host_.status("GPU disconnected. Reconnecting…",0);
 }
 void WebGpuRenderer::serviceRecovery() {
-    if(initializing_&&!canvasAcquired_&&emscripten_get_now()-initializationStartedMs_>=10000) {
+    if(instance_) host_.processEvents(instance_);
+    if(initializing_&&!canvasAcquired_&&host_.nowMs()-initializationStartedMs_>=10000) {
         callbacks_->owner=nullptr; // Late acquisition must not revive a timed-out backend.
         fail("WebGPU acquisition timed out");
     }
-    if(recoveryPending_&&!initializing_&&emscripten_get_now()>=retryAtMs_) {
+    if(recoveryPending_&&!initializing_&&host_.nowMs()>=retryAtMs_) {
         recoveryPending_=false;++recoveryAttempts_;releaseGpu();initialize();
     }
 }
@@ -96,9 +84,10 @@ void WebGpuRenderer::retryRecovery() {
 }
 void WebGpuRenderer::simulateDeviceLoss() { if(ready_&&device_) device_.Destroy(); }
 void WebGpuRenderer::resizeCanvas() {
-    const auto extent=resolveResolution(canvas_css_width(),canvas_css_height(),canvas_pixel_ratio(),quality_.resolution,capabilities_);
-    int w=0,h=0;emscripten_get_canvas_element_size("#viewport",&w,&h);
-    if(w!=int(extent.width)||h!=int(extent.height)) emscripten_set_canvas_element_size("#viewport",extent.width,extent.height);
+    const auto size=host_.logicalSize();
+    const auto extent=resolveResolution(size.width,size.height,size.pixelRatio,quality_.resolution,capabilities_);
+    int w=0,h=0;host_.drawableSize(w,h);
+    if(w!=int(extent.width)||h!=int(extent.height)) host_.resizeDrawable(extent.width,extent.height);
 }
 void WebGpuRenderer::setQuality(const RenderQuality& quality) {
     quality.validate(); // Validate the entire candidate before publishing any setting.
@@ -108,10 +97,13 @@ void WebGpuRenderer::setQuality(const RenderQuality& quality) {
     lodEnabled_=quality.lod;shadowLodEnabled_=quality.shadowLod;shadowOverflowReported_=false;
     resizeCanvas();resetMeasurements();reportState(ready_?"ready":failed_?"failed":"initializing");
 }
-WebGpuRenderer::WebGpuRenderer(Scene& scene) : scene_(&scene) {}
+WebGpuRenderer::WebGpuRenderer(Scene& scene,WebGpuHost& host) : host_(host),scene_(&scene) {}
+#ifdef __EMSCRIPTEN__
+WebGpuRenderer::WebGpuRenderer(Scene& scene) : WebGpuRenderer(scene,browserWebGpuHost()) {}
 WebGpuRenderer::WebGpuRenderer(Scene& scene,CameraComponent& camera) : WebGpuRenderer(scene) {
     const RenderView view{&camera};setViews({&view,1});
 }
+#endif
 void WebGpuRenderer::setViews(std::span<const RenderView> views) {
     views_.set(views);
     // Release removed views, retain caches for unchanged slots.
@@ -125,6 +117,9 @@ void WebGpuRenderer::setScene(Scene& scene,std::span<const RenderView> views) {
 }
 WebGpuRenderer::~WebGpuRenderer() { releaseGpu(); }
 void WebGpuRenderer::releaseGpu() {
+    bloomTexture_=nullptr;bloomView_=nullptr;postLayout_=nullptr;bloomPipeline_=nullptr;postPipeline_=nullptr;postBuffer_=nullptr;
+    postWidth_=postHeight_=0;postValues_={};hdr_=false;
+
     // Invalidate every outstanding adapter/device/timestamp callback before destroying resources.
     callbacks_->owner=nullptr;
     ready_=false;initializing_=false;guiRenderer_.reset();
@@ -153,19 +148,20 @@ void WebGpuRenderer::releaseGpu() {
 }
 void WebGpuRenderer::initialize() {
     if(ready_||initializing_||failed_||recoveryPending_) return;
-    if(!webgpu_available()) { fail("WebGPU is unavailable. Automatic mode can use WebGL 2.");return; }
+    if(!host_.available()) { fail("WebGPU is unavailable. Automatic mode can use WebGL 2.");return; }
     callbacks_=std::make_shared<CallbackState>(CallbackState{this});
-    initializing_=true;initializationStartedMs_=emscripten_get_now();reportState(recoveryAttempts_?"recovering":"initializing");
-    instance_=wgpu::CreateInstance();
-    wgpu::RequestAdapterOptions options{}; options.powerPreference=wgpu::PowerPreference::HighPerformance;
-    instance_.RequestAdapter(&options,wgpu::CallbackMode::AllowSpontaneous,
+    initializing_=true;initializationStartedMs_=host_.nowMs();reportState(recoveryAttempts_?"recovering":"initializing");
+    instance_=host_.createInstance();
+    wgpu::RequestAdapterOptions options{}; options.powerPreference=wgpu::PowerPreference::HighPerformance;host_.adapterOptions(options);
+    instance_.RequestAdapter(&options,host_.callbackMode(),
         [callbacks=callbacks_](wgpu::RequestAdapterStatus status,wgpu::Adapter adapter,wgpu::StringView message) {
             auto* self=callbacks->owner; if(!self) return;
             if(status!=wgpu::RequestAdapterStatus::Success) { self->fail("No WebGPU adapter: "+messageText(message)); return; }
             self->adapter_=std::move(adapter);
+            self->host_.adapterSelected(self->adapter_);
             wgpu::DeviceDescriptor desc{};
             self->gpuTimingSupported_=self->adapter_.HasFeature(wgpu::FeatureName::TimestampQuery);
-            self->gpuTimingEnabled_=self->gpuTimingSupported_ && gpu_timing_requested();
+            self->gpuTimingEnabled_=self->gpuTimingSupported_ && self->host_.timingRequested();
             std::vector<wgpu::FeatureName> features;
             if(self->gpuTimingEnabled_) features.push_back(wgpu::FeatureName::TimestampQuery);
             for(auto feature:{wgpu::FeatureName::TextureCompressionBC,wgpu::FeatureName::TextureCompressionETC2,wgpu::FeatureName::TextureCompressionASTC})
@@ -175,16 +171,16 @@ void WebGpuRenderer::initialize() {
             desc.SetUncapturedErrorCallback([](const wgpu::Device&,wgpu::ErrorType,wgpu::StringView message,CallbackState* state) {
                 if(state->owner) state->owner->fail("WebGPU error: "+messageText(message));
             },callbacks.get());
-            desc.SetDeviceLostCallback(wgpu::CallbackMode::AllowSpontaneous,[callbacks](const wgpu::Device&,wgpu::DeviceLostReason,wgpu::StringView message) {
+            desc.SetDeviceLostCallback(self->host_.callbackMode(),[callbacks](const wgpu::Device&,wgpu::DeviceLostReason,wgpu::StringView message) {
                 if(callbacks->owner) callbacks->owner->deviceLost(messageText(message));
             });
-            self->adapter_.RequestDevice(&desc,wgpu::CallbackMode::AllowSpontaneous,
+            self->adapter_.RequestDevice(&desc,self->host_.callbackMode(),
                 [callbacks](wgpu::RequestDeviceStatus status,wgpu::Device device,wgpu::StringView message) {
                     auto* self=callbacks->owner; if(!self) return;
                     if(status!=wgpu::RequestDeviceStatus::Success) { self->fail("Cannot create WebGPU device: "+messageText(message)); return; }
                     self->device_=std::move(device);
                     wgpu::Limits limits{};
-                    if(!self->device_.GetLimits(&limits)) { self->fail("Cannot query WebGPU limits");return; }
+                    if(self->device_.GetLimits(&limits)!=wgpu::Status::Success) { self->fail("Cannot query WebGPU limits");return; }
                     auto& c=self->capabilities_;c.maxTextureDimension2D=limits.maxTextureDimension2D;
                     c.maxTextureArrayLayers=limits.maxTextureArrayLayers;c.maxBufferSize=limits.maxBufferSize;
                     c.timestampQuery=self->gpuTimingSupported_;
@@ -193,14 +189,12 @@ void WebGpuRenderer::initialize() {
                     c.compressionASTC=self->device_.HasFeature(wgpu::FeatureName::TextureCompressionASTC);
                     self->shadowResolution_=std::min(self->quality_.shadowResolution,c.maxTextureDimension2D);
                     ++self->deviceGeneration_;self->resizeCanvas();
-                    wgpu::EmscriptenSurfaceSourceCanvasHTMLSelector canvas{}; canvas.selector="#viewport";
-                    wgpu::SurfaceDescriptor surfaceDesc{}; surfaceDesc.nextInChain=&canvas;
                     self->canvasAcquired_=true;
-                    self->surface_=self->instance_.CreateSurface(&surfaceDesc);
+                    self->surface_=self->host_.createSurface(self->instance_);
                     wgpu::SurfaceCapabilities capabilities{};
                     self->surface_.GetCapabilities(self->adapter_,&capabilities);
                     if(capabilities.formatCount==0) { self->fail("No supported canvas format"); return; }
-                    self->format_=capabilities.formats[0];
+                    self->format_=capabilities.formats[0];c.hdrPostProcessing=true;
                     // Standard 8-bit canvas color formats and Depth24Plus support 4x MSAA.
                     c.msaa4x=self->format_==wgpu::TextureFormat::BGRA8Unorm||self->format_==wgpu::TextureFormat::BGRA8UnormSrgb||
                         self->format_==wgpu::TextureFormat::RGBA8Unorm||self->format_==wgpu::TextureFormat::RGBA8UnormSrgb;
@@ -210,7 +204,7 @@ void WebGpuRenderer::initialize() {
                     self->createSkyPipeline();
                     self->initializeTiming();
                     self->ready_=true;self->initializing_=false;self->failed_=false;self->reportState("ready");
-                    report_status("WebGpuRenderer ready",0);
+                    self->host_.status("WebGpuRenderer ready",0);
                 });
         });
 }
@@ -243,7 +237,7 @@ int WebGpuRenderer::beginGpuSample(double nowMs) {
 }
 void WebGpuRenderer::readGpuSample(int index) {
     auto& slot=timingSlots_[index];
-    slot.readback.MapAsync(wgpu::MapMode::Read,0,slot.queryCount*8,wgpu::CallbackMode::AllowSpontaneous,
+    slot.readback.MapAsync(wgpu::MapMode::Read,0,slot.queryCount*8,host_.callbackMode(),
         [callbacks=callbacks_,index](wgpu::MapAsyncStatus status,wgpu::StringView) {
             auto* self=callbacks->owner;if(!self) return;
             auto& slot=self->timingSlots_[index];slot.busy=false;
@@ -261,7 +255,7 @@ void WebGpuRenderer::readGpuSample(int index) {
                 else durations[local>=7 ? 1 : local]+=static_cast<double>(times[pair*2+1]-times[pair*2])*1e-6; // WebGPU timestamps are nanoseconds.
             }
             slot.readback.Unmap();
-            if(valid && slot.epoch==self->measurementEpoch_) self->measurements_.recordGpu(durations,emscripten_get_now(),shadowMs);
+            if(valid && slot.epoch==self->measurementEpoch_) self->measurements_.recordGpu(durations,self->host_.nowMs(),shadowMs);
         });
 }
 void WebGpuRenderer::resetMeasurements() {
@@ -273,13 +267,13 @@ void WebGpuRenderer::reportMeasurements(double nowMs) {
     const char* gpuState=!gpuTimingSupported_ ? "unsupported" : !gpuTimingEnabled_ ? "disabled" : gpuTimingFailed_ ? "readback-failed" : "enabled";
     const auto json=measurements_.json(nowMs,gpuState);
 #ifdef NDEBUG
-    report_performance(json.c_str(),"Release");
+    host_.performance(json.c_str(),"Release");
 #else
-    report_performance(json.c_str(),"Debug");
+    host_.performance(json.c_str(),"Debug");
 #endif
 }
 void WebGpuRenderer::createPipeline() {
-    wgpu::ShaderSourceWGSL code{};code.code=mesh_shader;
+    wgpu::ShaderSourceWGSL code{};const auto source=hdrShader(mesh_shader,hdr_);code.code=source.c_str();
     wgpu::ShaderModuleDescriptor shader{};shader.nextInChain=&code;shader.label="PBR / Unlit mesh materials";
     meshShader_=device_.CreateShaderModule(&shader);
     std::array<wgpu::BindGroupLayoutEntry,11> frameBindings{};
@@ -381,7 +375,7 @@ wgpu::RenderPipeline WebGpuRenderer::materialPipeline(const MeshDraw& draw,bool 
     buffers[1].arrayStride=objectStride;buffers[1].stepMode=wgpu::VertexStepMode::Instance;buffers[1].attributeCount=instance.size();buffers[1].attributes=instance.data();
     buffers[2].arrayStride=sizeof(SkinVertex);buffers[2].attributeCount=weights.size();buffers[2].attributes=weights.data();
     const auto blend=fxBlend(draw.blend==BlendMode::Additive);
-    wgpu::ColorTargetState target{};target.format=format_;if(transparent) target.blend=&blend;
+    wgpu::ColorTargetState target{};target.format=colorFormat();if(transparent) target.blend=&blend;
     const std::array<wgpu::ConstantEntry,8> materialConstants={{{nullptr,"materialAlpha",double(m.alphaMode)},
         {nullptr,"materialLayered",double(layered)},{nullptr,"materialShader",double(m.shader)},
         {nullptr,"materialNormalMap",double(normalMap)},{nullptr,"materialSurfaceMap",double(surfaceMap)},
@@ -412,14 +406,14 @@ void WebGpuRenderer::createFxPipelines() {
     const std::array layouts={particleLayout_,textureLayout_};
     wgpu::PipelineLayoutDescriptor pipelineLayout{};pipelineLayout.bindGroupLayoutCount=layouts.size();pipelineLayout.bindGroupLayouts=layouts.data();
     const auto explicitLayout=device_.CreatePipelineLayout(&pipelineLayout);
-    wgpu::ShaderSourceWGSL code{};code.code=particle_shader;
+    wgpu::ShaderSourceWGSL code{};const auto source=hdrShader(particle_shader,hdr_);code.code=source.c_str();
     wgpu::ShaderModuleDescriptor shaderDesc{};shaderDesc.nextInChain=&code;shaderDesc.label="Particle billboards / flipbooks";
     const auto shader=device_.CreateShaderModule(&shaderDesc);
     std::array<wgpu::VertexAttribute,7> attributes{};
     for(std::size_t i=0;i<attributes.size();++i) { attributes[i].format=wgpu::VertexFormat::Float32x4;attributes[i].offset=i*16;attributes[i].shaderLocation=static_cast<std::uint32_t>(i); }
     wgpu::VertexBufferLayout buffer{};buffer.arrayStride=sizeof(ParticleInstance);buffer.stepMode=wgpu::VertexStepMode::Instance;
     buffer.attributeCount=attributes.size();buffer.attributes=attributes.data();
-    wgpu::ColorTargetState target{};target.format=format_;
+    wgpu::ColorTargetState target{};target.format=colorFormat();
     wgpu::FragmentState fragment{};fragment.module=shader;fragment.entryPoint="particleFragment";fragment.targetCount=1;fragment.targets=&target;
     wgpu::DepthStencilState depth{};depth.format=wgpu::TextureFormat::Depth24Plus;depth.depthWriteEnabled=false;depth.depthCompare=wgpu::CompareFunction::LessEqual;
     wgpu::RenderPipelineDescriptor desc{};desc.label="Instanced particle FX";desc.layout=explicitLayout;
@@ -451,7 +445,7 @@ void WebGpuRenderer::createClearPipeline() {
     if(!clearLayout_) clearLayout_=device_.CreateBindGroupLayout(&layout);
     wgpu::PipelineLayoutDescriptor pipelineLayout{};pipelineLayout.bindGroupLayoutCount=1;pipelineLayout.bindGroupLayouts=&clearLayout_;
     const auto explicitLayout=device_.CreatePipelineLayout(&pipelineLayout);
-    wgpu::ColorTargetState target{};target.format=format_;
+    wgpu::ColorTargetState target{};target.format=colorFormat();
     wgpu::FragmentState fragment{};fragment.module=shader;fragment.entryPoint="fragmentMain";fragment.targetCount=1;fragment.targets=&target;
     wgpu::DepthStencilState depth{};depth.format=wgpu::TextureFormat::Depth24Plus;depth.depthWriteEnabled=false;depth.depthCompare=wgpu::CompareFunction::Always;
     wgpu::RenderPipelineDescriptor desc{};desc.label="Viewport color clear";desc.layout=explicitLayout;
@@ -461,7 +455,7 @@ void WebGpuRenderer::createClearPipeline() {
 }
 void WebGpuRenderer::createSkyPipeline() {
     static_assert(sizeof(SkyUniform)==320);
-    wgpu::ShaderSourceWGSL code{};code.code=sky_shader;
+    wgpu::ShaderSourceWGSL code{};const auto source=hdrShader(sky_shader,hdr_);code.code=source.c_str();
     wgpu::ShaderModuleDescriptor shaderDesc{};shaderDesc.nextInChain=&code;shaderDesc.label="Sky background";
     const auto shader=device_.CreateShaderModule(&shaderDesc);
     wgpu::BindGroupLayoutEntry entry{};entry.binding=0;entry.visibility=wgpu::ShaderStage::Vertex|wgpu::ShaderStage::Fragment;
@@ -471,7 +465,7 @@ void WebGpuRenderer::createSkyPipeline() {
     const std::array layouts={skyLayout_,textureLayout_};
     wgpu::PipelineLayoutDescriptor pipelineLayout{};pipelineLayout.bindGroupLayoutCount=layouts.size();pipelineLayout.bindGroupLayouts=layouts.data();
     const auto explicitLayout=device_.CreatePipelineLayout(&pipelineLayout);
-    wgpu::ColorTargetState target{};target.format=format_;
+    wgpu::ColorTargetState target{};target.format=colorFormat();
     wgpu::FragmentState fragment{};fragment.module=shader;fragment.entryPoint="fragmentMain";fragment.targetCount=1;fragment.targets=&target;
     wgpu::DepthStencilState depth{};depth.format=wgpu::TextureFormat::Depth24Plus;depth.depthWriteEnabled=false;depth.depthCompare=wgpu::CompareFunction::Always;
     wgpu::RenderPipelineDescriptor desc{};desc.label="Sky background";desc.layout=explicitLayout;
@@ -564,7 +558,7 @@ void WebGpuRenderer::prepareFx() {
     if(vertices.empty())activeView_->ribbonShadow.clear();
     else {
         bool grow=vertices.size()>activeView_->ribbonCapacity;
-        if(grow){wgpu::Limits limits{};if(!device_.GetLimits(&limits)||vertices.size()>limits.maxBufferSize/sizeof(RibbonVertex))throw std::length_error("Ribbon buffer exceeds GPU limits");
+        if(grow){wgpu::Limits limits{};if(device_.GetLimits(&limits)!=wgpu::Status::Success||vertices.size()>limits.maxBufferSize/sizeof(RibbonVertex))throw std::length_error("Ribbon buffer exceeds GPU limits");
             activeView_->ribbonCapacity=std::min<std::uint64_t>(std::max(vertices.size(),activeView_->ribbonCapacity*2+16),limits.maxBufferSize/sizeof(RibbonVertex));
             if(activeView_->ribbonBuffer)activeView_->ribbonBuffer.Destroy();
             activeView_->ribbonBuffer=makeBuffer(device_,activeView_->ribbonCapacity*sizeof(RibbonVertex),wgpu::BufferUsage::Vertex,"Ribbon vertices");}
@@ -577,7 +571,7 @@ void WebGpuRenderer::prepareFx() {
     if(!instances.empty()) {
     bool recreate=instances.size()>activeView_->particleCapacity;
     if(recreate) {
-        wgpu::Limits limits{};if(!device_.GetLimits(&limits)) throw std::runtime_error("Cannot query particle GPU limits");
+        wgpu::Limits limits{};if(device_.GetLimits(&limits)!=wgpu::Status::Success) throw std::runtime_error("Cannot query particle GPU limits");
         const auto max=limits.maxBufferSize/sizeof(ParticleInstance);
         if(instances.size()>max) throw std::length_error("Particle data exceeds GPU limits");
         activeView_->particleCapacity=static_cast<std::size_t>(std::min<std::uint64_t>(std::max(instances.size(),activeView_->particleCapacity*2+16),max));
@@ -604,6 +598,15 @@ void WebGpuRenderer::prepareFx() {
     }
 }
 void WebGpuRenderer::resize(std::uint32_t width,std::uint32_t height) {
+    if(hdr_!=quality_.post.enabled) {
+        hdr_=quality_.post.enabled;materialPipelines_.clear();
+        wgpu::ShaderSourceWGSL code{};const auto source=hdrShader(mesh_shader,hdr_);code.code=source.c_str();
+        wgpu::ShaderModuleDescriptor shader{};shader.nextInChain=&code;meshShader_=device_.CreateShaderModule(&shader);
+        createFxPipelines();createClearPipeline();createSkyPipeline();createWaterPipelines();
+        underwaterPipeline_=nullptr;reflectionWidth_=reflectionHeight_=0;
+    }
+    if(bloomTexture_)bloomTexture_.Destroy();bloomTexture_=nullptr;bloomView_=nullptr;postWidth_=postHeight_=0;
+
     const auto samples=resolveMsaaSamples(quality_,capabilities_);
     if(samples!=sampleCount_) {
         sampleCount_=samples;materialPipelines_.clear();
@@ -613,7 +616,8 @@ void WebGpuRenderer::resize(std::uint32_t width,std::uint32_t height) {
     waterSamples_=0;captureBinding_=nullptr;
     width_=width; height_=height;
     wgpu::SurfaceConfiguration config{}; config.device=device_; config.format=format_;
-    config.width=width; config.height=height; config.usage=wgpu::TextureUsage::RenderAttachment;
+    config.width=width; config.height=height; config.usage=host_.surfaceUsage();
+    config.presentMode=wgpu::PresentMode::Fifo;
     config.alphaMode=wgpu::CompositeAlphaMode::Opaque; surface_.Configure(&config);
     if(depth_) depth_.Destroy();
     if(msaaColor_) msaaColor_.Destroy();
@@ -623,14 +627,14 @@ void WebGpuRenderer::resize(std::uint32_t width,std::uint32_t height) {
     desc.sampleCount=sampleCount_;
     depth_=device_.CreateTexture(&desc); depthView_=depth_.CreateView();
     if(sampleCount_>1) {
-        desc.label="Multisampled compositor color";desc.format=format_;
+        desc.label="Multisampled compositor color";desc.format=colorFormat();
         msaaColor_=device_.CreateTexture(&desc);msaaColorView_=msaaColor_.CreateView();
     }
 }
 void WebGpuRenderer::reserveObjects(std::size_t count) {
     if(count<=activeView_->objectCapacity) return;
     wgpu::Limits limits{};
-    if(!device_.GetLimits(&limits)) throw std::runtime_error("Cannot query GPU instance-buffer limit");
+    if(device_.GetLimits(&limits)!=wgpu::Status::Success) throw std::runtime_error("Cannot query GPU instance-buffer limit");
     const auto maxCapacity=std::min<std::uint64_t>(limits.maxBufferSize/objectStride,std::numeric_limits<std::size_t>::max()/objectStride);
     if(count>maxCapacity) throw std::length_error("Instance data exceeds the GPU buffer-size limit");
     activeView_->objectCapacity=static_cast<std::size_t>(std::min<std::uint64_t>(std::max<std::uint64_t>(count,std::uint64_t(activeView_->objectCapacity)*2+16),maxCapacity));
@@ -640,7 +644,7 @@ void WebGpuRenderer::reserveObjects(std::size_t count) {
     activeView_->frame.invalidateObjects();
 }
 void WebGpuRenderer::admitUpload(std::uint64_t bytes) {
-    if(!uploadAdmission_.admit(bytes,emscripten_get_now()-uploadStarted_)) throw UploadDeferred{};
+    if(!uploadAdmission_.admit(bytes,host_.nowMs()-uploadStarted_)) throw UploadDeferred{};
 }
 WebGpuRenderer::MaterialKey WebGpuRenderer::materialKey(const Material& m) const {
     const auto w=waterParameters(m.water);
@@ -665,7 +669,8 @@ bool WebGpuRenderer::resourcesReady(const MeshDraw& draw) const {
 }
 WebGpuRenderer::GpuMesh& WebGpuRenderer::upload(const std::shared_ptr<const Mesh>& mesh) {
     if(const auto cached=meshes_.find(mesh.get());cached!=meshes_.end()) return cached->second;
-    const auto resourceStart=emscripten_get_now();
+    ProfileScope uploadProfile(ProfileCategory::Loading,"GPU resource upload");
+    const auto resourceStart=host_.nowMs();
     bool shortIndices=true;
     for(auto index:mesh->indices) if(index>65535) { shortIndices=false;break; }
     admitUpload(mesh->vertices.size()*sizeof(Vertex)+((mesh->indices.size()*(shortIndices?2:4)+3)&~std::size_t(3))+mesh->skin.size()*sizeof(SkinVertex));
@@ -686,14 +691,14 @@ WebGpuRenderer::GpuMesh& WebGpuRenderer::upload(const std::shared_ptr<const Mesh
             device_.GetQueue().WriteBuffer(gpu.skin,0,mesh->skin.data(),bytes);
             gpu.bytes+=bytes;++counters_.uploadCalls;counters_.uploadBytes+=bytes;
         }
-        resourceMs_+=emscripten_get_now()-resourceStart;
+        resourceMs_+=host_.nowMs()-resourceStart;
     }
     return meshes_.at(mesh.get());
 }
 WebGpuRenderer::GpuTexture& WebGpuRenderer::uploadTexture(const std::shared_ptr<const Texture>& texture,TextureSemantic semantic) {
     const auto key=std::make_pair(texture.get(),semantic);
     if(const auto cached=textures_.find(key);cached!=textures_.end()) return cached->second;
-    const auto started=emscripten_get_now();
+    const auto started=host_.nowMs();
     if(!texture->width||!texture->height||texture->width>4096||texture->height>4096||texture->pixels.size()!=std::uint64_t(texture->width)*texture->height*4)
         throw std::invalid_argument("Invalid RGBA texture fallback");
     const CompressedTexture* compressed=nullptr;
@@ -739,7 +744,7 @@ WebGpuRenderer::GpuTexture& WebGpuRenderer::uploadTexture(const std::shared_ptr<
         std::array<wgpu::BindGroupEntry,2> entries{};entries[0].binding=0;entries[0].sampler=gpu.sampler;entries[1].binding=1;entries[1].textureView=gpu.view;
         wgpu::BindGroupDescriptor group{};group.layout=textureLayout_;group.entryCount=2;group.entries=entries.data();gpu.binding=device_.CreateBindGroup(&group);
     }
-    ++counters_.newTextures;resourceMs_+=emscripten_get_now()-started;return textures_.emplace(key,std::move(gpu)).first->second;
+    ++counters_.newTextures;resourceMs_+=host_.nowMs()-started;return textures_.emplace(key,std::move(gpu)).first->second;
 }
 std::size_t WebGpuRenderer::MaterialKeyHash::operator()(const MaterialKey& key) const {
     std::size_t h=key.flags;
@@ -754,7 +759,7 @@ WebGpuRenderer::GpuMaterial& WebGpuRenderer::uploadMaterial(const Material& m) {
     const auto semantics=materialTextureSemantics(m);
     for(std::uint32_t i=0;i<9;++i) uploadTexture(sources[i],semantics[i]);
     admitUpload(400);
-    const auto started=emscripten_get_now();const auto previousResourceMs=resourceMs_;GpuMaterial gpu;gpu.sources=sources;gpu.used=frameSerial_;
+    const auto started=host_.nowMs();const auto previousResourceMs=resourceMs_;GpuMaterial gpu;gpu.sources=sources;gpu.used=frameSerial_;
     const auto w=waterParameters(m.water);
     std::array<Float4,25> data={Float4{m.roughness,m.metallic,m.normalScale,m.occlusionStrength},
         Float4{m.emissive.x,m.emissive.y,m.emissive.z,m.alphaCutoff},Float4{m.uvScale.x,m.uvScale.y,m.uvOffset.x,m.uvOffset.y},
@@ -771,7 +776,7 @@ WebGpuRenderer::GpuMaterial& WebGpuRenderer::uploadMaterial(const Material& m) {
         entries[2+i*2].binding=2+i*2;entries[2+i*2].textureView=t.view;
     }
     wgpu::BindGroupDescriptor group{};group.layout=materialLayout_;group.entryCount=entries.size();group.entries=entries.data();gpu.binding=device_.CreateBindGroup(&group);
-    resourceMs_=previousResourceMs+emscripten_get_now()-started;return materials_.emplace(key,std::move(gpu)).first->second;
+    resourceMs_=previousResourceMs+host_.nowMs()-started;return materials_.emplace(key,std::move(gpu)).first->second;
 }
 void WebGpuRenderer::uploadEnvironment() {
     const auto source=scene_->environment ? scene_->environment : Environment::studio();
@@ -779,7 +784,7 @@ void WebGpuRenderer::uploadEnvironment() {
     std::uint64_t bytes=(source->diffuse.pixels.size()+source->brdf.size())*8;
     for(const auto& level:source->specular) bytes+=level.pixels.size()*8;
     admitUpload(bytes);
-    const auto started=emscripten_get_now();environmentBytes_=0;
+    const auto started=host_.nowMs();environmentBytes_=0;
     auto upload=[&](std::span<const EnvironmentLevel> levels,wgpu::Texture& texture,wgpu::TextureView& view) {
         if(texture) texture.Destroy();wgpu::TextureDescriptor desc{};desc.size={levels[0].size,levels[0].size,6};desc.mipLevelCount=levels.size();
         desc.format=wgpu::TextureFormat::RGBA16Float;desc.usage=wgpu::TextureUsage::TextureBinding|wgpu::TextureUsage::CopyDst;texture=device_.CreateTexture(&desc);
@@ -801,7 +806,7 @@ void WebGpuRenderer::uploadEnvironment() {
     ++counters_.uploadCalls;counters_.uploadBytes+=pixels.size()*2;environmentBytes_+=pixels.size()*2;
     wgpu::SamplerDescriptor sampler{};sampler.addressModeU=sampler.addressModeV=sampler.addressModeW=wgpu::AddressMode::ClampToEdge;
     sampler.minFilter=sampler.magFilter=wgpu::FilterMode::Linear;sampler.mipmapFilter=wgpu::MipmapFilterMode::Linear;environmentSampler_=device_.CreateSampler(&sampler);
-    environment_=source;counters_.newTextures+=3;resourceMs_+=emscripten_get_now()-started;
+    environment_=source;counters_.newTextures+=3;resourceMs_+=host_.nowMs()-started;
 }
 void WebGpuRenderer::uploadMorph(const std::shared_ptr<const MorphPose>& pose) {
     if(pose->vertices.empty()) throw std::invalid_argument("Empty morph vertex buffer");
@@ -842,15 +847,16 @@ void WebGpuRenderer::uploadSkeleton(const std::shared_ptr<const SkinPose>& pose)
     gpu.source=pose;
 }
 void WebGpuRenderer::render(double updateMs,double intervalMs) {
+    ProfileScope profile(ProfileCategory::Render,"WebGPU render");
     if(!ready_) return;
     try {
-        const auto started=emscripten_get_now();FrameTiming timing{};timing.updateMs=updateMs;timing.intervalMs=intervalMs;counters_={};resourceMs_=0;++frameSerial_;
+        const auto started=host_.nowMs();FrameTiming timing{};timing.updateMs=updateMs;timing.intervalMs=intervalMs;counters_={};resourceMs_=0;++frameSerial_;
         uploadAdmission_.begin(uploadBudget_);uploadStarted_=started;
         resizeCanvas();
-        int width=0,height=0; emscripten_get_canvas_element_size("#viewport",&width,&height);
+        int width=0,height=0; host_.drawableSize(width,height);
         if(width<=0 || height<=0) return;
         if(static_cast<std::uint32_t>(width)!=width_ || static_cast<std::uint32_t>(height)!=height_ ||
-           sampleCount_!=resolveMsaaSamples(quality_,capabilities_)) resize(width,height);
+           (sampleCount_!=resolveMsaaSamples(quality_,capabilities_)||hdr_!=quality_.post.enabled)) resize(width,height);
         wgpu::SurfaceTexture backbuffer{};surface_.GetCurrentTexture(&backbuffer);
         if(!backbuffer.texture) {
             if(backbuffer.status==wgpu::SurfaceGetCurrentTextureStatus::Lost) deviceLost("Canvas surface lost");
@@ -865,7 +871,7 @@ void WebGpuRenderer::render(double updateMs,double intervalMs) {
         underwaterViews_.resize(resolvedViews_.size());bool submerged=false;
         for(std::size_t i=0;i<resolvedViews_.size();++i) {const auto& camera=*views_.views()[resolvedViews_[i].index].camera;
             underwaterViews_[i]=underwaterView(*scene_,camera.worldPosition(),camera.visibilityMask());submerged|=bool(underwaterViews_[i]);}
-        prepareWaterTargets(submerged||waterSceneInputsRequired(*scene_,waterMask)||softParticlesRequired(*scene_,waterMask));
+        prepareWaterTargets(hdr_||submerged||waterSceneInputsRequired(*scene_,waterMask)||softParticlesRequired(*scene_,waterMask));
         prepareReflectionTargets(waterPlanarReflectionRequired(*scene_,waterMask));
         const auto view=sampleCount_>1 ? msaaColorView_ : waterCapture_ ? sceneColorView_ : canvasView;
         auto encoder=device_.CreateCommandEncoder();
@@ -878,12 +884,12 @@ void WebGpuRenderer::render(double updateMs,double intervalMs) {
             activeView_=viewResources_[resolved.index].get();
             activeCamera_=views_.views()[resolved.index].camera;
             const auto viewport=resolved.viewport;
-            const auto collectStart=emscripten_get_now();
+            const auto collectStart=host_.nowMs();
             const auto* frustum=frustumCullingEnabled_ && activeCamera_->active() ? &activeCamera_->frustum(viewport.width/viewport.height) : nullptr;
-            const DetailView detail{activeCamera_->viewProjection(viewport.width/viewport.height),viewport.width,viewport.height};
+            const DetailView detail{activeCamera_->viewProjection(viewport.width/viewport.height),viewport.width*quality_.detailScale,viewport.height*quality_.detailScale};
             activeView_->frame.collect(*scene_,instancingEnabled_,activeCamera_->active() ? activeCamera_->visibilityMask() : 0,frustum,lodEnabled_ ? &detail : nullptr);
-            const auto& frame=activeView_->frame.sceneFrame();timing.collectMs+=emscripten_get_now()-collectStart;
-            const auto prepareStart=emscripten_get_now();
+            const auto& frame=activeView_->frame.sceneFrame();timing.collectMs+=host_.nowMs()-collectStart;
+            const auto prepareStart=host_.nowMs();
             activeView_->fxFrame.prepare(frame,activeCamera_->view());
             for(auto it=meshes_.begin();it!=meshes_.end();) {
                 if(it->second.source.expired()) it=meshes_.erase(it); else ++it;
@@ -915,29 +921,25 @@ void WebGpuRenderer::render(double updateMs,double intervalMs) {
             uniforms.environmentOptions={scene_->environmentRotation,float(environment_->specular.size()-1),shadowReceivingEnabled_ ? 0.0f : 1.0f,float(shadowFilterTaps_)};
             const auto count=std::min(frame.lights.size(),maxLights);
             uniforms.ambientCount={scene_->ambient.x,scene_->ambient.y,scene_->ambient.z,static_cast<float>(count)};
-            if(frame.lights.size()>maxLights && !lightOverflowReported_) { emscripten_log(EM_LOG_WARN,"WebGpuRenderer uses first eight enabled lights"); lightOverflowReported_=true; }
-            std::size_t shadowCount=0;
-            for(auto& shadow:uniforms.shadows) shadow.options.x=-1;
+            if(frame.lights.size()>maxLights && !lightOverflowReported_) { host_.status("WebGpuRenderer uses first eight enabled lights",false); lightOverflowReported_=true; }
             for(std::size_t i=0;i<count;++i) {
-                const auto& l=frame.lights[i]; uniforms.lights[i]={{l.position.x,l.position.y,l.position.z,l.type==LightType::Point ? 1.0f : 0.0f},
-                    {l.direction.x,l.direction.y,l.direction.z,l.range},{l.color.x,l.color.y,l.color.z,l.intensity}};
-                if(shadowsEnabled_&&quality_.maxShadowMaps>0&&l.shadow.enabled&&l.intensity>0) {
-                    if(shadowCount==quality_.maxShadowMaps) {
-                        if(quality_.maxShadowMaps==maxShadowLights&&!shadowOverflowReported_) { emscripten_log(EM_LOG_WARN,"WebGpuRenderer uses first four shadow-casting directional lights");shadowOverflowReported_=true; }
-                        continue;
-                    }
-                    const auto matrix=directionalShadowMatrix(l.direction,l.shadowCenter,l.shadow,shadowResolution_);
-                    uniforms.shadows[i]={matrix,{float(shadowCount),l.shadow.depthBias,l.shadow.normalBias,1.0f/shadowResolution_}};
-                    if(!activeView_->shadowMatrixValid[shadowCount]||std::memcmp(&activeView_->shadowMatrices[shadowCount],&matrix,sizeof(matrix))||activeView_->shadowWaterTime[shadowCount]!=uniforms.waterClock.x) {
-                        FrameUniform shadowUniform{};shadowUniform.viewProjection=matrix;shadowUniform.waterClock=uniforms.waterClock;
-                        device_.GetQueue().WriteBuffer(activeView_->shadowBuffers[shadowCount],0,&shadowUniform,sizeof(shadowUniform));
-                        activeView_->shadowWaterTime[shadowCount]=uniforms.waterClock.x;
-                        activeView_->shadowMatrices[shadowCount]=matrix;activeView_->shadowMatrixValid[shadowCount]=true;
-                        ++counters_.uploadCalls;counters_.uploadBytes+=sizeof(shadowUniform);
-                    }
-                    activeView_->frame.prepareShadow(shadowCount,{matrix,float(shadowResolution_),float(shadowResolution_)},shadowLodEnabled_,shadowCullingEnabled_,shadowCastingEnabled_);
-                    ++shadowCount;
+                const auto& l=frame.lights[i];uniforms.lights[i]={{l.position.x,l.position.y,l.position.z,float(l.type)},
+                    {l.direction.x,l.direction.y,l.direction.z,l.range},{l.color.x,l.color.y,l.color.z,l.intensity},{std::cos(l.innerAngle),std::cos(l.outerAngle),0,0}};
+            }
+            const auto plan=shadowsEnabled_?planShadows(frame.lights,*activeCamera_,viewport.width/viewport.height,quality_,shadowResolution_):ShadowPlan{};
+            const auto shadowCount=plan.count;
+            for(auto& shadow:uniforms.shadows)shadow.options.x=-1;
+            for(std::size_t j=0;j<shadowCount;++j) {
+                const auto& map=plan.maps[j];const auto& l=frame.lights[map.light];const auto& matrix=map.matrix;
+                uniforms.shadows[j]={matrix,{float(j),l.shadow.depthBias,l.shadow.normalBias,1.0f/shadowResolution_},
+                    {float(map.light),map.nearDistance,map.farDistance,map.cascade?1.f:0.f}};
+                if(!activeView_->shadowMatrixValid[j]||std::memcmp(&activeView_->shadowMatrices[j],&matrix,sizeof(matrix))||activeView_->shadowWaterTime[j]!=uniforms.waterClock.x) {
+                    FrameUniform shadowUniform{};shadowUniform.viewProjection=matrix;shadowUniform.waterClock=uniforms.waterClock;
+                    device_.GetQueue().WriteBuffer(activeView_->shadowBuffers[j],0,&shadowUniform,sizeof(shadowUniform));
+                    activeView_->shadowWaterTime[j]=uniforms.waterClock.x;activeView_->shadowMatrices[j]=matrix;activeView_->shadowMatrixValid[j]=true;
+                    ++counters_.uploadCalls;counters_.uploadBytes+=sizeof(shadowUniform);
                 }
+                activeView_->frame.prepareShadow(j,{matrix,float(shadowResolution_)*quality_.detailScale,float(shadowResolution_)*quality_.detailScale},shadowLodEnabled_,shadowCullingEnabled_,shadowCastingEnabled_);
             }
             if(!activeView_->frameUniformValid || std::memcmp(activeView_->frameUniformShadow.data(),&uniforms,sizeof(uniforms))) {
                 device_.GetQueue().WriteBuffer(activeView_->frameBuffer,0,&uniforms,sizeof(uniforms));
@@ -971,9 +973,9 @@ void WebGpuRenderer::render(double updateMs,double intervalMs) {
             counters_.shadowCulledParts+=activeView_->frame.shadowCulledParts();
             counters_.changedObjects+=activeView_->frame.changedObjects();
             counters_.localTransformBuilds+=frame.transformRebuilds.localBuilds;counters_.worldTransformBuilds+=frame.transformRebuilds.worldBuilds;counters_.normalTransformBuilds+=frame.transformRebuilds.normalBuilds;
-            timing.prepareMs+=emscripten_get_now()-prepareStart;
+            timing.prepareMs+=host_.nowMs()-prepareStart;
             timing.resourceMs=resourceMs_;
-            const auto encodeStart=emscripten_get_now();
+            const auto encodeStart=host_.nowMs();
             if(sampleSlot>=0) timingSlots_[sampleSlot].shadowCounts[viewOrdinal]=shadowCount;
             for(std::size_t i=0;i<shadowCount;++i) {
                 wgpu::RenderPassDepthStencilAttachment depth{};depth.view=shadowLayerViews_[i];depth.depthClearValue=1;
@@ -1136,7 +1138,7 @@ void WebGpuRenderer::render(double updateMs,double intervalMs) {
                     drawUnderwater(encoder,view,*underwaterViews_[viewOrdinal],sampleSlot,viewOrdinal);
                 }
             }
-            timing.encodeMs+=emscripten_get_now()-encodeStart;
+            timing.encodeMs+=host_.nowMs()-encodeStart;
             ++viewOrdinal;
         } // Ordered views all load the same color target and start fresh depth per layer.
         activeView_=nullptr;activeCamera_=nullptr;
@@ -1148,7 +1150,7 @@ void WebGpuRenderer::render(double updateMs,double intervalMs) {
         }
         if(sampleCount_>1) {
             // Resolve accumulated color once, after every view/layer and before the GUI.
-            wgpu::RenderPassColorAttachment color{};color.view=msaaColorView_;color.resolveTarget=canvasView;
+            wgpu::RenderPassColorAttachment color{};color.view=msaaColorView_;color.resolveTarget=hdr_?sceneColorView_:canvasView;
             color.loadOp=wgpu::LoadOp::Load;color.storeOp=wgpu::StoreOp::Discard;
             wgpu::RenderPassDescriptor desc{};desc.label="MSAA compositor resolve";desc.colorAttachmentCount=1;desc.colorAttachments=&color;
             auto pass=encoder.BeginRenderPass(&desc);pass.End();++counters_.passes;
@@ -1160,12 +1162,12 @@ void WebGpuRenderer::render(double updateMs,double intervalMs) {
         counters_.cachedMeshes=meshes_.size();counters_.cachedTextures=textures_.size()+3;counters_.cachedMaterials=materials_.size();
         counters_.shadowMapResolution=shadowResolution_;counters_.shadowFilterTaps=shadowFilterTaps_;
         counters_.width=width_;counters_.height=height_;counters_.gpuDepthBytes=std::uint64_t(width_)*height_*4*sampleCount_+std::uint64_t(shadowResolution_)*shadowResolution_*std::max(1u,quality_.maxShadowMaps)*4;
-        if(msaaColor_) counters_.gpuTextureBytes+=std::uint64_t(width_)*height_*4*sampleCount_;
+        if(msaaColor_) counters_.gpuTextureBytes+=std::uint64_t(width_)*height_*(hdr_?8:4)*sampleCount_;
         if(gpuTimingEnabled_) for(const auto& slot:timingSlots_) counters_.gpuBufferBytes+=slot.queryCount*16;
         counters_.cachedSkeletons=skeletons_.size();
         for(const auto& [key,gpu]:skeletons_) { (void)key;counters_.gpuSkinBytes+=gpu.capacity*sizeof(BoneUniform); }
-        if(reflectionWidth_>1) {counters_.gpuTextureBytes+=std::uint64_t(width_)*height_*4;counters_.gpuDepthBytes+=std::uint64_t(width_)*height_*4;}
-        if(waterCapture_) counters_.gpuTextureBytes+=std::uint64_t(width_)*height_*(sampleCount_==1 ? 12 : 8);
+        if(reflectionWidth_>1) {counters_.gpuTextureBytes+=std::uint64_t(width_)*height_*(hdr_?8:4);counters_.gpuDepthBytes+=std::uint64_t(width_)*height_*4;}
+        if(waterCapture_) counters_.gpuTextureBytes+=std::uint64_t(width_)*height_*(hdr_?20:(sampleCount_==1 ? 12 : 8));
         counters_.gpuBufferBytes+=counters_.gpuSkinBytes+materials_.size()*400;
         for(const auto& [key,gpu]:morphs_) {
             (void)key;counters_.gpuMeshBytes+=gpu.capacity;
@@ -1197,17 +1199,18 @@ void WebGpuRenderer::render(double updateMs,double intervalMs) {
             counters_.frameStorageBytes+=resource->frame.storageBytes()+resource->fxFrame.storageBytes()+resource->particleShadow.capacity()*sizeof(ParticleInstance)+resource->ribbonShadow.capacity()*sizeof(RibbonVertex);
         }
         timing.resourceMs=resourceMs_;
-        const auto finalEncodeStart=emscripten_get_now();
-        if(waterCapture_&&sampleCount_==1) {
+        const auto finalEncodeStart=host_.nowMs();
+        if(waterCapture_&&sampleCount_==1&&!hdr_) {
             wgpu::RenderPassColorAttachment color{};color.view=canvasView;color.loadOp=wgpu::LoadOp::Clear;color.storeOp=wgpu::StoreOp::Store;
             wgpu::RenderPassDescriptor desc{};desc.label="Water scene presentation";desc.colorAttachmentCount=1;desc.colorAttachments=&color;
             auto pass=encoder.BeginRenderPass(&desc);pass.SetPipeline(waterPresentPipeline_);pass.SetBindGroup(0,captureBinding_);pass.Draw(3);pass.End();
             ++counters_.passes;++counters_.drawCalls;++counters_.triangles;
         }
+        if(hdr_)drawPost(encoder,canvasView);
         if(gui_) {
             if(!guiRenderer_) guiRenderer_=std::make_unique<GuiRenderer>(device_,format_);
             double logicalWidth=0,logicalHeight=0;
-            emscripten_get_element_css_size("#viewport",&logicalWidth,&logicalHeight);
+            const auto size=host_.logicalSize();logicalWidth=size.width;logicalHeight=size.height;
             const Vec2 logical{static_cast<float>(logicalWidth),static_cast<float>(logicalHeight)};
             gui_->layout(logical);
             guiRenderer_->render(gui_->draw(started/1000),logical,width_,height_,canvasView,encoder);
@@ -1221,15 +1224,17 @@ void WebGpuRenderer::render(double updateMs,double intervalMs) {
             counters_.gpuTextureBytes+=stats.textureBytes;counters_.gpuBufferBytes+=stats.bufferBytes;
         }
         if(sampleSlot>=0) { const auto& slot=timingSlots_[sampleSlot];encoder.ResolveQuerySet(slot.queries,0,slot.queryCount,slot.resolve,0);encoder.CopyBufferToBuffer(slot.resolve,0,slot.readback,0,slot.queryCount*8); }
-        const auto commands=encoder.Finish();timing.encodeMs+=emscripten_get_now()-finalEncodeStart;
+        host_.beforeSubmit(device_,encoder,backbuffer.texture);
+        const auto commands=encoder.Finish();timing.encodeMs+=host_.nowMs()-finalEncodeStart;
         counters_.cachedMaterialPipelines=materialPipelines_.size();
-        const auto submitStart=emscripten_get_now();device_.GetQueue().Submit(1,&commands);
+        const auto submitStart=host_.nowMs();{ProfileScope submitProfile(ProfileCategory::Render,"Queue submit (CPU)");device_.GetQueue().Submit(1,&commands);}
         if(++stableFrames_==120) recoveryAttempts_=0;
-        timing.submitMs=emscripten_get_now()-submitStart;
-        timing.cpuMs=updateMs+emscripten_get_now()-started;
+        host_.present(surface_);
+        timing.submitMs=host_.nowMs()-submitStart;
+        timing.cpuMs=updateMs+host_.nowMs()-started;
         if(sampleSlot>=0) readGpuSample(sampleSlot);
-        measurements_.recordFrame(timing,counters_);reportMeasurements(emscripten_get_now());
-        report_stats(static_cast<int>(counters_.meshes),static_cast<int>(counters_.lights),static_cast<int>(counters_.passes));
+        measurements_.recordFrame(timing,counters_);reportMeasurements(host_.nowMs());
+        host_.stats(static_cast<int>(counters_.meshes),static_cast<int>(counters_.lights),static_cast<int>(counters_.passes));
     } catch(const std::exception& e) { activeView_=nullptr;activeCamera_=nullptr;fail(e.what()); }
 }
 } // namespace engine

@@ -33,16 +33,22 @@ public:
     void resetMeasurements() { measurements_.reset();lastReport_=-1000; }
     void setInstancingEnabled(bool) {} // Draws individually; capability report declares this.
     void setFrustumCullingEnabled(bool enabled) { culling_=enabled; }
-    void setShadowsEnabled(bool) {}
+    void setShadowsEnabled(bool value) {shadowsEnabled_=value;}
     void setLodEnabled(bool enabled) { quality_.lod=enabled; }
     void setShadowLodEnabled(bool enabled) { quality_.shadowLod=enabled; }
-    void setShadowCastingEnabled(bool) {}
-    void setShadowReceivingEnabled(bool) {}
-    void setShadowCullingEnabled(bool) {}
+    void setShadowCastingEnabled(bool value) {shadowCasting_=value;}
+    void setShadowReceivingEnabled(bool value) {shadowReceiving_=value;}
+    void setShadowCullingEnabled(bool value) {shadowCulling_=value;}
     void setShadowQuality(std::uint32_t resolution,std::uint32_t taps);
     void setGui(GuiSystem* gui) { gui_=gui; }
     bool ready() const { return ready_; }
 private:
+    GLuint shadowTexture_=0,shadowFramebuffer_=0;
+    std::uint32_t shadowSize_=0,shadowLayers_=0;
+    bool shadowPass_=false,shadowsEnabled_=true,shadowCasting_=true,shadowReceiving_=true,shadowCulling_=true;
+    ShadowPlan shadowPlan_;
+    void drawShadows(const CameraComponent&,float,const SceneFrame&);
+    void releaseShadows(bool lost=false);
     double waterTime_=0;
     WaterInteractions waterInteractions_;
     WaterInteractionParameters interactionParameters_;
@@ -72,7 +78,14 @@ private:
     EMSCRIPTEN_WEBGL_CONTEXT_HANDLE context_=0;
     GLuint meshProgram_=0,guiProgram_=0,guiVao_=0,guiVertices_=0,guiIndices_=0,particleVao_=0,particleBuffer_=0,ribbonVao_=0,ribbonBuffer_=0;
     GLuint skyProgram_=0,skyVao_=0,skySampler_=0;
+    bool hdr_=false,targetHdr_=false;
     bool waterCapture_=false;
+    GLuint postProgram_=0,postVao_=0,bloomFramebuffer_=0,bloomTexture_=0;
+    std::uint32_t bloomWidth_=0,bloomHeight_=0;
+    void drawPost();
+    void releasePost(bool lost=false);
+    std::uint32_t samplesFor(const RenderQuality& q) const {return q.post.enabled&&capabilities_.hdrPostProcessing&&!hdrMsaa_?1:resolveMsaaSamples(q,capabilities_);}
+    bool hdrMsaa_=false;
     std::vector<std::optional<UnderwaterView>> underwaterViews_;
     GLuint underwaterProgram_=0,underwaterVao_=0;
     void drawUnderwater(const UnderwaterView&,const CameraComponent&,const ResolvedRenderView&);

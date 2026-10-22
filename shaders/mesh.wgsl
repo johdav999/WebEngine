@@ -9,12 +9,12 @@ override materialOcclusionMap: bool = false;
 override materialEmissiveMap: bool = false;
 override materialReflectionPass: bool = false;
 // FOG_FUNCTIONS
-struct Light { positionType: vec4f, directionRange: vec4f, colorIntensity: vec4f };
-struct Shadow { viewProjection: mat4x4f, options: vec4f }; // layer, depth bias, normal bias, texel size
+struct Light { positionType: vec4f, directionRange: vec4f, colorIntensity: vec4f, cone: vec4f };
+struct Shadow { viewProjection: mat4x4f, options: vec4f, selection: vec4f }; // layer, depth bias, normal bias, texel size
 struct Frame {
     viewProjection: mat4x4f, ambientCount: vec4f, lights: array<Light,8>,
     cameraEnvironment: vec4f, environmentOptions: vec4f,
-    shadows: array<Shadow,8>, waterClock: vec4f, inverseViewProjection: mat4x4f, viewport: vec4f, extent: vec4f, viewForward: vec4f, reflectionViewProjection: mat4x4f, reflectionPlane: vec4f, reflectionOptions: vec4f, interactionOptions: vec4f, interactionData: array<vec4f,64>, fog:Fog,
+    shadows: array<Shadow,4>, waterClock: vec4f, inverseViewProjection: mat4x4f, viewport: vec4f, extent: vec4f, viewForward: vec4f, reflectionViewProjection: mat4x4f, reflectionPlane: vec4f, reflectionOptions: vec4f, interactionOptions: vec4f, interactionData: array<vec4f,64>, fog:Fog,
 };
 struct Object { model: mat4x4f, normalMatrix: mat4x4f, color: vec4f, shadow: vec4f };
 struct Material { surface: vec4f, emissiveCutoff: vec4f, uv: vec4f, flags: vec4f, wave: vec4f, detail: vec4f, horizon: vec4f, zenith: vec4f, transmission: vec4f, absorptionFoam: vec4f, foamColor: vec4f, layerColor: array<vec4f,4>, layerUv: array<vec4f,4>, weightUv: vec4f, layerOptions: vec4f, layerDetail: array<vec4f,4> };
@@ -177,12 +177,13 @@ fn layerSurface(uv: vec2f,input:VertexOutput) -> LayerSurface {
     if(materialLayered) {alpha=layerSurface(uv,input).color.a*input.color.a;}
     if(f32(materialAlpha)==1 && alpha<material.emissiveCutoff.w) { discard; }
 }
-fn shadowVisibility(index: u32,input: VertexOutput,normal: vec3f,l: vec3f) -> f32 {
+fn sampleShadow(index: u32,input: VertexOutput,normal: vec3f,l: vec3f) -> f32 {
     let shadow=frame.shadows[index];
     if(shadow.options.x<0 || input.receivesShadow<0.5 || frame.environmentOptions.z>0.5) { return 1; }
     let geometric=safeNormal(input.normal,normal);
     let offset=geometric*shadow.options.z*(1-clamp(dot(geometric,l),0,1));
     let clip=shadow.viewProjection*vec4f(input.world+offset,1);
+    if(clip.w<=0) {return 1;}
     let ndc=clip.xyz/clip.w;
     let uv=ndc.xy*vec2f(0.5,-0.5)+vec2f(0.5);
     if(any(uv<vec2f(0)) || any(uv>vec2f(1)) || ndc.z<0 || ndc.z>1) { return 1; }
@@ -195,6 +196,24 @@ fn shadowVisibility(index: u32,input: VertexOutput,normal: vec3f,l: vec3f) -> f3
         visibility+=textureSampleCompareLevel(shadowMaps,shadowSampler,tap,i32(shadow.options.x),ndc.z-shadow.options.y);
     } }
     return visibility/9;
+}
+fn shadowVisibility(index:u32,input:VertexOutput,normal:vec3f,l:vec3f) -> f32 {
+    let depth=dot(input.world-frame.cameraEnvironment.xyz,frame.viewForward.xyz);
+    for(var j=0u;j<4u;j++) {
+        let s=frame.shadows[j];
+        if(s.options.x<0 || u32(s.selection.x)!=index) {continue;}
+        if(s.selection.w>0.5 && depth>s.selection.z) {continue;}
+        var value=sampleShadow(j,input,normal,l);
+        if(s.selection.w>0.5 && j<3u) {
+            let next=frame.shadows[j+1u];
+            if(next.options.x>=0 && next.selection.x==s.selection.x) {
+                let blend=smoothstep(mix(s.selection.y,s.selection.z,.9),s.selection.z,depth);
+                value=mix(value,sampleShadow(j+1u,input,normal,l),blend);
+            }
+        }
+        return value;
+    }
+    return 1;
 }
 fn environmentDirection(d: vec3f) -> vec3f {
     let c=cos(frame.environmentOptions.x);let s=sin(frame.environmentOptions.x);
@@ -209,6 +228,7 @@ fn directBrdf(n: vec3f,v: vec3f,l: vec3f,base: vec3f,rough: f32,metal: f32,f0: v
     return ((vec3f(1)-f)*(1-metal)*base/3.14159265+specular)*nl;
 }
 fn srgb(linear: vec3f) -> vec3f {
+    if(hdrOutput){return linear;}
     return select(12.92*linear,1.055*pow(max(linear,vec3f(0)),vec3f(1.0/2.4))-0.055,linear>vec3f(0.0031308));
 }
 fn scenePoint(pixel: vec2f,depth: f32) -> vec3f {
@@ -216,6 +236,7 @@ fn scenePoint(pixel: vec2f,depth: f32) -> vec3f {
     let world=frame.inverseViewProjection*vec4f(ndc,depth,1);return world.xyz/world.w;
 }
 fn linearDisplay(c: vec3f) -> vec3f {
+    if(hdrOutput){return c;}
     return select(c/12.92,pow((c+0.055)/1.055,vec3f(2.4)),c>vec3f(0.04045));
 }
 fn waterComposite(input: VertexOutput,normal: vec3f,body: vec3f,display: vec3f,uv: vec2f,time: f32,nv: f32) -> vec3f {
@@ -327,6 +348,7 @@ fn shade(input: VertexOutput,front: bool) -> vec4f {
         if(light.positionType.w>0.5) {
             let delta=light.positionType.xyz-input.world;let distance=max(length(delta),0.001);l=delta/distance;
             attenuation=pow(clamp(1-distance/max(light.directionRange.w,0.001),0,1),2);
+            if(light.positionType.w>1.5){attenuation*=smoothstep(light.cone.y,light.cone.x,dot(light.directionRange.xyz,-l));}
         }
         lighting+=directBrdf(normal,v,l,base,rough,metal,f0)*light.colorIntensity.xyz*light.colorIntensity.w*attenuation*shadowVisibility(i,input,normal,l);
     }
@@ -348,6 +370,7 @@ fn shade(input: VertexOutput,front: bool) -> vec4f {
             if(light.positionType.w>0.5) {
                 let delta=light.positionType.xyz-input.world;let distance=max(length(delta),0.001);l=delta/distance;
                 attenuation=pow(clamp(1-distance/max(light.directionRange.w,0.001),0,1),2);
+            if(light.positionType.w>1.5){attenuation*=smoothstep(light.cone.y,light.cone.x,dot(light.directionRange.xyz,-l));}
             }
             let h=safeNormal(v+l,normal);
             let power=mix(256.0,8.0,rough);
@@ -357,7 +380,7 @@ fn shade(input: VertexOutput,front: bool) -> vec4f {
         lighting=waterLight*(1-fWater*material.horizon.w)+reflectedColor*fWater*material.horizon.w;
     }
     let linear=lighting+emission;
-    var display=surfaceFog(linear/(vec3f(1)+linear),input);
+    var display=surfaceFog(select(linear/(vec3f(1)+linear),linear,hdrOutput),input);
     if(f32(materialShader)>1.5 && frame.reflectionOptions.x>0.5 && input.planarSurface>0.5 && material.foamColor.w>0) {
         let clip=frame.reflectionViewProjection*vec4f(input.world,1);
         let uv=clip.xy/max(clip.w,0.0001)*vec2f(0.5,-0.5)+vec2f(0.5);

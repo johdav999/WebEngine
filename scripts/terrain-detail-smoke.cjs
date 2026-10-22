@@ -48,8 +48,8 @@ const colorTriangles=s=>s.triangles-(s.shadowTriangles||0)-(s.guiTriangles||0);
    assert.equal(coarse.shadowTriangles,full.shadowTriangles,'Camera LOD changed shadow submissions');
    await policy(0,3);const shadow=await stats();const coarseShadow=await shot('camera-full-shadow-coarse');
    assert.equal(colorTriangles(shadow),colorTriangles(full),'Shadow detail changed camera submissions');
-   if(backend==='webgpu') {assert(full.shadowTriangles>1000);assert(shadow.shadowTriangles<full.shadowTriangles*.65,'Shadow LOD did not reduce the actual shadow pass');}
-   else {assert.equal(full.shadowTriangles,0);assert.equal(shadow.shadowTriangles,0);assert.equal(await page.locator('#terrain-shadow-detail').isDisabled(),true);}
+   assert(full.shadowTriangles>1000);assert(shadow.shadowTriangles<full.shadowTriangles*.65,'Shadow LOD did not reduce the actual shadow pass');
+   assert.equal(await page.locator('#terrain-shadow-detail').isDisabled(),false);
    await policy(-1,0,.1);const autoCoarse=await stats();await policy(-1,0,8);const autoFine=await stats();
    assert(colorTriangles(autoCoarse)<colorTriangles(autoFine),'Projected-size terrain selection is missing');
    const afterGround=await ground();for(let i=0;i<afterGround.length;i++) {
@@ -64,7 +64,7 @@ const colorTriangles=s=>s.triangles-(s.shadowTriangles||0)-(s.guiTriangles||0);
    await page.setViewportSize({width:1000,height:800});await shot('coverage-resized');await page.setViewportSize({width:1400,height:1000});await frames();
    assert.equal(await page.evaluate(()=>Module._engine_terrain_view(0)),1);await surface(0);await policy(4,3);const saved=await shot('saved-layered-mixed');
    const download=page.waitForEvent('download');await page.locator('#save-scene').click();const file=await download;
-   const savedPath=path.join(evidence,`${backend}.wescene`);await file.saveAs(savedPath);const bytes=await fs.readFile(savedPath);assert.equal(bytes.readUInt32LE(8),23);
+   const savedPath=path.join(evidence,`${backend}.wescene`);await file.saveAs(savedPath);const bytes=await fs.readFile(savedPath);assert.equal(bytes.readUInt32LE(8),34);
    assert(await page.evaluate(data=>EngineSceneArchive.openScene(new File([new Uint8Array(data)],'terrain-detail.wescene')),Array.from(bytes)));
    const loaded=await shot('loaded-layered-mixed');assert(difference(saved,loaded)<40,'Layered terrain/LOD save changed pixels');
    const restoredPolicy=await page.evaluate(()=>{Module._engine_terrain_probe(0,0,0);return engineTerrainSnapshot.policy;});assert.equal(restoredPolicy.cameraLevel,4);assert.equal(restoredPolicy.shadowLevel,3);
@@ -76,13 +76,13 @@ const colorTriangles=s=>s.triangles-(s.shadowTriangles||0)-(s.guiTriangles||0);
    assert(difference(loaded,await shot('recovered-layered-mixed'))<40,'Recovery changed layered terrain pixels');
    await page.evaluate(()=>Module._engine_archive_return());await page.locator('#terrain-reset').click();await frames();
    await page.evaluate(()=>Module._engine_terrain_probe(0,0,0));assert.equal(await page.evaluate(()=>engineTerrainSnapshot.policy.cameraLevel),-1);
-   // User-facing controls work, and the shadow control is correctly unavailable on GL.
+   // User-facing controls, including shadow detail, work on both current backends.
    await page.locator('#terrain-surface').selectOption('2');await shot('ui-sand');await page.locator('#terrain-camera-detail').selectOption('4');
    await page.locator('#terrain-view').selectOption('1');await shot('ui-overhead');
    await page.locator('#terrain-return').click();await frames();await page.evaluate(()=>Module._engine_terrain_probe(0,0,0));assert.equal(await page.evaluate(()=>engineTerrainSnapshot.chunks),0);
    await page.locator('#terrain-open').click();await frames();await shot('restarted');
    result.backends[backend]={layerChanges,full,coarse,shadow,autoCoarse,autoFine,coarseHoles,mixedHoles,
-    shadowChangedPixels:difference(blend,coarseShadow),archiveBytes:bytes.length,restoredPolicy,shadowMaps:backend==='webgpu',
+    shadowChangedPixels:difference(blend,coarseShadow),archiveBytes:bytes.length,restoredPolicy,shadowMaps:full.shadowTriangles>0,
     checks:['four tiled color layers','linear weight normalization and zero fallback','invalid edit preservation','camera and shadow submission independence','automatic projected-size selection','full/coarse/mixed rendered coverage','ground/collision invariance','perspective/orthographic views','resize','layered mixed-LOD save/load','malformed archive preservation','paused context/device recovery','demo controls','return/reset/restart']};
    await page.close();
   }

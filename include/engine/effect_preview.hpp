@@ -23,14 +23,18 @@ public:
     bool paused() const{return paused_;}
     double seconds() const{return seconds_;}
     std::size_t particleCount() const;
+    std::size_t trailPointCount() const;
     std::size_t impactCount() const;
     std::size_t collisionQueries() const;
     std::uint64_t droppedParticles() const;
+    EffectCompositionStats compositionStats() const{return effect_?effect_->compositionStats():EffectCompositionStats{};}
 private:
     Scene scene_{"FX preview"};
     CameraComponent* camera_;
     EffectComponent* effect_=nullptr;
     Actor* collisionFloor_=nullptr; // Lazily owned by scene_, only collision previews need physics.
+    Node* ground_=nullptr;
+    Node* slope_=nullptr;
     bool active_=false,paused_=false,trailMotion_=true;
     double seconds_=0;
     void positionTrailSources(double seconds);

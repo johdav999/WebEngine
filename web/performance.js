@@ -46,7 +46,7 @@
         paused: document.querySelector('#pause').getAttribute('aria-pressed') === 'true',
         definitions: {
           intervalMs: 'Submitted frame callback interval; includes browser scheduling and stalls. First interval is omitted.',
-          cpuMs: 'CPU animation update and renderer work; excludes inspector processing and GPU execution.',
+          cpuMs: 'CPU simulation/host update and renderer work; excludes inspector processing and GPU execution.',
           prepareMs: 'Uniform preparation, cache maintenance, CPU mip generation, and queue write calls.',
           resourceMs: 'Scene mesh/texture creation, CPU mip generation and queue writes; subset of prepareMs. GUI preparation runs during encodeMs.',
           submitMs: 'CPU time calling queue.submit, not GPU execution time.',
@@ -67,6 +67,7 @@
         },
         latest: latest ? structuredClone(latest) : null,
         history: structuredClone(history), assets: structuredClone(assets),
+        timeline: window.EngineTimeline?.snapshot() || null,
       };
     },
   };

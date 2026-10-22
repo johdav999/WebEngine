@@ -1,5 +1,14 @@
 #include <set>
+#include <sstream>
+#include <iomanip>
+#include "engine/performance_timeline.hpp"
+#include "engine/adaptive_quality.hpp"
 #include "vehicle_example.hpp"
+#include "formula_demo.hpp"
+#include "ik_example.hpp"
+#include "retarget_example.hpp"
+#include "prefab_example.hpp"
+#include "engine/glb_importer.hpp"
 #define VEHICLE_BROWSER_IMPLEMENTATION
 #include "vehicle_browser.hpp"
 #include "engine/renderer.hpp"
@@ -22,11 +31,16 @@
 #include "water_demo.hpp"
 #include "terrain_demo.hpp"
 #include "ai_demo.hpp"
+#include "crowd_demo.hpp"
 #include "editor_ai_browser.hpp"
 #include "engine/ai_controller.hpp"
 #include "fx_contact_fixture.hpp"
 #include "editor_browser.hpp"
+namespace {void advanceContentIteration(double);}
 #include "audio_demo.hpp"
+#include "engine/editor_cinematic.hpp"
+#include "engine/audio_browser.hpp"
+#include "cinematic_example.hpp"
 #include "route_example.hpp"
 #include "driving_audio_demo.hpp"
 #include <emscripten.h>
@@ -37,6 +51,15 @@
 using namespace engine;
 extern "C" int engine_terrain_surface(int);
 extern "C" int engine_terrain_detail(int,int,float,float);
+bool cinematicActive();
+void advanceCinematic(double seconds);
+void suspendCinematic(bool value);
+void shutdownCinematic();
+bool replayReviewing();
+bool replayBusy();
+void advanceReplay(Scene&,double,double);
+void shutdownReplay();
+void markReplayReset();
 namespace {
 Application application;
 const SceneId playgroundSceneId=application.loadScene(std::make_unique<Scene>("Demo scene"));
@@ -55,6 +78,18 @@ LightComponent* point=nullptr;
 std::unique_ptr<OrbitController> orbit;
 const InputSystem& input=application.input();
 std::unique_ptr<Renderer> renderer;
+std::unique_ptr<FrameTimeline> detailedTimeline;
+std::unique_ptr<ProfileSession> detailedProfileSession;
+AdaptiveQuality adaptiveQuality;
+EM_JS(int,adaptive_replay_enabled,(),{return new URLSearchParams(location.search).get('adaptiveTest')==='1';});
+EM_JS(int,adaptive_viewport_changed,(),{const c=Module.canvas,key=[c.clientWidth,c.clientHeight,devicePixelRatio].join(',');const changed=Module.__adaptiveViewport!==key;Module.__adaptiveViewport=key;return changed;});
+EM_JS(void,report_adaptive_quality,(int enabled,double target,double pressure,double smoothed,double changes,const char* phase,double ceilingScale,int ceilingShadow,int ceilingMaps,double ceilingDetail),{
+    window.EngineQuality?.adaptiveReport({enabled:!!enabled,targetMs:target,pressure,smoothedMs:smoothed,changes,phase:UTF8ToString(phase),source:new URLSearchParams(location.search).get('adaptiveTest')==='1'?'test replay':'frame intervals',ceiling:{resolutionScale:ceilingScale,shadowResolution:ceilingShadow,maxShadowMaps:ceilingMaps,detailScale:ceilingDetail}});
+});
+void reportAdaptiveQuality(){const auto& q=adaptiveQuality.ceiling();report_adaptive_quality(adaptiveQuality.enabled(),adaptiveQuality.settings().targetMs,adaptiveQuality.pressure(),adaptiveQuality.smoothedMs(),double(adaptiveQuality.changes()),adaptiveQuality.phase(),q.resolution.scale,q.shadowResolution,q.maxShadowMaps,q.detailScale);}
+RenderQuality manualQuality(){return adaptiveQuality.enabled()?adaptiveQuality.ceiling():renderer->quality();}
+void applyManualQuality(const RenderQuality& q){renderer->setQuality(q);adaptiveQuality.start(q,adaptiveQuality.settings());adaptiveQuality.stop();reportAdaptiveQuality();}
+void sampleAdaptiveQuality(double ms,bool eligible=true){if(ms==0){adaptiveQuality.resetEvidence();return;}if(adaptiveQuality.observe(ms,eligible))renderer->setQuality(adaptiveQuality.effective());}
 bool hostSuspended=false;
 bool paused() { return application.state()==ApplicationState::Paused; }
 void setPaused(bool value) { if(value||browserEditorActive()) application.pause();else application.resume(); }
@@ -67,6 +102,9 @@ Actor* materialShowcase=nullptr;
 WaterDemo waterDemo;
 TerrainDemo terrainDemo;
 AiDemo aiDemo;
+CrowdDemo crowdDemo;
+double crowdLastTime=-1;
+FormulaDemo formulaDemo;
 int terrainTool=0;
 TerrainBrush terrainBrush;
 int terrainSurfaceMode=0,terrainCameraLevel=-1,terrainShadowLevel=-1;
@@ -219,10 +257,14 @@ void reportSkyState() {
     const auto& s=*setting;report_sky_state(int(s.mode)+1,int(s.geometry),s.brightness,s.rotation,s.clouds.enabled,s.clouds.coverage,s.clouds.density,s.atmosphere.rayleigh,s.atmosphere.mie,s.dayNight.enabled,s.dayNight.running,s.dayNight.hour,s.dayNight.daySeconds);
 }
 EM_BOOL frame(double time,void*) {
+    ProfileFrame detailedFrame;
     if(application.state()==ApplicationState::Stopped) return EM_FALSE;
     renderer->serviceRecovery();
     const bool suspended=hostSuspended||!renderer->ready();
-    if(application.suspended()!=suspended) {suspendAudioDemo(suspended);suspendDrivingAudio(suspended);}
+    if(crowdDemo.active()&&!openedScene){const auto dt=paused()||suspended||crowdLastTime<0?0:std::clamp((time-crowdLastTime)/1000,0.,.25);if(!suspended){crowdDemo.prepare(scene,dt);crowdDemo.debug(scene);}crowdLastTime=time;}
+    if(suspended)adaptiveQuality.resetEvidence();
+    if(adaptiveQuality.enabled()&&adaptive_viewport_changed())adaptiveQuality.resetEvidence();
+    if(application.suspended()!=suspended) {suspendAudioDemo(suspended);suspendDrivingAudio(suspended);suspendCinematic(suspended);}
     application.setSuspended(suspended);
     if(browserEditorPlaying())browserEditorPlaySession().setSuspended(suspended);
     const float inputHeight=drain_browser_input();
@@ -230,9 +272,17 @@ EM_BOOL frame(double time,void*) {
         const auto updateStart=emscripten_get_now();
         ApplicationFrameCallbacks callbacks;
         callbacks.input=[&](Scene& active,const InputSystem& snapshot,const ApplicationFrame& clocks) {
-            if(!browserEditorActive()){prepareDrivingAudio(active);vehicleInput(active,snapshot,paused());}
+            if(cinematicActive()||replayReviewing())return;
+            if(!browserEditorActive()){
+                prepareDrivingAudio(active);
+                if(formulaDemo.active(active)){
+                    const auto move=snapshot.action(InputActions::Move).value;
+                    formulaDemo.submit(active,{move.y,move.x,snapshot.action(100).value.x,snapshot.action(101).value.x},paused()||suspended);
+                }else vehicleInput(active,snapshot,paused());
+            }
+            if(browserEditorRegionActive())return;
             if(browserEditorFxActive()){updateBrowserEditorFx(snapshot,float(clocks.input.delta),inputHeight);return;}
-            if(browserEditorPlaying()||browserEditorFxActive())return;
+            if(browserEditorPlaying()||browserEditorFxActive()||browserEditorRegionActive())return;
             if(browserEditorActive())updateBrowserEditorCamera(snapshot,float(clocks.input.delta),inputHeight);
             else if(!composedVehicleCamera(*renderer->views().front().camera)&&(openedScene||!terrainDemo.active()||terrainTool==0)) displayedOrbit().update(snapshot,float(clocks.input.delta),inputHeight);
             if(!openedScene&&terrainDemo.active()&&snapshot.action(InputActions::ResetCamera).pressed) terrainDemo.frame(scene,*orbit);
@@ -240,6 +290,7 @@ EM_BOOL frame(double time,void*) {
             if(!openedScene&&shipStress.active()&&snapshot.action(InputActions::ResetCamera).pressed) orbit->zoom(750);
         };
         callbacks.simulate=[](Scene&,const ApplicationFrame& clocks) {
+            if(crowdDemo.active()&&!openedScene)return;
             const auto dt=float(clocks.simulation.delta);
             if(openedScene) {
                 if(openedDemoMotion) {
@@ -254,8 +305,20 @@ EM_BOOL frame(double time,void*) {
             }
         };
         callbacks.afterSimulation=[&](Scene& active,const ApplicationFrame& clocks) {
+            if(cinematicActive()){advanceCinematic(clocks.presentation.delta);return;}
+            advanceReplay(active,clocks.simulation.delta,clocks.presentation.delta);
+            if(!browserEditorActive()&&formulaDemo.active(active)) {
+                formulaDemo.update(active,clocks.simulation.delta);
+                if(auto* assist=formulaDemo.driver(active)){
+                    const auto desired=assist->desired();
+                    EM_ASM({window.formulaInputState={};window.formulaInputState.steering=$0;window.formulaInputState.throttle=$1;},desired.steering,desired.throttle);
+                }
+                const auto& race=formulaDemo.laps;
+                EM_ASM({window.EngineFormula?.report({lap:$0,completed:$1,time:$2,last:$3,best:$4,valid:!!$5,offTrack:!!$6,wrongWay:!!$7,progress:$8,length:$9,x:$10,z:$11});},race.lap,race.completed,race.seconds,race.last,race.best,race.valid,race.offTrack,race.wrongWay,formulaDemo.distance,formulaDemo.track->length(),active.findActor(formulaDemo.car)->transform.position.x,active.findActor(formulaDemo.car)->transform.position.z);
+            }
             if(!browserEditorActive()){reportVehicle(active);if(!renderer->views().empty())if(auto* camera=renderer->views().front().camera){int width=1,height=1;emscripten_get_canvas_element_size("#viewport",&width,&height);const auto view=camera->pixelViewport(width,height);vehicleMainCamera.update(active,*camera,clocks.presentation.delta,view.width/view.height);reportVehicleCamera(*camera);}}
             if(!openedScene&&aiDemo.active()) aiDemo.debug(scene);
+            if(browserEditorRegionActive()){advanceBrowserEditorRegion();return;}
             if(browserEditorFxActive()){browserEditorFxPreview().advance(std::clamp(clocks.presentation.delta,0.0,.1));return;}
             if(browserEditorPlaying()){renderer->setWaterTime(advanceBrowserEditorPlay(time/1000,application.input(),inputHeight,false));return;}
             if(!openedScene&&terrainDemo.active()&&!browserEditorActive()) {
@@ -321,9 +384,12 @@ EM_BOOL frame(double time,void*) {
             }
         };
         callbacks.present=[&](Scene&,const ApplicationFrame& clocks) {
+            advanceContentIteration(time/1000);
             static double lastSkyReport=-1000;
             if(time-lastSkyReport>=250) {reportSkyState();lastSkyReport=time;}
             renderer->render(emscripten_get_now()-updateStart,clocks.interval*1000);
+            if(!adaptive_replay_enabled())sampleAdaptiveQuality(clocks.interval*1000,!suspended&&renderer->ready());
+            static double lastAdaptiveReport=-1000;if(time-lastAdaptiveReport>=250){reportAdaptiveQuality();lastAdaptiveReport=time;}
             syncBrowserGui();tickAnimationUI();tickBrowserEditor();
             if(!openedScene) {
                 if(time-lastFxReport>=250) { reportFx();lastFxReport=time; }
@@ -483,6 +549,16 @@ void appendLibrary(AssetLibrary& to,const AssetLibrary& from) {
 
 }
 extern "C" {
+EM_JS(void, timeline_report,(const char* text),{window.EngineTimeline?.report(JSON.parse(UTF8ToString(text)));});
+EM_JS(void, timeline_download,(const char* text),{window.EngineTimeline?.download(UTF8ToString(text));});
+EMSCRIPTEN_KEEPALIVE int engine_profile_control(int action){
+    try {if(action<0||action>3)return 0;
+        if(!detailedTimeline){detailedTimeline=std::make_unique<FrameTimeline>();detailedProfileSession=std::make_unique<ProfileSession>(*detailedTimeline);}
+        if(action==0)detailedTimeline->setRecording(false);else if(action==1)detailedTimeline->setRecording(true);else if(action==2)detailedTimeline->reset();else {const auto text=detailedTimeline->traceJson();timeline_download(text.c_str());}
+        const auto text=detailedTimeline->json();timeline_report(text.c_str());return 1;
+    }catch(const std::exception& e){emscripten_log(EM_LOG_WARN,"Profiling timeline: %s",e.what());return 0;}
+}
+EMSCRIPTEN_KEEPALIVE void engine_profile_snapshot(){if(detailedTimeline){const auto text=detailedTimeline->json();timeline_report(text.c_str());}}
 EM_JS(void, archive_message, (const char* text,int error), { window.engineArchiveMessage?.(UTF8ToString(text),!!error); });
 EM_JS(void, archive_bytes, (const void* data,int count,int assets), { window.engineArchiveBytes?.(HEAPU8.slice(data,data+count),!!assets); });
 EM_JS(void, archive_metadata, (const void* data,int count), { window.engineArchiveMetadata=HEAPU8.slice(data,data+count); });
@@ -497,7 +573,7 @@ EMSCRIPTEN_KEEPALIVE void engine_archive_snapshot() {
 }
 EMSCRIPTEN_KEEPALIVE int engine_archive_save(int assets,const void* metadata,int count) {
     try {
-        if(browserEditorPlaying()||browserEditorFxActive())throw std::logic_error("Close FX preview / Stop Play before saving the authoring document");
+        if(browserEditorPlaying()||browserEditorFxActive()||browserEditorRegionActive()||replayReviewing())throw std::logic_error("Close previews / Stop Play before saving the authoring document");
         if(count<0||(!metadata&&count)) throw std::invalid_argument("Invalid scene metadata");
         prepareBrowserEditorSave();
         displayedScene().flushPendingDestroy();
@@ -511,7 +587,7 @@ EMSCRIPTEN_KEEPALIVE int engine_archive_save(int assets,const void* metadata,int
 }
 EMSCRIPTEN_KEEPALIVE int engine_archive_prepare(const void* data,int count,int assets) {
     try {
-        if(browserEditorPlaying()||browserEditorFxActive())throw std::logic_error("Close FX preview / Stop Play before opening a document");
+        if(browserEditorPlaying()||browserEditorFxActive()||browserEditorRegionActive())throw std::logic_error("Close previews / Stop Play before opening a document");
         pendingDocument={};pendingOrbit.reset();pendingAssetRoot.reset();pendingLibrary={};
         pendingDemoMotion=false;pendingPhase=0;
         if(!data||count<=0) throw std::invalid_argument("Empty scene archive");
@@ -550,7 +626,7 @@ EMSCRIPTEN_KEEPALIVE int engine_archive_motion(float phase,int enabled) {
 }
 EMSCRIPTEN_KEEPALIVE int engine_archive_commit(int assets,int isPaused) {
     try {
-        if(browserEditorPlaying()||browserEditorFxActive())throw std::logic_error("Close FX preview / Stop Play before replacing the authoring document");
+        if(browserEditorPlaying()||browserEditorFxActive()||browserEditorRegionActive())throw std::logic_error("Close previews / Stop Play before replacing the authoring document");
         if(assets) {
             if(!pendingAssetRoot) throw std::logic_error("No prepared asset library");
             auto library=displayedLibrary();appendLibrary(library,pendingLibrary);
@@ -581,7 +657,7 @@ EMSCRIPTEN_KEEPALIVE int engine_archive_commit(int assets,int isPaused) {
 }
 EMSCRIPTEN_KEEPALIVE void engine_archive_cancel() { pendingDocument={};pendingOrbit.reset();pendingAssetRoot.reset();pendingLibrary={}; }
 EMSCRIPTEN_KEEPALIVE void engine_archive_return() {
-    if(browserEditorPlaying()||browserEditorFxActive())return;
+    if(browserEditorPlaying()||browserEditorFxActive()||browserEditorRegionActive())return;
     if(!openedScene) return;
     application.requestTransition(playgroundSceneId,true);application.commitTransition();
     openedScene=nullptr;openedSceneId={};openedAssembly=nullptr;openedLightRig=nullptr;
@@ -603,7 +679,7 @@ EMSCRIPTEN_KEEPALIVE int engine_ship_stress_asset(const void* data,int bytes) {
 }
 EMSCRIPTEN_KEEPALIVE int engine_ship_stress_count(int count) {
     try {
-        aiDemo.stop(scene,*orbit);shipStress.setCount(count);stopPhysicsDemo();
+        crowdDemo.stop(scene,*orbit);aiDemo.stop(scene,*orbit);shipStress.setCount(count);stopPhysicsDemo();
         assembly->enabled=false;importedActor->enabled=false;
         if(materialShowcase) materialShowcase->enabled=false;
         orbit->target={0,1,0};orbit->reset();orbit->zoom(750);
@@ -614,10 +690,39 @@ EMSCRIPTEN_KEEPALIVE void engine_ship_stress_stop() {
     stopShipStress();importedActor->enabled=bool(importedMesh->mesh);assembly->enabled=!importedActor->enabled;
     orbit->target={0,1,0};orbit->reset();++materialSceneRevision;reportMaterials();renderer->resetMeasurements();
 }
+EMSCRIPTEN_KEEPALIVE int engine_prefab_demo() {
+    try {if(openedScene)return 0;assembly->enabled=false;importedActor->enabled=false;lightRig->enabled=false;
+        auto asset=makePrefabExample();for(float x:{-2.f,2.f}){auto actor=asset->instantiate();actor->transform.position={x,1,0};scene.adoptChild(std::move(actor));}
+        auto sky=*scene.sky();sky.dayNight.enabled=false;scene.setSky(sky);orbit->focus({0,1,0},9);scene.synchronize();
+        if(browserEditorActive())bindBrowserEditor(scene,*camera,*orbit,displayedLibrary(),renderer->views());return 1;
+    }catch(const std::exception& e){emscripten_log(EM_LOG_ERROR,"Prefab demonstration: %s",e.what());return 0;}
+}
+EMSCRIPTEN_KEEPALIVE int engine_retarget_demo() {
+    try {
+        if(openedScene||scene.findSavedNode("retarget.target"))return 0;
+        assembly->enabled=false;importedActor->enabled=false;lightRig->enabled=false;
+        populateRetargetExample(scene);
+        auto sky=*scene.sky();sky.dayNight.enabled=false;scene.setSky(sky);
+        orbit->focus({.4f,1.8f,0},9);scene.synchronize();
+        if(browserEditorActive())bindBrowserEditor(scene,*camera,*orbit,displayedLibrary(),renderer->views());
+        ++materialSceneRevision;reportMaterials();return 1;
+    }catch(const std::exception& e){emscripten_log(EM_LOG_ERROR,"Retarget demonstration: %s",e.what());return 0;}
+}
+EMSCRIPTEN_KEEPALIVE int engine_ik_demo() {
+    try {
+        if(openedScene||scene.findSavedNode("ik.demo"))return 0;
+        assembly->enabled=false;importedActor->enabled=false;lightRig->enabled=false;
+        importedMesh=&populateIkExample(scene);
+        auto sky=*scene.sky();sky.dayNight.enabled=false;scene.setSky(sky);
+        orbit->focus({.3f,2,0},7);scene.synchronize();
+        if(browserEditorActive())bindBrowserEditor(scene,*camera,*orbit,displayedLibrary(),renderer->views());
+        ++materialSceneRevision;reportMaterials();return 1;
+    }catch(const std::exception& e){emscripten_log(EM_LOG_ERROR,"IK demonstration: %s",e.what());return 0;}
+}
 EMSCRIPTEN_KEEPALIVE void engine_physics_snapshot() { reportPhysics(); }
 EMSCRIPTEN_KEEPALIVE int engine_physics_action(int action,int value) {
     try {
-        if(action==0) {aiDemo.stop(scene,*orbit);terrainDemo.stop(scene,*orbit);waterDemo.stop(scene,*orbit);}
+        if(action==0) {crowdDemo.stop(scene,*orbit);aiDemo.stop(scene,*orbit);terrainDemo.stop(scene,*orbit);waterDemo.stop(scene,*orbit);}
         switch(action) {
             case 0:
                 stopShipStress();
@@ -657,11 +762,37 @@ EMSCRIPTEN_KEEPALIVE int engine_material_graph(int target,int slot,const float* 
         reportMaterials();material_message("Material graph preview updated",0);return 1;
     } catch(const std::exception& error) { material_message(error.what(),1);return 0; }
 }
+EMSCRIPTEN_KEEPALIVE int engine_crowd_demo(int action) {
+    try {
+        if(openedScene||browserEditorActive())return 0;
+        if(action==0)crowdDemo.stop(scene,*orbit);
+        else if(action==1){aiDemo.stop(scene,*orbit);terrainDemo.stop(scene,*orbit);waterDemo.stop(scene,*orbit);stopPhysicsDemo();stopShipStress();crowdDemo.start(scene,*orbit);crowdLastTime=-1;}
+        else if(action==2||action==3)crowdDemo.reset(scene,action-2);
+        else if(action==4||action==5)crowdDemo.door(scene,action==4);
+        else return 0;
+        scene.synchronize();crowdDemo.debug(scene);return 1;
+    }catch(const std::exception& error){emscripten_log(EM_LOG_WARN,"Crowd demo: %s",error.what());return 0;}
+}
+EM_JS(void,crowd_report_begin,(int active,int ready,int closed,double revision,double builds,double failures,int obstacles,int queries,int candidates,int stops,const char* error),{
+    window.__crowdReport={active:!!active,ready:!!ready,closed:!!closed,revision,builds,failures,obstacles,queries,candidates,safetyStops:stops,error:UTF8ToString(error),agents:[]};
+});
+EM_JS(void,crowd_report_agent,(int index,int generation,int status,float x,float y,float z,float vx,float vz,int neighbors,int yielding),{
+    window.__crowdReport.agents.push({index,generation,status,x,y,z,vx,vz,neighbors,yielding:!!yielding});
+});
+EMSCRIPTEN_KEEPALIVE void engine_crowd_snapshot(){
+    const auto nav=crowdDemo.navigationStats();const auto stats=crowdDemo.crowdStats(scene);crowd_report_begin(crowdDemo.active()&&!openedScene,crowdDemo.ready(),crowdDemo.closed(),double(crowdDemo.revision()),double(nav.builds),double(nav.failures),int(nav.obstacles),int(stats.obstacleQueries),int(stats.candidates),int(stats.safetyStops),nav.error.c_str());
+    for(const auto& s:crowdDemo.agents(scene))crowd_report_agent(s.motor.index,s.motor.generation,int(s.status),s.position.x,s.position.y,s.position.z,s.velocity.x,s.velocity.z,int(s.neighbors),s.yielding);
+    EM_ASM({window.EngineCrowd?.report(window.__crowdReport);});
+}
+EMSCRIPTEN_KEEPALIVE int engine_crowd_test_steps(int steps){
+    if(!EM_ASM_INT({return new URLSearchParams(location.search).get('crowdTest')==='1';})||!paused()||openedScene||browserEditorActive()||!crowdDemo.active()||steps<0||steps>600)return 0;
+    try {for(int i=0;i<steps;++i){crowdDemo.prepare(scene,1./60);scene.fixedUpdate(1./60);}crowdDemo.debug(scene);engine_crowd_snapshot();return 1;}catch(const std::exception& e){emscripten_log(EM_LOG_WARN,"Crowd test: %s",e.what());return 0;}
+}
 EMSCRIPTEN_KEEPALIVE int engine_ai_demo(int enabled) {
     try {
         if(openedScene||browserEditorActive()) return 0;
         if(enabled) {terrainDemo.stop(scene,*orbit);waterDemo.stop(scene,*orbit);stopPhysicsDemo();stopShipStress();aiDemo.start(scene,*orbit);}
-        else aiDemo.stop(scene,*orbit);
+        else {crowdDemo.stop(scene,*orbit);aiDemo.stop(scene,*orbit);}
         application.resetClocks();return 1;
     } catch(const std::exception& e) {emscripten_log(EM_LOG_WARN,"AI demo: %s",e.what());return 0;}
 }
@@ -712,7 +843,7 @@ EMSCRIPTEN_KEEPALIVE int engine_ai_test_steps(int steps) {
 EMSCRIPTEN_KEEPALIVE int engine_water_demo(int enabled) {
     try {
         if(openedScene) throw std::invalid_argument("Return to playground before opening water demo");
-        if(enabled) {aiDemo.stop(scene,*orbit);terrainDemo.stop(scene,*orbit);stopPhysicsDemo();stopShipStress();waterDemo.start(scene,*orbit);waterDemo.appearance(scene,0);waterDemo.view(scene,*orbit,*camera,0);waterSeconds=0;renderer->setWaterTime(0);}
+        if(enabled) {crowdDemo.stop(scene,*orbit);aiDemo.stop(scene,*orbit);terrainDemo.stop(scene,*orbit);stopPhysicsDemo();stopShipStress();waterDemo.start(scene,*orbit);waterDemo.appearance(scene,0);waterDemo.view(scene,*orbit,*camera,0);waterSeconds=0;renderer->setWaterTime(0);}
         else waterDemo.stop(scene,*orbit);
         return 1;
     } catch(const std::exception& e) {emscripten_log(EM_LOG_WARN,"Water demo: %s",e.what());return 0;}
@@ -721,7 +852,7 @@ EM_JS(void, terrain_message,(const char* message),{window.engineTerrainMessage?.
 EMSCRIPTEN_KEEPALIVE int engine_terrain_demo(int enabled) {
     try {
         if(openedScene) throw std::invalid_argument("Return to playground before changing the terrain demo");
-        if(enabled) {aiDemo.stop(scene,*orbit);if(!terrainDemo.active()) {terrainTool=terrainSurfaceMode=0;terrainCameraLevel=terrainShadowLevel=-1;terrainCameraScale=terrainShadowScale=1;}waterDemo.stop(scene,*orbit);stopPhysicsDemo();stopShipStress();terrainDemo.start(scene,*orbit,*camera);}
+        if(enabled) {crowdDemo.stop(scene,*orbit);aiDemo.stop(scene,*orbit);if(!terrainDemo.active()) {terrainTool=terrainSurfaceMode=0;terrainCameraLevel=terrainShadowLevel=-1;terrainCameraScale=terrainShadowScale=1;}waterDemo.stop(scene,*orbit);stopPhysicsDemo();stopShipStress();terrainDemo.start(scene,*orbit,*camera);}
         else terrainDemo.stop(scene,*orbit);
         application.resetClocks();++materialSceneRevision;reportMaterials();return 1;
     } catch(const std::exception& e) {terrain_message(e.what());return 0;}
@@ -855,6 +986,7 @@ EM_JS(void,terrain_snapshot_writeback,(int editing,int pending,int dirty,double 
     Object.assign(window.engineTerrainSnapshot.paging,{editing:!!editing,editPending:!!pending,dirty,dirtyBytes:bytes,writePending:!!writing,writing,writeFailed:!!failed,writes,writtenPages:pages,edits,lastAffected:affected,lastRebuilt:rebuilt,editError:UTF8ToString(editError),writeError:UTF8ToString(writeError)});
 });
 EMSCRIPTEN_KEEPALIVE int engine_terrain_probe(float x,float z,int mark) {
+    if(application.state()==ApplicationState::Stopped)return 0;
     try {
         auto& current=displayedScene();auto hit=terrainGround(current,x,z);int chunks=0;
         current.visit([&](const Node& n,const Mat4&) {if(dynamic_cast<const TerrainComponent*>(&n)&&n.isActiveInHierarchy()) ++chunks;});
@@ -908,7 +1040,7 @@ EMSCRIPTEN_KEEPALIVE int engine_water_time_set(double seconds) {
 }
 EMSCRIPTEN_KEEPALIVE int engine_material_scene(int showcase) {
     try {
-        aiDemo.stop(scene,*orbit);
+        crowdDemo.stop(scene,*orbit);aiDemo.stop(scene,*orbit);
         terrainDemo.stop(scene,*orbit);
         waterDemo.stop(scene,*orbit);
         stopShipStress();
@@ -1082,11 +1214,30 @@ EMSCRIPTEN_KEEPALIVE void engine_lifecycle_snapshot() {
         clocks.input.seconds,clocks.simulation.seconds,clocks.presentation.seconds,clocks.fixedSeconds,
         double(clocks.input.frames),double(clocks.simulation.frames),double(clocks.presentation.frames));
 }
-std::vector<RenderView> fxSourceViews;
-EMSCRIPTEN_KEEPALIVE int engine_editor_fx_preview(int enabled) {
+std::vector<RenderView> regionSourceViews;
+EMSCRIPTEN_KEEPALIVE int engine_editor_region_preview(int enabled) {
+    if(cinematicActive()||replayBusy())return 0;
     try {
         if(!browserEditorActive()||browserEditorPlaying()||!renderer||!renderer->ready())return 0;
         if(enabled){
+            if(browserEditorFxActive())throw std::logic_error("Close the FX preview first");
+            if(browserEditorRegionActive())return 1;
+            regionSourceViews.assign(renderer->views().begin(),renderer->views().end());startBrowserEditorRegion();
+            try{renderer->setScene(browserEditorRegionScene(),std::array{RenderView{&browserEditorRegionCamera()}});}catch(...){stopBrowserEditorRegion();regionSourceViews.clear();throw;}
+        }else{
+            if(!browserEditorRegionActive())return 1;
+            renderer->setScene(displayedScene(),regionSourceViews);stopBrowserEditorRegion();regionSourceViews.clear();renderer->setWaterTime(waterSeconds);
+        }
+        application.resetClocks();return 1;
+    }catch(const std::exception& e){archive_message(e.what(),1);return 0;}
+}
+std::vector<RenderView> fxSourceViews;
+EMSCRIPTEN_KEEPALIVE int engine_editor_fx_preview(int enabled) {
+    if(cinematicActive()||replayBusy())return 0;
+    try {
+        if(!browserEditorActive()||browserEditorPlaying()||!renderer||!renderer->ready())return 0;
+        if(enabled){
+            if(browserEditorRegionActive())throw std::logic_error("Close the region preview first");
             if(browserEditorFxActive())return 1;
             fxSourceViews.assign(renderer->views().begin(),renderer->views().end());startBrowserEditorFx();
             try {auto& preview=browserEditorFxPreview();renderer->setScene(preview.scene(),std::array{RenderView{&preview.camera()}});}
@@ -1100,9 +1251,11 @@ EMSCRIPTEN_KEEPALIVE int engine_editor_fx_preview(int enabled) {
 }
 std::vector<RenderView> editorSourceViews;
 EMSCRIPTEN_KEEPALIVE int engine_editor_play(int value) {
+    if(cinematicActive()||replayBusy())return 0;
     try {
         if(!browserEditorActive()||!renderer||!renderer->ready())return 0;
         if(value){
+            if(browserEditorRegionActive())throw std::logic_error("Close the region preview before Play");
             if(browserEditorFxActive())throw std::logic_error("Close the FX preview before Play");
             if(browserEditorPlaying())return 1;
             editorSourceViews.assign(renderer->views().begin(),renderer->views().end());
@@ -1117,7 +1270,8 @@ EMSCRIPTEN_KEEPALIVE int engine_editor_play(int value) {
     }catch(const std::exception& error){archive_message(error.what(),1);EM_ASM({window.EngineEditor?.message(UTF8ToString($0),true);},error.what());return 0;}
 }
 EMSCRIPTEN_KEEPALIVE int engine_editor_mode(int value) {
-    if(browserEditorPlaying()||browserEditorFxActive())return 0;
+    if(cinematicActive()||replayBusy())return 0;
+    if(browserEditorPlaying()||browserEditorFxActive()||browserEditorRegionActive())return 0;
     if(!renderer||!renderer->ready()||application.state()==ApplicationState::Stopped) return 0;
     if((value!=0)==browserEditorActive()) return 1;
     try {
@@ -1132,12 +1286,13 @@ EMSCRIPTEN_KEEPALIVE int engine_editor_mode(int value) {
     }
 }
 EMSCRIPTEN_KEEPALIVE void engine_pause(int value) {
+    if(replayReviewing()&&!value)return;
     if(application.state()==ApplicationState::Stopped) return;
     EM_ASM({window.EngineInput?.instance?.cancelAll();});setPaused(value!=0);reportPhysics();engine_lifecycle_snapshot();
 }
 EMSCRIPTEN_KEEPALIVE void engine_suspend(int value) {
     if(application.state()==ApplicationState::Stopped) return;
-    EM_ASM({window.EngineInput?.instance?.cancelAll();});hostSuspended=value!=0;application.setSuspended(hostSuspended||!renderer||!renderer->ready());suspendAudioDemo(application.suspended());suspendDrivingAudio(application.suspended());engine_lifecycle_snapshot();
+    EM_ASM({window.EngineInput?.instance?.cancelAll();});hostSuspended=value!=0;application.setSuspended(hostSuspended||!renderer||!renderer->ready());suspendAudioDemo(application.suspended());suspendDrivingAudio(application.suspended());suspendCinematic(application.suspended());engine_lifecycle_snapshot();
 }
 EMSCRIPTEN_KEEPALIVE void engine_audio_command(int command,float value) {
     if(application.state()==ApplicationState::Stopped) return;
@@ -1148,13 +1303,17 @@ EMSCRIPTEN_KEEPALIVE int engine_audio_load(const float* samples,unsigned count,u
     if(application.state()==ApplicationState::Stopped||!samples||count>32*1024*1024) return 0;
     return audioDemoLoad(rate,channels,std::span<const float>(samples,count));
 }
+EMSCRIPTEN_KEEPALIVE int engine_audio_stream(const char* uri) {
+    if(application.state()==ApplicationState::Stopped||application.suspended())return 0;
+    return audioDemoStream(uri);
+}
 EM_JS(void, dispose_browser_host, (), {
     window.EngineEditor?.cancel();window.EngineQuality?.dispose();window.EngineInput?.instance?.dispose();window.EngineAudio?.stop?.();
 });
 EMSCRIPTEN_KEEPALIVE void engine_shutdown() {
     if(application.state()==ApplicationState::Stopped) return;
-    dispose_browser_host();shutdownAudioDemo();shutdownDrivingAudio();stopShipStress();stopPhysicsDemo();
-    aiDemo.stop(scene,*orbit);
+    shutdownReplay();shutdownCinematic();dispose_browser_host();shutdownAudioDemo();shutdownDrivingAudio();stopShipStress();stopPhysicsDemo();
+    crowdDemo.stop(scene,*orbit);aiDemo.stop(scene,*orbit);
     attachBrowserGui(nullptr);application.shutdown();
     openedScene=nullptr;openedSceneId={};openedOrbit.reset();openedDocument={};
     pendingDocument={};pendingOrbit.reset();pendingAssetRoot.reset();pendingLibrary={};
@@ -1172,21 +1331,40 @@ EMSCRIPTEN_KEEPALIVE int engine_asset_upload_budget(double bytes,double resource
 EMSCRIPTEN_KEEPALIVE int engine_quality(int profile,float scale,float pixelRatio,int dimension,double pixels,int maps,int lod,int compressed) {
     if(!renderer) return 0;
     try {
-        auto q=profile==-1 ? renderer->quality() : RenderQuality::profile(static_cast<QualityProfile>(profile));
+        auto q=profile==-1 ? manualQuality() : RenderQuality::profile(static_cast<QualityProfile>(profile));
         if(scale!=0) {
             if(dimension<=0||!std::isfinite(pixels)||pixels<1||pixels>268435456||maps<0||maps>4) return 0;
             q.resolution={scale,pixelRatio,std::uint32_t(dimension),std::uint64_t(pixels)};q.maxShadowMaps=maps;
         }
         q.lod=lod!=0;q.shadowLod=lod!=0;q.compressedTextures=compressed!=0;
-        renderer->setQuality(q);return 1;
+        applyManualQuality(q);return 1;
     } catch(const std::exception&) { return 0; }
 }
-EMSCRIPTEN_KEEPALIVE void engine_resize_quality() { if(renderer) renderer->resizeCanvas(); }
+EMSCRIPTEN_KEEPALIVE void engine_resize_quality() { adaptiveQuality.resetEvidence();if(renderer) renderer->resizeCanvas(); }
+EMSCRIPTEN_KEEPALIVE int engine_adaptive_quality(int enabled,double target) {
+    if(!renderer)return 0;
+    try {
+        auto settings=adaptiveQuality.settings();settings.targetMs=target;settings.validate();
+        if(enabled){if(adaptiveQuality.enabled())adaptiveQuality.configure(settings);else adaptiveQuality.start(renderer->quality(),settings);renderer->setQuality(adaptiveQuality.effective());}
+        else {if(adaptiveQuality.enabled()){const auto q=adaptiveQuality.ceiling();renderer->setQuality(q);adaptiveQuality.stop();}adaptiveQuality.configure(settings);}
+        reportAdaptiveQuality();return 1;
+    }catch(const std::exception&){return 0;}
+}
+// Explicit deterministic acceptance transport; production samples completed RAFs.
+EMSCRIPTEN_KEEPALIVE int engine_adaptive_sample(double ms,int count) {
+    if(!renderer||!renderer->ready()||!adaptive_replay_enabled()||count<1||count>2000||!std::isfinite(ms)||ms<=0||ms>250)return 0;
+    for(int i=0;i<count;++i)sampleAdaptiveQuality(ms);reportAdaptiveQuality();return 1;
+}
+EMSCRIPTEN_KEEPALIVE int engine_lighting(int enabled,float exposure,float bloom,float threshold,float saturation,float contrast,int cascades,float distance) {
+    if(!renderer)return 0;
+    try {auto q=manualQuality();q.post={enabled!=0,exposure,bloom,threshold,saturation,contrast};q.directionalCascades=std::uint32_t(cascades);q.shadowDistance=distance;applyManualQuality(q);return 1;}
+    catch(const std::exception&){return 0;}
+}
 EMSCRIPTEN_KEEPALIVE int engine_msaa(int samples) {
     if(!renderer) return 0;
     try {
-        auto q=renderer->quality();q.msaaSamples=static_cast<std::uint32_t>(samples);
-        renderer->setQuality(q);return 1;
+        auto q=manualQuality();q.msaaSamples=static_cast<std::uint32_t>(samples);
+        applyManualQuality(q);return 1;
     } catch(const std::exception&) { return 0; }
 }
 EMSCRIPTEN_KEEPALIVE void engine_retry_gpu() { if(renderer) renderer->retryRecovery(); }
@@ -1210,12 +1388,11 @@ EMSCRIPTEN_KEEPALIVE int engine_compressed_fixture() {
     scene.synchronize();return 1;
 }
 EMSCRIPTEN_KEEPALIVE void engine_lose_gpu() { if(renderer&&resilience_fixture_enabled()) renderer->simulateDeviceLoss(); }
-EMSCRIPTEN_KEEPALIVE void engine_shadows(int value) { renderer->setShadowsEnabled(value!=0);renderer->resetMeasurements(); }
+EMSCRIPTEN_KEEPALIVE void engine_shadows(int value) { if(adaptiveQuality.enabled())applyManualQuality(manualQuality());renderer->setShadowsEnabled(value!=0);renderer->resetMeasurements(); }
 // Atomic controls for reproducible LOD/shadow comparisons. Changes reset both sampling windows.
 EMSCRIPTEN_KEEPALIVE int engine_detail_settings(int lod,int shadowLod,int casting,int receiving,int resolution,int taps,int culling) {
     try {
-        renderer->setShadowQuality(resolution,taps);
-        renderer->setLodEnabled(lod!=0);renderer->setShadowLodEnabled(shadowLod!=0);
+        auto q=manualQuality();q.shadowResolution=std::uint32_t(resolution);q.shadowFilterTaps=std::uint32_t(taps);q.lod=lod!=0;q.shadowLod=shadowLod!=0;applyManualQuality(q);
         renderer->setShadowCastingEnabled(casting!=0);renderer->setShadowReceivingEnabled(receiving!=0);
         renderer->setShadowCullingEnabled(culling!=0);renderer->resetMeasurements();renderer->refreshQualityReport();return 1;
     } catch(const std::exception&) { return 0; }
@@ -1360,7 +1537,9 @@ EMSCRIPTEN_KEEPALIVE int engine_fog_view(int index,int enabled) {
     std::vector<RenderView> views(renderer->views().begin(),renderer->views().end());views[index].fogEnabled=enabled!=0;renderer->setViews(views);return 1;
 }
 EMSCRIPTEN_KEEPALIVE int engine_fx_fixture(int mode) {
-    if(!fx_fixture_enabled()||mode<0||mode>85) return 0;
+    if(!fx_fixture_enabled()||mode<0||mode>95) return 0;
+    const bool surfaceTrail=mode>=86,occludedSurface=mode==95;
+    if(surfaceTrail)mode=occludedSurface?26:mode-60;
     static Actor* fixture=nullptr;
     if(fixture) { fixture->destroy();scene.flushPendingDestroy(); }
     for(const auto& child:scene.children()) child->enabled=false;
@@ -1413,12 +1592,16 @@ EMSCRIPTEN_KEEPALIVE int engine_fx_fixture(int mode) {
     }
     if(mode>=26&&mode<=34){
         if(mode!=29)cube("Trail depth receiver",RenderLayer::World);
-        auto d=std::make_shared<ParticleEmitterDefinition>();d->renderMode=ParticleRenderMode::Ribbon;d->space=ParticleSpace::World;
+        auto d=std::make_shared<ParticleEmitterDefinition>();d->renderMode=surfaceTrail?ParticleRenderMode::SurfaceTrail:ParticleRenderMode::Ribbon;d->space=ParticleSpace::World;
         d->trailLifetime=4;d->trailMinDistance=.1f;d->size={{0,2}};d->color={{0,{1,0,0,.8f}}};
         d->blend=(mode==32||mode==33)?BlendMode::Additive:BlendMode::Alpha;
         d->softDistance=(mode==26||mode==31||mode==33)?0:.5f;
         auto& e=fixture->addChild<ParticleEmitterComponent>("Depth trail",d);
-        e.transform.position={-.9f,0,mode==28?2.1f:1.15f};scene.update(0);e.transform.position.x=.9f;scene.update(.1);
+        e.transform.position={-.9f,0,occludedSurface?.9f:mode==28?2.1f:1.15f};
+        if(surfaceTrail)e.submitSurfaceContact(e.transform.position,{0,0,1});
+        scene.update(0);e.transform.position.x=.9f;
+        if(surfaceTrail)e.submitSurfaceContact(e.transform.position,{0,0,1});
+        scene.update(.1);
         if(mode==30||mode==31)camera->setPerspective(pi/3,.1f,20);
         if(mode==34){e.visibilityMask=3;camera->setViewport({0,0,.5f,1});
             auto& second=fixture->addChild<CameraComponent>("Trail clear view");second.transform=camera->transform;second.setOrthographic(4,.1f,20);second.setVisibilityMask(2);second.setViewport({.5f,0,.5f,1});
@@ -1506,7 +1689,7 @@ int import_model(const void* data,int bytes,bool glb) {
         stopPhysicsDemo();
         waterDemo.stop(scene,*orbit);
         terrainDemo.stop(scene,*orbit);
-        aiDemo.stop(scene,*orbit);
+        crowdDemo.stop(scene,*orbit);aiDemo.stop(scene,*orbit);
         importedMesh->mesh=std::move(candidate);importedMesh->transform=previewTransform;
         importedMesh->animation().stop();
         fitMs=emscripten_get_now()-fitStart;
@@ -1544,7 +1727,7 @@ EMSCRIPTEN_KEEPALIVE int engine_import_texture(const void* data,int bytes) {
     } catch(const std::exception& error) { report_texture(error.what(),0); return 0; }
 }
 EMSCRIPTEN_KEEPALIVE void engine_restore_demo() {
-    aiDemo.stop(scene,*orbit);
+    crowdDemo.stop(scene,*orbit);aiDemo.stop(scene,*orbit);
     terrainDemo.stop(scene,*orbit);
     waterDemo.stop(scene,*orbit);
     if(!importedActor) return;
@@ -1640,6 +1823,11 @@ int main() {
     renderer->setShadowsEnabled(shadows_requested()!=0);
     playgroundViews.assign(renderer->views().begin(),renderer->views().end());
     application.setSceneBinding([](Scene* next) {
+        if(browserEditorRegionActive()){
+            if(!next)renderer.reset();
+            else if(renderer)renderer->setScene(displayedScene(),regionSourceViews);
+            stopBrowserEditorRegion();regionSourceViews.clear();
+        }
         stopDrivingAudio();vehicleMainCamera.reset();unbindBrowserEditor();
         if(!next) { renderer.reset();return; }
         if(next==&scene) renderer->setScene(*next,playgroundViews);
@@ -1658,21 +1846,36 @@ int main() {
 
 extern "C" EMSCRIPTEN_KEEPALIVE int engine_vehicle_course() {
     try {
-        if(openedScene||browserEditorPlaying()||browserEditorFxActive()||firstVehicle(scene))return 0;
+        if(openedScene||browserEditorPlaying()||browserEditorFxActive()||browserEditorRegionActive()||firstVehicle(scene))return 0;
         scene.visit([](const Node& n,const Mat4&){if(auto* m=dynamic_cast<const MeshComponent*>(&n))const_cast<MeshComponent*>(m)->setEnabled(false);});
         if(EM_ASM_INT({return new URLSearchParams(location.search).get("surfaceTest")==="1";}))populatePhysicalSurfaceCourse(scene);else populateVehicleCourse(scene);scene.synchronize();orbit->focus({0,1,8},22);scene.physics().setDebugDrawEnabled(true);configureVehicleCamera(scene,*camera);vehicleMainCamera.reset();
         if(browserEditorActive())bindBrowserEditor(scene,*camera,*orbit,displayedLibrary(),renderer->views());
         reportVehicle(scene);return 1;
     }catch(const std::exception& e){archive_message(e.what(),1);return 0;}
 }
+extern "C" EMSCRIPTEN_KEEPALIVE int engine_formula_demo(const void* data,int bytes) {
+    try {
+        if(openedScene||browserEditorActive()||firstVehicle(scene)||!data||bytes<=0)return 0;
+        FbxImportOptions options;
+        auto model=GlbImporter::loadMemory({static_cast<const std::byte*>(data),static_cast<std::size_t>(bytes)},options);
+        formulaDemo.build(scene,std::move(model));
+        scene.visit([&](const Node& n,const Mat4&){if(n.name=="Ground"||n.name=="Grid"||n.name=="Rotating assembly"||n.name=="Imported model"||n.name=="Moving light rig"||n.name=="Overlay axes")const_cast<Node&>(n).setEnabled(false);});
+        auto sky=*scene.sky();sky.dayNight.enabled=false;sky.clouds.coverage=.32f;scene.setSky(sky);
+        sun->direction={-.4f,-1,.3f};sun->intensity=2.5f;scene.ambient={.32f,.36f,.4f};
+        camera->farPlane=1100;auto follow=camera->follow();follow.enabled=true;follow.target="formula.car";follow.focusOffset={0,.7f,1.8f};follow.offset={0,3.2f,-8.5f};follow.lookAheadSeconds=.16f;follow.maxLookAhead=3;follow.collision=false;camera->setFollow(follow);vehicleMainCamera.reset();
+        EM_ASM({window.formulaMap=[];});for(int i=0;i<180;++i){auto p=formulaDemo.track->atDistance(formulaDemo.track->length()*i/180).position;EM_ASM({window.formulaMap.push([$0,$1]);},p.x,p.z);}
+        scene.synchronize();application.resetClocks();return 1;
+    }catch(const std::exception& e){emscripten_log(EM_LOG_ERROR,"Formula circuit: %s",e.what());return 0;}
+}
 extern "C" EMSCRIPTEN_KEEPALIVE int engine_vehicle_reset() {
+    markReplayReset();
     try {if(browserEditorActive()&&!browserEditorPlaying())return 0;auto& active=browserEditorPlaying()?*browserEditorPlaySession().scene():displayedScene();auto* v=firstVehicle(active);if(!v)return 0;
-        EM_ASM({window.EngineInput?.instance?.cancelAll();});v->owner()->getComponent<RigidBodyComponent>()->teleport(Transform{{0,.95f,0}});active.synchronize();v->cancel();vehicleMainCamera.reset();vehiclePlayCamera.reset();reportVehicle(active);return 1;
+        EM_ASM({window.EngineInput?.instance?.cancelAll();});if(formulaDemo.active(active))formulaDemo.reset(active);else v->owner()->getComponent<RigidBodyComponent>()->teleport(Transform{{0,.95f,0}});active.synchronize();v->cancel();vehicleMainCamera.reset();vehiclePlayCamera.reset();reportVehicle(active);return 1;
     }catch(const std::exception&){return 0;}
 }
 EM_JS(int, vehicleTestEnabled,(),{return new URLSearchParams(location.search).get('vehicleTest')==='1';});
 extern "C" EMSCRIPTEN_KEEPALIVE int engine_vehicle_step(int count,float throttle,float steering,float brake,float handbrake) {
-    try {if(!vehicleTestEnabled()||!paused()||browserEditorActive()||count<0||count>600)return 0;auto& active=displayedScene();auto* v=firstVehicle(active);if(!v)return 0;v->submit({throttle,steering,brake,handbrake});for(int i=0;i<count;++i)active.fixedUpdate(1.0/60);active.physics().setInterpolationAlpha(1);reportVehicle(active);return 1;
+    try {if(!vehicleTestEnabled()||!paused()||browserEditorActive()||count<0||count>600)return 0;auto& active=displayedScene();auto* v=firstVehicle(active);if(!v)return 0;if(formulaDemo.active(active))formulaDemo.submit(active,{throttle,steering,brake,handbrake});else v->submit({throttle,steering,brake,handbrake});for(int i=0;i<count;++i)active.fixedUpdate(1.0/60);active.physics().setInterpolationAlpha(1);reportVehicle(active);return 1;
     }catch(const std::exception& e){archive_message(e.what(),1);return 0;}
 }
 
@@ -1734,7 +1937,7 @@ extern "C" EMSCRIPTEN_KEEPALIVE int engine_driving_audio_test(int lane,int drop)
 }
 
 extern "C" EMSCRIPTEN_KEEPALIVE int engine_route_example(){
-    try{if(openedScene||browserEditorPlaying()||browserEditorFxActive())return 0;if(scene.findSavedNode("route.example"))return 0;
+    try{if(openedScene||browserEditorPlaying()||browserEditorFxActive()||browserEditorRegionActive())return 0;if(scene.findSavedNode("route.example"))return 0;
         auto road=makeRouteActor("Curved banked route",exampleRoute());road->setSavedId("route.example");road->transform.position={0,3,0};scene.adoptChild(std::move(road));
         auto* v=firstVehicle(scene);if(!v){auto car=makeVehicleExample({0,4.1f,0});v=car->getComponent<VehicleComponent>();scene.adoptChild(std::move(car));}
         scene.synchronize();v->owner()->getComponent<RigidBodyComponent>()->teleport(Transform{{0,4.1f,0}});v->cancel();configureVehicleCamera(scene,*camera);vehicleMainCamera.reset();orbit->focus({3,3,20},65);
@@ -1751,3 +1954,8 @@ extern "C" EMSCRIPTEN_KEEPALIVE int engine_route_resources(){
     active.visit([&](const Node& n,const Mat4&){if(const auto* r=dynamic_cast<const RouteComponent*>(&n)){++count;assets.insert(r->asset().get());splines.insert(r->asset()->data().spline.get());profiles.insert(r->asset()->data().profile.get());meshes.insert(r->mesh.get());}});
     EM_ASM({window.routeResources={};window.routeResources.count=$0;window.routeResources.assets=$1;window.routeResources.splines=$2;window.routeResources.profiles=$3;window.routeResources.meshes=$4;},count,assets.size(),splines.size(),profiles.size(),meshes.size());return count;
 }
+
+#include "spotlight_example.inc"
+#include "cinematic_browser.inc"
+#include "replay_browser.inc"
+#include "content_iteration_browser.inc"

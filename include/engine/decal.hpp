@@ -7,6 +7,7 @@ struct SceneFrame;
 struct DecalSettings {
     std::shared_ptr<const Texture> texture=Texture::white();
     Vec3 color{1,1,1};float opacity=1,normalOffset=.002f,normalThreshold=.1f;
+    float lifetime=0,fadeOut=0; // Seconds; lifetime zero is persistent.
     BlendMode blend=BlendMode::Alpha;
     std::uint32_t receiverMask=0xffffffffu,maxSourceTriangles=20000,maxTriangles=4096;
     void validate() const;
@@ -26,7 +27,16 @@ public:
     bool projectionLimited() const{return limited_;}
     std::size_t triangleCount() const{return projected_?projected_->indices.size()/3:0;}
     std::uint64_t projectionBuilds() const{return builds_;}
+    double age() const{return age_;}
+    float effectiveOpacity() const;
+protected:
+    void tick(double seconds) override;
 private:
+    friend class ArchiveCodec;
+    friend class EffectComponent;
+    double age_=0;
+    bool effectSpawned_=false;
+    Transform spawnPose_;
     DecalSettings settings_;
     mutable std::shared_ptr<const Mesh> projected_;
     mutable std::uint64_t key_=0,builds_=0;

@@ -44,7 +44,7 @@ const pixels=buffer=>PNG.sync.read(buffer).data;
     results.checks.push('Low/Balanced profiles, DPR, aspect-preserving pixel/dimension limits, zero shadow maps and atomic invalid settings');
     await page.locator('#quality-profile').selectOption('1');await frames();
     // Verify settings remain editable through repeated performance refreshes.
-    await page.locator('[aria-labelledby=quality-heading] summary').click();
+    await page.getByText('Resolution and shadow budgets',{exact:true}).click();
     await page.locator('#quality-scale').fill('0.5');
     await page.waitForTimeout(600);assert.equal(await page.locator('#quality-scale').inputValue(),'0.5');
     await page.locator('#quality-form button').click();await frames();assert.equal((await quality()).resolutionScale,0.5);

@@ -1,3 +1,4 @@
+#include "engine/performance_timeline.hpp"
 #include "webgl_renderer.hpp"
 #include "shaders.hpp"
 #include <emscripten.h>
@@ -18,6 +19,13 @@ EM_JS(int, gl_msaa4x_supported, (), {
     // The opaque (alpha:false) default framebuffer is RGB8; resolve formats must match.
     return [gl.RGB8,gl.DEPTH_COMPONENT24].every(format =>
         Array.from(gl.getInternalformatParameter(gl.RENDERBUFFER,format,gl.SAMPLES) || []).includes(4));
+});
+EM_JS(int, gl_hdr, (), {
+    return !!document.querySelector('#viewport').getContext('webgl2').getExtension('EXT_color_buffer_float');
+});
+EM_JS(int, gl_hdr_msaa, (), {
+    const gl=document.querySelector('#viewport').getContext('webgl2');
+    return Array.from(gl.getInternalformatParameter(gl.RENDERBUFFER,gl.RGBA16F,gl.SAMPLES)||[]).includes(4);
 });
 EM_JS(void, gl_lose, (), {
     const gl=Module.canvas.getContext('webgl2');const ext=gl?.getExtension('WEBGL_lose_context');
@@ -74,7 +82,7 @@ void main() {
 constexpr const char* meshFragment=R"(#version 300 es
 precision highp float;
 // FOG_FUNCTIONS
-uniform bool fogWorld,fogAdditive;
+uniform bool fogWorld,fogAdditive,hdrOutput;
 in vec3 worldPosition,worldNormal;
 in vec2 texcoord;
 uniform sampler2D baseTexture;
@@ -108,7 +116,35 @@ uniform vec4 tint,uvTransform;
 uniform vec3 ambient,emissive;
 uniform vec4 lightPosition[8],lightDirection[8],lightColor[8];
 uniform int lightCount;
-uniform bool unlit,masked,toneMapped;
+uniform vec4 lightCone[8];
+uniform bool unlit,masked,toneMapped,shadowPass,receivesShadow;
+uniform highp sampler2DArrayShadow shadowMaps;
+uniform mat4 shadowMatrix[4];
+uniform vec4 shadowOptions[4],shadowSelection[4];
+uniform int shadowCount,shadowTaps;
+float sampleShadow(int j,vec3 l) {
+    vec3 geometric=normalize(worldNormal);
+    vec4 clip=shadowMatrix[j]*vec4(worldPosition+geometric*shadowOptions[j].z*(1.0-clamp(dot(geometric,l),0.0,1.0)),1);
+    if(clip.w<=0.0)return 1.0;
+    vec3 p=clip.xyz/clip.w;p.xy=p.xy*.5+.5;
+    if(any(lessThan(p,vec3(0)))||any(greaterThan(p,vec3(1))))return 1.0;
+    float result=0.0;
+    if(shadowTaps==1)return texture(shadowMaps,vec4(p.xy,float(j),p.z-shadowOptions[j].y));
+    for(int y=-1;y<=1;y++)for(int x=-1;x<=1;x++) result+=texture(shadowMaps,vec4(p.xy+vec2(x,y)*shadowOptions[j].w,float(j),p.z-shadowOptions[j].y));
+    return result/9.0;
+}
+float visibility(int light,vec3 l) {
+    if(!receivesShadow)return 1.0;
+    float depth=dot(worldPosition-cameraPosition,viewForward);
+    for(int j=0;j<4;j++) {
+        if(j>=shadowCount)break;
+        vec4 s=shadowSelection[j];if(int(s.x)!=light || (s.w>.5&&depth>s.z))continue;
+        float result=sampleShadow(j,l);
+        if(s.w>.5&&j+1<shadowCount&&shadowSelection[j+1].x==s.x) result=mix(result,sampleShadow(j+1,l),smoothstep(mix(s.y,s.z,.9),s.z,depth));
+        return result;
+    }
+    return 1.0;
+}
 uniform float cutoff;
 out vec4 outputColor;
 vec3 surfaceFog(vec3 color) {
@@ -142,7 +178,7 @@ vec3 waterComposite(vec3 normal,vec3 body,vec3 display,vec2 uv,float time,float 
     if(sampleDepth>=0.999999||dot(samplePoint-worldPosition,viewForward)<=0.001||dot(samplePoint-worldPosition,normalize(planeNormal))>0.01) {samplePixel=pixel;samplePoint=background;}
     vec3 ray=normalize(scenePoint(pixel,0.99)-scenePoint(pixel,0.0));
     float thickness=clamp(dot(samplePoint-worldPosition,viewForward)/max(dot(ray,viewForward),0.1),0.0,100.0);
-    vec3 transmitted=pow(textureLod(sceneColor,samplePixel/waterExtent,0.0).rgb,vec3(2.2));
+    vec3 captured=textureLod(sceneColor,samplePixel/waterExtent,0.0).rgb;vec3 transmitted=hdrOutput?captured:pow(captured,vec3(2.2));
     vec3 attenuation=exp(-absorptionFoam.rgb*thickness);
     float f=0.02+0.98*pow(1.0-clamp(nv,0.0,1.0),5.0);
     vec3 result=mix(display,transmitted*attenuation+surfaceFog(clamp(body,vec3(0),vec3(1)))*(vec3(1)-attenuation),transmission.x*(1.0-f*reflectionHorizon.w));
@@ -246,6 +282,7 @@ void main() {
     }
     if(reflectionPass && dot(reflectionPlane,vec4(worldPosition,1))<0.002) discard;
     if(masked && alpha<cutoff) discard;
+    if(shadowPass) {outputColor=vec4(0);return;}
     if(water) {
         vec3 t=normalize(worldTangent-n*dot(n,worldTangent));
         float signB=dot(cross(n,t),worldBitangent)<0.0 ? -1.0 : 1.0;
@@ -266,6 +303,8 @@ void main() {
         bool directional=lightPosition[i].w<0.5;
         vec3 direction=directional ? -lightDirection[i].xyz : delta/max(distance,0.0001);
         float attenuation=directional ? 1.0 : pow(max(1.0-distance/max(lightDirection[i].w,0.0001),0.0),2.0);
+        if(lightPosition[i].w>1.5)attenuation*=smoothstep(lightCone[i].y,lightCone[i].x,dot(lightDirection[i].xyz,-direction));
+        attenuation*=visibility(i,direction);
         lighting+=lightColor[i].rgb*lightColor[i].a*max(dot(n,direction),0.0)*attenuation;
         if(water) {
             vec3 h=(viewDirection+direction)*inversesqrt(max(dot(viewDirection+direction,viewDirection+direction),0.0001));
@@ -278,16 +317,16 @@ void main() {
         vec3 reflection=mix(reflectionHorizon.rgb,reflectionZenith.rgb,clamp(reflect(-viewDirection,n).y,0.0,1.0));
         linear=waterLighting*(1.0-fWater*reflectionHorizon.w)+reflection*fWater*reflectionHorizon.w+emissive;
     }
-    vec3 displayLinear=surfaceFog(toneMapped ? linear/(vec3(1.0)+linear) : linear);
+    vec3 displayLinear=surfaceFog(toneMapped && !hdrOutput ? linear/(vec3(1.0)+linear) : linear);
     if(water && worldWater && planarActive && planarSurface>0.5 && foamColor.w>0.0) {
         vec4 clip=reflectionVp*vec4(worldPosition,1);
         vec2 uv=clip.xy/max(clip.w,0.0001)*0.5+0.5+n.xz*0.008*(1.0-roughness);
         bool inside=clip.w>0.0 && all(greaterThan(uv,vec2(0))) && all(lessThan(uv,vec2(1))) && clip.z>=0.0 && clip.z<=clip.w;
         vec4 reflected=textureLod(planarReflection,clamp(waterViewport.xy+uv*waterViewport.zw,waterViewport.xy+0.5,waterViewport.xy+waterViewport.zw-0.5)/waterExtent,0.0);
-        displayLinear=mix(displayLinear,pow(reflected.rgb,vec3(2.2)),inside ? foamColor.w*reflectionHorizon.w*fWater*reflected.a : 0.0);
+        displayLinear=mix(displayLinear,hdrOutput?reflected.rgb:pow(reflected.rgb,vec3(2.2)),inside ? foamColor.w*reflectionHorizon.w*fWater*reflected.a : 0.0);
     }
     if(water) displayLinear=waterComposite(n,body,displayLinear,texcoord*uvTransform.xy+uvTransform.zw,wt,max(dot(n,viewDirection),0.0))+fogApply(fog,vec3(min(abs(interaction.w)*.18,.25)),worldPosition,true);
-    vec3 display=pow(displayLinear,vec3(1.0/2.2));
+    vec3 display=hdrOutput?displayLinear:pow(displayLinear,vec3(1.0/2.2));
     float fade=1.0;
     if(particleSoftDistance>0.0) {
         vec2 pixel=clamp(gl_FragCoord.xy,waterViewport.xy+0.5,waterViewport.xy+waterViewport.zw-0.5);
@@ -363,16 +402,18 @@ void WebGlRenderer::setScene(Scene& scene,std::span<const RenderView> views) {
     views_.set(views);scene_=&scene;
 }
 void WebGlRenderer::setQuality(const RenderQuality& quality) {
-    quality.validate();
+    quality.validate();const bool oldHdr=hdr_,nextHdr=quality.post.enabled&&capabilities_.hdrPostProcessing;
     if(ready_) {
         emscripten_webgl_make_context_current(context_);
         double w=0,h=0;emscripten_get_element_css_size("#viewport",&w,&h);
         const auto extent=resolveResolution(w,h,gl_dpr(),quality.resolution,capabilities_);
-        // Stage and validate targets before replacing valid quality/resources.
-        resizeTargets(extent.width,extent.height,resolveMsaaSamples(quality,capabilities_));
+        hdr_=nextHdr;
+        try {resizeTargets(extent.width,extent.height,samplesFor(quality));} catch(...) {hdr_=oldHdr;throw;}
+        if(oldHdr!=nextHdr){releaseWaterTargets();releaseReflectionTargets();
+            if(!nextHdr){glDeleteFramebuffers(1,&bloomFramebuffer_);glDeleteTextures(1,&bloomTexture_);bloomFramebuffer_=bloomTexture_=0;bloomWidth_=bloomHeight_=0;}}
     }
     quality_=quality;
-    if(ready_) { resizeCanvas();resetMeasurements();refreshQualityReport(); }
+    if(ready_){resizeCanvas();resetMeasurements();refreshQualityReport();}
 }
 void WebGlRenderer::setShadowQuality(std::uint32_t resolution,std::uint32_t taps) {
     auto candidate=quality_;candidate.shadowResolution=resolution;candidate.shadowFilterTaps=taps;candidate.validate();quality_=candidate;
@@ -406,6 +447,8 @@ void WebGlRenderer::initialize() {
     try { createResources(); } catch(const std::exception& e) { fail(std::string("WebGL 2 initialization failed: ")+e.what()); }
 }
 void WebGlRenderer::createResources() {
+    capabilities_.hdrPostProcessing=gl_hdr();hdrMsaa_=capabilities_.hdrPostProcessing&&gl_hdr_msaa();hdr_=quality_.post.enabled&&capabilities_.hdrPostProcessing;
+    postProgram_=program(post_vertex_glsl,post_fragment_glsl);glGenVertexArrays(1,&postVao_);
     skyProgram_=program(sky_vertex_glsl,sky_fragment_glsl);glGenVertexArrays(1,&skyVao_);glGenSamplers(1,&skySampler_);
     glSamplerParameteri(skySampler_,GL_TEXTURE_WRAP_S,GL_REPEAT);glSamplerParameteri(skySampler_,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
     glSamplerParameteri(skySampler_,GL_TEXTURE_MIN_FILTER,GL_LINEAR);glSamplerParameteri(skySampler_,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
@@ -426,11 +469,12 @@ void WebGlRenderer::createResources() {
     glEnableVertexAttribArray(3);glVertexAttribPointer(3,4,GL_FLOAT,GL_FALSE,sizeof(RibbonVertex),reinterpret_cast<void*>(16));
     GLint limit=0;glGetIntegerv(GL_MAX_TEXTURE_SIZE,&limit);capabilities_.maxTextureDimension2D=limit;
     glGetIntegerv(GL_MAX_ARRAY_TEXTURE_LAYERS,&limit);capabilities_.maxTextureArrayLayers=limit;
-    capabilities_.backend=RenderBackend::WebGl2;capabilities_.shadowMaps=false;capabilities_.pbr=false;capabilities_.instancing=false;
+    capabilities_.backend=RenderBackend::WebGl2;capabilities_.shadowMaps=true;capabilities_.pbr=false;capabilities_.instancing=false;
     capabilities_.msaa4x=gl_msaa4x_supported()!=0;
     ++generation_;ready_=true;failed_=false;resizeCanvas();resetMeasurements();refreshQualityReport();gl_status("WebGL 2 renderer ready",0);
 }
 void WebGlRenderer::releaseResources(bool lost) {
+    releaseShadows(lost);releasePost(lost);
     releaseWaterTargets(lost);releaseReflectionTargets(lost);
     if(!lost) {
         glDeleteFramebuffers(1,&msaaFramebuffer_);glDeleteRenderbuffers(1,&msaaColor_);glDeleteRenderbuffers(1,&msaaDepth_);
@@ -446,12 +490,12 @@ void WebGlRenderer::releaseResources(bool lost) {
     msaaFramebuffer_=msaaColor_=msaaDepth_=0;targetWidth_=targetHeight_=0;sampleCount_=1;capabilities_.msaa4x=false;
 }
 void WebGlRenderer::resizeTargets(std::uint32_t width,std::uint32_t height,std::uint32_t samples) {
-    if(width==targetWidth_&&height==targetHeight_&&samples==sampleCount_) return;
+    if(width==targetWidth_&&height==targetHeight_&&samples==sampleCount_&&targetHdr_==hdr_) return;
     GLuint framebuffer=0,color=0,depth=0;
     if(samples>1) {
         glGenFramebuffers(1,&framebuffer);glBindFramebuffer(GL_FRAMEBUFFER,framebuffer);
         glGenRenderbuffers(1,&color);glBindRenderbuffer(GL_RENDERBUFFER,color);
-        glRenderbufferStorageMultisample(GL_RENDERBUFFER,samples,GL_RGB8,width,height);
+        glRenderbufferStorageMultisample(GL_RENDERBUFFER,samples,hdr_?GL_RGBA16F:GL_RGB8,width,height);
         glFramebufferRenderbuffer(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_RENDERBUFFER,color);
         glGenRenderbuffers(1,&depth);glBindRenderbuffer(GL_RENDERBUFFER,depth);
         glRenderbufferStorageMultisample(GL_RENDERBUFFER,samples,GL_DEPTH_COMPONENT24,width,height);
@@ -465,12 +509,12 @@ void WebGlRenderer::resizeTargets(std::uint32_t width,std::uint32_t height,std::
     }
     glDeleteFramebuffers(1,&msaaFramebuffer_);glDeleteRenderbuffers(1,&msaaColor_);glDeleteRenderbuffers(1,&msaaDepth_);
     msaaFramebuffer_=framebuffer;msaaColor_=color;msaaDepth_=depth;
-    targetWidth_=width;targetHeight_=height;sampleCount_=samples;
+    targetWidth_=width;targetHeight_=height;sampleCount_=samples;targetHdr_=hdr_;
 }
 void WebGlRenderer::resizeCanvas() {
     double w=0,h=0;emscripten_get_element_css_size("#viewport",&w,&h);
     const auto extent=resolveResolution(w,h,gl_dpr(),quality_.resolution,capabilities_);
-    if(ready_) resizeTargets(extent.width,extent.height,resolveMsaaSamples(quality_,capabilities_));
+    if(ready_) resizeTargets(extent.width,extent.height,samplesFor(quality_));
     int cw=0,ch=0;emscripten_get_canvas_element_size("#viewport",&cw,&ch);
     if(cw!=int(extent.width)||ch!=int(extent.height)) emscripten_set_canvas_element_size("#viewport",extent.width,extent.height);
     width_=extent.width;height_=extent.height;
@@ -479,14 +523,15 @@ void WebGlRenderer::refreshQualityReport() {
     if(!context_&&!failed_) return; // Do not overwrite the selected backend's report before acquisition.
     const auto& q=quality_;const auto& c=capabilities_;
     std::ostringstream s;
-    s<<"{\"backend\":\"webgl2\",\"shadows\":false,\"pbr\":false,\"instancing\":false,\"state\":\""<<(ready_?"ready":failed_?"failed":generation_?"recovering":"initializing")
+    s<<"{\"spotLights\":true,\"spotLightShadows\":true,\"maxLights\":8,\"backend\":\"webgl2\",\"shadows\":true,\"pbr\":false,\"instancing\":false,\"state\":\""<<(ready_?"ready":failed_?"failed":generation_?"recovering":"initializing")
      <<"\",\"generation\":"<<generation_<<",\"recoveryAttempts\":0,\"maxTextureDimension2D\":"<<c.maxTextureDimension2D
      <<",\"maxTextureArrayLayers\":"<<c.maxTextureArrayLayers<<",\"maxBufferSize\":0,\"timestampQuery\":false,\"compressionBC\":false,\"compressionETC2\":false,\"compressionASTC\":false,\"compressedTextureCount\":0"
      <<",\"width\":"<<width_<<",\"height\":"<<height_<<",\"resolutionScale\":"<<q.resolution.scale<<",\"maxPixelRatio\":"<<q.resolution.maxPixelRatio
-     <<",\"maxDimension\":"<<q.resolution.maxDimension<<",\"maxPixels\":"<<q.resolution.maxPixels<<",\"shadowResolution\":0,\"shadowFilterTaps\":0,\"maxShadowMaps\":0"
+     <<",\"maxDimension\":"<<q.resolution.maxDimension<<",\"maxPixels\":"<<q.resolution.maxPixels<<",\"shadowResolution\":"<<q.shadowResolution<<",\"shadowFilterTaps\":"<<q.shadowFilterTaps<<",\"maxShadowMaps\":"<<q.maxShadowMaps
      <<",\"msaaSamples\":"<<q.msaaSamples<<",\"effectiveMsaaSamples\":"<<sampleCount_<<",\"msaa4x\":"<<(c.msaa4x?"true":"false")
-     <<",\"lod\":"<<(q.lod?"true":"false")<<",\"shadowLod\":false,\"compressedTextures\":false}";
-    gl_report(s.str().c_str());
+     <<",\"detailScale\":"<<q.detailScale<<",\"lod\":"<<(q.lod?"true":"false")<<",\"shadowLod\":"<<(q.shadowLod?"true":"false")<<",\"compressedTextures\":false}";
+    auto report=s.str();report.pop_back();report+=",\"postEnabled\":"+std::string(q.post.enabled?"true":"false")+",\"hdrPostProcessing\":"+(c.hdrPostProcessing?"true":"false")+",\"effectivePost\":"+(hdr_?"true":"false")+",\"directionalCascades\":"+std::to_string(q.directionalCascades)+",\"shadowDistance\":"+std::to_string(q.shadowDistance)+",\"postExposure\":"+std::to_string(q.post.exposure)+",\"postBloom\":"+std::to_string(q.post.bloomStrength)+",\"postThreshold\":"+std::to_string(q.post.bloomThreshold)+",\"postSaturation\":"+std::to_string(q.post.saturation)+",\"postContrast\":"+std::to_string(q.post.contrast)+"}";
+    gl_report(report.c_str());
 }
 
 namespace { struct UploadDeferred {}; }
@@ -500,6 +545,7 @@ WebGlRenderer::GpuMesh& WebGlRenderer::mesh(const MeshDraw& draw) {
     if(!meshes_.contains(draw.mesh.get())) admitUpload(draw.mesh->vertices.size()*sizeof(Vertex)+draw.mesh->indices.size()*sizeof(std::uint32_t));
     auto [it,inserted]=meshes_.try_emplace(draw.mesh.get());auto& gpu=it->second;
     if(inserted) {
+        ProfileScope uploadProfile(ProfileCategory::Loading,"Mesh upload");
         gpu.source=draw.mesh;glGenVertexArrays(1,&gpu.vao);glGenBuffers(1,&gpu.vertices);glGenBuffers(1,&gpu.indices);
         glBindVertexArray(gpu.vao);glBindBuffer(GL_ARRAY_BUFFER,gpu.vertices);attributes();glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,gpu.indices);
         glBufferData(GL_ELEMENT_ARRAY_BUFFER,draw.mesh->indices.size()*sizeof(std::uint32_t),draw.mesh->indices.data(),GL_STATIC_DRAW);
@@ -555,7 +601,7 @@ GLuint WebGlRenderer::texture(const std::shared_ptr<const Texture>& source) {
     glBindTexture(GL_TEXTURE_2D,gpu.image);return gpu.image;
 }
 void WebGlRenderer::drawMesh(const MeshDraw& draw,const Mat4& vp,const SceneFrame& frame) {
-    try { mesh(draw);glUseProgram(meshProgram_);glUniform1i(glGetUniformLocation(meshProgram_,"ribbon"),0);glUniform1f(glGetUniformLocation(meshProgram_,"particleSoftDistance"),0);glActiveTexture(GL_TEXTURE0);texture(draw.texture); }
+    try { mesh(draw);glUseProgram(meshProgram_);glUniform1i(glGetUniformLocation(meshProgram_,"hdrOutput"),hdr_);glUniform1i(glGetUniformLocation(meshProgram_,"ribbon"),0);glUniform1f(glGetUniformLocation(meshProgram_,"particleSoftDistance"),0);glActiveTexture(GL_TEXTURE0);texture(draw.texture); }
     catch(const UploadDeferred&) { ++counters_.deferredAssetUploads;++counters_.deferredAssetDraws;return; }
     matrix(meshProgram_,"model",draw.model);matrix(meshProgram_,"normalMatrix",draw.normal);matrix(meshProgram_,"vp",vp);
     glUniform4f(glGetUniformLocation(meshProgram_,"tint"),draw.color.x,draw.color.y,draw.color.z,draw.opacity);
@@ -575,6 +621,10 @@ void WebGlRenderer::drawMesh(const MeshDraw& draw,const Mat4& vp,const SceneFram
         glUniform1i(glGetUniformLocation(meshProgram_,"layerOne"),5);glUniform1i(glGetUniformLocation(meshProgram_,"layerTwo"),6);
         glUniform1i(glGetUniformLocation(meshProgram_,"layerThree"),7);glUniform1i(glGetUniformLocation(meshProgram_,"layerWeights"),8);glActiveTexture(GL_TEXTURE0);
     }
+    glUniform1i(glGetUniformLocation(meshProgram_,"shadowPass"),shadowPass_);
+    glUniform1i(glGetUniformLocation(meshProgram_,"receivesShadow"),!shadowPass_&&shadowReceiving_&&draw.receivesShadow);
+    glActiveTexture(GL_TEXTURE13);glBindTexture(GL_TEXTURE_2D_ARRAY,shadowPass_?0:shadowTexture_);
+    glUniform1i(glGetUniformLocation(meshProgram_,"shadowMaps"),13);glActiveTexture(GL_TEXTURE0);
     const auto w=waterParameters(m.water);
     glUniform1i(glGetUniformLocation(meshProgram_,"worldWater"),draw.layer==RenderLayer::World);
     glUniform1i(glGetUniformLocation(meshProgram_,"sceneWater"),waterCapture_&&draw.layer==RenderLayer::World&&m.shader==MaterialShader::Water&&m.water.usesSceneInputs());
@@ -609,15 +659,16 @@ void WebGlRenderer::drawMesh(const MeshDraw& draw,const Mat4& vp,const SceneFram
     glUniform1i(glGetUniformLocation(meshProgram_,"toneMapped"),m.shader!=MaterialShader::Unlit);
     glUniform1i(glGetUniformLocation(meshProgram_,"masked"),m.alphaMode==AlphaMode::Mask);
     glUniform1f(glGetUniformLocation(meshProgram_,"cutoff"),m.alphaCutoff);
-    const auto count=std::min(std::size_t(8),frame.lights.size());std::array<float,32> positions{},directions{},colors{};
+    const auto count=std::min(std::size_t(8),frame.lights.size());std::array<float,32> positions{},directions{},colors{},cones{};
     for(std::size_t i=0;i<count;++i) {
         const auto& l=frame.lights[i];const auto k=i*4;
-        positions[k]=l.position.x;positions[k+1]=l.position.y;positions[k+2]=l.position.z;positions[k+3]=l.type==LightType::Directional ? 0:1;
+        positions[k]=l.position.x;positions[k+1]=l.position.y;positions[k+2]=l.position.z;positions[k+3]=float(l.type);
         directions[k]=l.direction.x;directions[k+1]=l.direction.y;directions[k+2]=l.direction.z;directions[k+3]=l.range;
+        cones[k]=std::cos(l.innerAngle);cones[k+1]=std::cos(l.outerAngle);
         colors[k]=l.color.x;colors[k+1]=l.color.y;colors[k+2]=l.color.z;colors[k+3]=l.intensity;
     }
     glUniform1i(glGetUniformLocation(meshProgram_,"lightCount"),count);
-    if(count) { glUniform4fv(glGetUniformLocation(meshProgram_,"lightPosition"),count,positions.data());glUniform4fv(glGetUniformLocation(meshProgram_,"lightDirection"),count,directions.data());glUniform4fv(glGetUniformLocation(meshProgram_,"lightColor"),count,colors.data()); }
+    if(count) { glUniform4fv(glGetUniformLocation(meshProgram_,"lightPosition"),count,positions.data());glUniform4fv(glGetUniformLocation(meshProgram_,"lightDirection"),count,directions.data());glUniform4fv(glGetUniformLocation(meshProgram_,"lightColor"),count,colors.data());glUniform4fv(glGetUniformLocation(meshProgram_,"lightCone"),count,cones.data()); }
     glUniform1i(glGetUniformLocation(meshProgram_,"fogWorld"),draw.layer==RenderLayer::World);glUniform1i(glGetUniformLocation(meshProgram_,"fogAdditive"),draw.blend==BlendMode::Additive);
     blend(draw.blend);glFrontFace((draw.mirrored!=reflectionPass_) ? GL_CW : GL_CCW);
     if(m.doubleSided) glDisable(GL_CULL_FACE);else { glEnable(GL_CULL_FACE);glCullFace(GL_BACK); }
@@ -627,7 +678,7 @@ void WebGlRenderer::drawMesh(const MeshDraw& draw,const Mat4& vp,const SceneFram
     if(draw.blend!=BlendMode::Opaque) ++counters_.transparentMeshDraws;
 }
 void WebGlRenderer::drawParticles(const FxBatch& batch,const CameraComponent& camera,const Mat4& vp) {
-    glUseProgram(meshProgram_);glBindVertexArray(particleVao_);glBindBuffer(GL_ARRAY_BUFFER,particleBuffer_);glActiveTexture(GL_TEXTURE0);
+    glUseProgram(meshProgram_);glUniform1i(glGetUniformLocation(meshProgram_,"hdrOutput"),hdr_);glBindVertexArray(particleVao_);glBindBuffer(GL_ARRAY_BUFFER,particleBuffer_);glActiveTexture(GL_TEXTURE0);
     glUniform1i(glGetUniformLocation(meshProgram_,"ribbon"),0);
     glUniform1i(glGetUniformLocation(meshProgram_,"layered"),0);
     glActiveTexture(GL_TEXTURE3);glBindTexture(GL_TEXTURE_2D,waterDepth_);glUniform1i(glGetUniformLocation(meshProgram_,"sceneDepth"),3);glActiveTexture(GL_TEXTURE0);
@@ -658,7 +709,7 @@ void WebGlRenderer::drawParticles(const FxBatch& batch,const CameraComponent& ca
     }
 }
 void WebGlRenderer::drawRibbon(const FxBatch& batch,const Mat4& vp) {
-    glUseProgram(meshProgram_);glBindVertexArray(ribbonVao_);glBindBuffer(GL_ARRAY_BUFFER,ribbonBuffer_);
+    glUseProgram(meshProgram_);glUniform1i(glGetUniformLocation(meshProgram_,"hdrOutput"),hdr_);glBindVertexArray(ribbonVao_);glBindBuffer(GL_ARRAY_BUFFER,ribbonBuffer_);
     glActiveTexture(GL_TEXTURE0);try{texture(batch.texture);}catch(const UploadDeferred&){++counters_.deferredAssetDraws;return;}
     glActiveTexture(GL_TEXTURE3);glBindTexture(GL_TEXTURE_2D,waterDepth_);glUniform1i(glGetUniformLocation(meshProgram_,"sceneDepth"),3);glActiveTexture(GL_TEXTURE0);
     matrix(meshProgram_,"model",Mat4::identity());matrix(meshProgram_,"normalMatrix",Mat4::identity());matrix(meshProgram_,"vp",vp);
@@ -703,7 +754,7 @@ void WebGlRenderer::drawSky(const RenderView& view,float aspect) {
         texture(sky.mode==SkyMode::Panorama ? sky.panorama : Texture::white());
     }
     catch(const UploadDeferred&) { ++counters_.deferredAssetUploads;++counters_.deferredAssetDraws;return; }
-    glUseProgram(skyProgram_);fogUniform(skyProgram_,prepareFog(scene_->fog(),*view.camera,view.fogEnabled));glBindVertexArray(sphere ? sphere->vao : skyVao_);glBindSampler(0,skySampler_);
+    glUseProgram(skyProgram_);glUniform1i(glGetUniformLocation(skyProgram_,"hdrOutput"),hdr_);fogUniform(skyProgram_,prepareFog(scene_->fog(),*view.camera,view.fogEnabled));glBindVertexArray(sphere ? sphere->vao : skyVao_);glBindSampler(0,skySampler_);
     const std::array<const char*,10> names={"skyRight","skyUp","skyForward","skyHorizon","skyZenith","skyNadir","skySun","skyAir","skyClouds","skyCloudWind"};
     const std::array values={payload.right,payload.up,payload.forward,payload.horizon,payload.zenith,payload.nadir,payload.sun,payload.air,payload.clouds,payload.cloudWind};
     for(std::size_t i=0;i<names.size();++i) glUniform4fv(glGetUniformLocation(skyProgram_,names[i]),1,values[i].data());
@@ -717,6 +768,7 @@ void WebGlRenderer::drawSky(const RenderView& view,float aspect) {
     glBindSampler(0,0);glEnable(GL_DEPTH_TEST);glDepthMask(GL_TRUE);
 }
 void WebGlRenderer::render(double updateMs,double intervalMs) {
+    ProfileScope profile(ProfileCategory::Render,"WebGL2 render");
     if(!ready_) return;
     const double started=emscripten_get_now();FrameTiming timing;timing.updateMs=updateMs;timing.intervalMs=intervalMs;counters_={};counters_.shadowMapResolution=0;counters_.shadowFilterTaps=0;
     uploadAdmission_.begin(uploadBudget_);uploadStarted_=started;budgeted_=true;
@@ -726,7 +778,7 @@ void WebGlRenderer::render(double updateMs,double intervalMs) {
         underwaterViews_.resize(resolved_.size());bool submerged=false;
         for(std::size_t i=0;i<resolved_.size();++i) {const auto& camera=*views_.views()[resolved_[i].index].camera;
             underwaterViews_[i]=underwaterView(*scene_,camera.worldPosition(),camera.visibilityMask());submerged|=bool(underwaterViews_[i]);}
-        prepareWaterTargets(submerged||waterSceneInputsRequired(*scene_,waterMask)||softParticlesRequired(*scene_,waterMask));
+        prepareWaterTargets(hdr_||submerged||waterSceneInputsRequired(*scene_,waterMask)||softParticlesRequired(*scene_,waterMask));
         prepareReflectionTargets(waterPlanarReflectionRequired(*scene_,waterMask));
         glBindFramebuffer(GL_FRAMEBUFFER,sampleCount_>1 ? msaaFramebuffer_ : waterCapture_ ? sceneFramebuffer_ : 0);
         glDisable(GL_SCISSOR_TEST);glDepthMask(GL_TRUE);glClearColor(.018f,.026f,.042f,1);glClearDepthf(1);glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
@@ -735,7 +787,7 @@ void WebGlRenderer::render(double updateMs,double intervalMs) {
         for(const auto& resolved:resolved_) {
             const auto& view=views_.views()[resolved.index];auto& camera=*view.camera;const float aspect=resolved.viewport.width/resolved.viewport.height;
             interactionParameters_=waterInteractionParameters(waterInteractions_,waterTime_,camera.visibilityMask());
-            glUseProgram(meshProgram_);fogUniform(meshProgram_,prepareFog(scene_->fog(),camera,view.fogEnabled));const auto eye=camera.worldPosition();
+            glUseProgram(meshProgram_);glUniform1i(glGetUniformLocation(meshProgram_,"hdrOutput"),hdr_);fogUniform(meshProgram_,prepareFog(scene_->fog(),camera,view.fogEnabled));const auto eye=camera.worldPosition();
             glUniform3f(glGetUniformLocation(meshProgram_,"cameraPosition"),eye.x,eye.y,eye.z);
             matrix(meshProgram_,"inverseVp",camera.inverseViewProjection(aspect));
             glUniform4f(glGetUniformLocation(meshProgram_,"waterViewport"),resolved.viewport.x,height_-resolved.viewport.y-resolved.viewport.height,resolved.viewport.width,resolved.viewport.height);
@@ -745,12 +797,16 @@ void WebGlRenderer::render(double updateMs,double intervalMs) {
             glViewport(resolved.viewport.x,height_-resolved.viewport.y-resolved.viewport.height,resolved.viewport.width,resolved.viewport.height);
             glScissor(resolved.x,height_-resolved.y-resolved.height,resolved.width,resolved.height);glDepthMask(GL_TRUE);glDepthRangef(0,1);
             if(view.clearColor) { const auto& color=*view.clearColor;glClearColor(color[0],color[1],color[2],color[3]);glClear(GL_COLOR_BUFFER_BIT); }
-            const double collectStart=emscripten_get_now();const auto& vp=camera.viewProjection(aspect);const DetailView detail{vp,resolved.viewport.width,resolved.viewport.height};
+            const double collectStart=emscripten_get_now();const auto& vp=camera.viewProjection(aspect);const DetailView detail{vp,resolved.viewport.width*quality_.detailScale,resolved.viewport.height*quality_.detailScale};
             frame_.collect(*scene_,false,camera.visibilityMask(),culling_ ? &camera.frustum(aspect) : nullptr,quality_.lod ? &detail : nullptr);
             const auto& scene=frame_.sceneFrame();fx_.prepare(scene,camera.view());timing.collectMs+=emscripten_get_now()-collectStart;
             counters_.meshParticles+=scene.meshParticleCount;counters_.meshes+=scene.meshCount;counters_.lights+=std::min(std::size_t(8),scene.lights.size());counters_.culledMeshes+=scene.culledMeshes;counters_.visibleMeshes+=scene.meshCount-scene.culledMeshes;
             counters_.cameraLodParts+=frame_.cameraLodParts();counters_.particles+=fx_.instances().size();
             const double encodeStart=emscripten_get_now();
+            drawShadows(camera,aspect,scene);
+            glBindFramebuffer(GL_FRAMEBUFFER,sampleCount_>1?msaaFramebuffer_:waterCapture_?sceneFramebuffer_:0);
+            glViewport(resolved.viewport.x,height_-resolved.viewport.y-resolved.viewport.height,resolved.viewport.width,resolved.viewport.height);
+            glScissor(resolved.x,height_-resolved.y-resolved.height,resolved.width,resolved.height);glEnable(GL_SCISSOR_TEST);
             const auto reflection=waterReflection(scene.meshes,eye);
             glUniform1i(glGetUniformLocation(meshProgram_,"planarActive"),bool(reflection));
             if(reflection) {
@@ -795,13 +851,14 @@ void WebGlRenderer::render(double updateMs,double intervalMs) {
             }
             ++ordinal;timing.encodeMs+=emscripten_get_now()-encodeStart;
         }
-        if(sampleCount_>1||waterCapture_) {
+        if(sampleCount_>1||(waterCapture_&&!hdr_)) {
             // View scissor must not clip the full-canvas resolve.
-            glDisable(GL_SCISSOR_TEST);glBindFramebuffer(GL_READ_FRAMEBUFFER,sampleCount_>1 ? msaaFramebuffer_ : sceneFramebuffer_);glBindFramebuffer(GL_DRAW_FRAMEBUFFER,0);
+            glDisable(GL_SCISSOR_TEST);glBindFramebuffer(GL_READ_FRAMEBUFFER,sampleCount_>1 ? msaaFramebuffer_ : sceneFramebuffer_);glBindFramebuffer(GL_DRAW_FRAMEBUFFER,hdr_?sceneFramebuffer_:0);
             glBlitFramebuffer(0,0,width_,height_,0,0,width_,height_,GL_COLOR_BUFFER_BIT,GL_NEAREST);
             ++counters_.passes;
         }
         glBindFramebuffer(GL_FRAMEBUFFER,0);
+        if(hdr_)drawPost();
         budgeted_=false;drawGui(started);glDepthMask(GL_TRUE);glDisable(GL_SCISSOR_TEST);
         // Drop stale asset references before pruning backend caches.
         for(auto it=meshes_.begin();it!=meshes_.end();) { if(it->second.source.expired()) { eraseMesh(it->second);it=meshes_.erase(it); }else ++it; }
@@ -810,13 +867,13 @@ void WebGlRenderer::render(double updateMs,double intervalMs) {
         counters_.cachedMeshes=meshes_.size();counters_.cachedTextures=textures_.size();counters_.width=width_;counters_.height=height_;
         for(const auto& [key,gpu]:meshes_) { counters_.gpuMeshBytes+=gpu.bytes;counters_.cpuAssetBytes+=gpu.bytes; }
         for(const auto& [key,gpu]:textures_) { counters_.gpuTextureBytes+=gpu.bytes;counters_.cpuAssetBytes+=gpu.bytes; }
-        if(reflectionWidth_>1) {counters_.gpuTextureBytes+=std::uint64_t(width_)*height_*4;counters_.gpuDepthBytes+=std::uint64_t(width_)*height_*4;}
-        if(waterCapture_) {counters_.gpuTextureBytes+=std::uint64_t(width_)*height_*8;}
+        if(reflectionWidth_>1) {counters_.gpuTextureBytes+=std::uint64_t(width_)*height_*(hdr_?8:4);counters_.gpuDepthBytes+=std::uint64_t(width_)*height_*4;}
+        if(waterCapture_) {counters_.gpuTextureBytes+=std::uint64_t(width_)*height_*(hdr_?16:8);}
         counters_.frameStorageBytes=frame_.storageBytes()+fx_.storageBytes();
         // The browser default framebuffer retains its depth allocation alongside our MSAA depth.
         counters_.gpuDepthBytes+=std::uint64_t(width_)*height_*4*(sampleCount_>1 ? sampleCount_+1 : 1);
         if(waterCapture_) counters_.gpuDepthBytes+=std::uint64_t(width_)*height_*8;
-        if(msaaFramebuffer_) counters_.gpuTextureBytes+=std::uint64_t(width_)*height_*4*sampleCount_;
+        if(msaaFramebuffer_) counters_.gpuTextureBytes+=std::uint64_t(width_)*height_*(hdr_?8:4)*sampleCount_;
         timing.cpuMs=updateMs+emscripten_get_now()-started;measurements_.recordFrame(timing,counters_);
         if(started-lastReport_>=250) {
             lastReport_=started;refreshQualityReport();
@@ -830,5 +887,80 @@ void WebGlRenderer::render(double updateMs,double intervalMs) {
         gl_stats(counters_.meshes,counters_.lights,counters_.passes);
     } catch(const std::exception& e) { fail(std::string("WebGL 2 rendering failed: ")+e.what()); }
 }
+void WebGlRenderer::releaseShadows(bool lost) {
+    if(!lost) {glDeleteTextures(1,&shadowTexture_);glDeleteFramebuffers(1,&shadowFramebuffer_);}
+    shadowTexture_=shadowFramebuffer_=0;shadowSize_=shadowLayers_=0;
+}
+void WebGlRenderer::drawShadows(const CameraComponent& camera,float aspect,const SceneFrame& scene) {
+    const auto size=std::min(quality_.shadowResolution,capabilities_.maxTextureDimension2D),layers=std::max(1u,quality_.maxShadowMaps);
+    if(shadowSize_!=size||shadowLayers_!=layers) {
+        releaseShadows();glGenTextures(1,&shadowTexture_);glActiveTexture(GL_TEXTURE13);glBindTexture(GL_TEXTURE_2D_ARRAY,shadowTexture_);
+        glTexStorage3D(GL_TEXTURE_2D_ARRAY,1,GL_DEPTH_COMPONENT24,size,size,layers);
+        glTexParameteri(GL_TEXTURE_2D_ARRAY,GL_TEXTURE_MIN_FILTER,GL_LINEAR);glTexParameteri(GL_TEXTURE_2D_ARRAY,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D_ARRAY,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);glTexParameteri(GL_TEXTURE_2D_ARRAY,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D_ARRAY,GL_TEXTURE_COMPARE_MODE,GL_COMPARE_REF_TO_TEXTURE);glTexParameteri(GL_TEXTURE_2D_ARRAY,GL_TEXTURE_COMPARE_FUNC,GL_LEQUAL);
+        glGenFramebuffers(1,&shadowFramebuffer_);shadowSize_=size;shadowLayers_=layers;glActiveTexture(GL_TEXTURE0);
+    }
+    shadowPlan_=shadowsEnabled_?planShadows(scene.lights,camera,aspect,quality_,size):ShadowPlan{};
+    shadowPass_=true;glUseProgram(meshProgram_);glUniform1i(glGetUniformLocation(meshProgram_,"hdrOutput"),hdr_);glUniform1i(glGetUniformLocation(meshProgram_,"reflectionPass"),0);
+    glUniform1i(glGetUniformLocation(meshProgram_,"shadowCount"),0);
+    glDisable(GL_SCISSOR_TEST);glEnable(GL_DEPTH_TEST);glDepthMask(GL_TRUE);glEnable(GL_POLYGON_OFFSET_FILL);glPolygonOffset(1,1);
+    glBindFramebuffer(GL_FRAMEBUFFER,shadowFramebuffer_);const GLenum none=GL_NONE;glDrawBuffers(1,&none);glReadBuffer(GL_NONE);glViewport(0,0,size,size);
+    for(unsigned j=0;j<shadowPlan_.count;++j) {
+        const auto& map=shadowPlan_.maps[j];glFramebufferTextureLayer(GL_FRAMEBUFFER,GL_DEPTH_ATTACHMENT,shadowTexture_,0,j);
+        if(glCheckFramebufferStatus(GL_FRAMEBUFFER)!=GL_FRAMEBUFFER_COMPLETE)throw std::runtime_error("Cannot create shadow framebuffer");
+        glClearDepthf(1);glClear(GL_DEPTH_BUFFER_BIT);++counters_.passes;++counters_.shadowPasses;
+        frame_.prepareShadow(j,{map.matrix,float(size)*quality_.detailScale,float(size)*quality_.detailScale},quality_.shadowLod,shadowCulling_,shadowCasting_);
+        for(const auto& batch:frame_.shadowBatches(j))for(unsigned i=0;i<batch.instances.instanceCount;++i) {
+            auto draw=frame_.instanceDraw(batch.instances.firstInstance+i);draw.mesh=batch.mesh;draw.firstIndex=batch.firstIndex;draw.indexCount=batch.indexCount;
+            drawMesh(draw,map.matrix,scene);++counters_.shadowDrawCalls;++counters_.shadowInstances;counters_.shadowTriangles+=draw.indexCount/3;
+        }
+    }
+    glDisable(GL_POLYGON_OFFSET_FILL);shadowPass_=false;
+    glUniform1i(glGetUniformLocation(meshProgram_,"shadowPass"),0);glUniform1i(glGetUniformLocation(meshProgram_,"shadowCount"),shadowPlan_.count);
+    glUniform1i(glGetUniformLocation(meshProgram_,"shadowTaps"),quality_.shadowFilterTaps);
+    for(unsigned j=0;j<shadowPlan_.count;++j) {
+        const auto& map=shadowPlan_.maps[j];const auto& l=scene.lights[map.light];auto suffix="["+std::to_string(j)+"]";
+        matrix(meshProgram_,("shadowMatrix"+suffix).c_str(),map.matrix);
+        glUniform4f(glGetUniformLocation(meshProgram_,("shadowOptions"+suffix).c_str()),float(j),l.shadow.depthBias,l.shadow.normalBias,1.f/size);
+        glUniform4f(glGetUniformLocation(meshProgram_,("shadowSelection"+suffix).c_str()),float(map.light),map.nearDistance,map.farDistance,map.cascade?1.f:0.f);
+    }
+    counters_.shadowMapResolution=size;counters_.shadowFilterTaps=quality_.shadowFilterTaps;
+    counters_.gpuDepthBytes=std::uint64_t(size)*size*layers*4;
+}
+
+void WebGlRenderer::releasePost(bool lost) {
+    if(!lost){glDeleteFramebuffers(1,&bloomFramebuffer_);glDeleteTextures(1,&bloomTexture_);glDeleteProgram(postProgram_);glDeleteVertexArrays(1,&postVao_);}
+    bloomFramebuffer_=bloomTexture_=postProgram_=postVao_=0;bloomWidth_=bloomHeight_=0;
+}
+void WebGlRenderer::drawPost() {
+    const auto w=std::max(1u,(width_+3)/4),h=std::max(1u,(height_+3)/4);
+    if(bloomWidth_!=w||bloomHeight_!=h) {
+        glDeleteTextures(1,&bloomTexture_);glDeleteFramebuffers(1,&bloomFramebuffer_);
+        glGenTextures(1,&bloomTexture_);glActiveTexture(GL_TEXTURE1);glBindTexture(GL_TEXTURE_2D,bloomTexture_);
+        glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA16F,w,h,0,GL_RGBA,GL_HALF_FLOAT,nullptr);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+        glGenFramebuffers(1,&bloomFramebuffer_);glBindFramebuffer(GL_FRAMEBUFFER,bloomFramebuffer_);
+        glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,bloomTexture_,0);
+        if(glCheckFramebufferStatus(GL_FRAMEBUFFER)!=GL_FRAMEBUFFER_COMPLETE)throw std::runtime_error("Cannot create HDR bloom target");
+        bloomWidth_=w;bloomHeight_=h;
+    }
+    glDisable(GL_SCISSOR_TEST);glDisable(GL_DEPTH_TEST);glDepthMask(GL_FALSE);glDisable(GL_BLEND);glDisable(GL_CULL_FACE);
+    glUseProgram(postProgram_);glBindVertexArray(postVao_);const auto& p=quality_.post;
+    glUniform4f(glGetUniformLocation(postProgram_,"params"),std::exp2(p.exposure),p.bloomStrength,p.bloomThreshold,0);
+    glUniform4f(glGetUniformLocation(postProgram_,"grade"),p.saturation,p.contrast,0,0);
+    glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,sceneColor_);glUniform1i(glGetUniformLocation(postProgram_,"sourceColor"),0);
+    glActiveTexture(GL_TEXTURE1);glBindTexture(GL_TEXTURE_2D,sceneColor_);glUniform1i(glGetUniformLocation(postProgram_,"bloomColor"),1);
+    if(p.bloomStrength>0) {
+        glBindFramebuffer(GL_FRAMEBUFFER,bloomFramebuffer_);glViewport(0,0,w,h);glUniform1i(glGetUniformLocation(postProgram_,"extractBloom"),1);glDrawArrays(GL_TRIANGLES,0,3);
+        ++counters_.passes;++counters_.drawCalls;++counters_.triangles;
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER,0);glViewport(0,0,width_,height_);glBindTexture(GL_TEXTURE_2D,bloomTexture_);
+    glUniform1i(glGetUniformLocation(postProgram_,"extractBloom"),0);glDrawArrays(GL_TRIANGLES,0,3);
+    glActiveTexture(GL_TEXTURE0);glDepthMask(GL_TRUE);++counters_.passes;++counters_.drawCalls;++counters_.triangles;
+    counters_.gpuTextureBytes+=std::uint64_t(w)*h*8;
+}
+
 }
 

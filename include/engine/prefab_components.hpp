@@ -30,6 +30,7 @@ struct PrefabLightSettings {
     LightType type=LightType::Directional;
     Vec3 color{1,1,1},direction{0,-1,0};
     float intensity=1,range=10;
+    float innerAngle=pi/9,outerAngle=pi/6;
     std::uint32_t visibilityMask=1;
     ShadowSettings shadow;
 };

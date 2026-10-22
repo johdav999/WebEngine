@@ -129,6 +129,12 @@ does not establish physical mobile acceptance or sustained mobile performance.
 Ribbon authoring adds the Ribbon trail preset/group and optional preview source
 motion. See [ribbon trails](trails.md); current exports use archive v21.
 
+Surface trail authoring adds a World-only contact-strip preset and the Trails
+settings group. Isolated preview supplies sloped contacts and airborne gaps;
+diagnostics include live points and existing segment/upload counters. Current
+exports use v29 (SurfaceTrail added in v28); see [surface trails](surface-trails.md) for application submission,
+receiver policy, bounds and live continuation.
+
 Ground ring and Plane alignment/normal/offset controls are documented in
 [plane particles](plane-particles.md). Existing immutable history and preview ownership apply.
 
@@ -136,3 +142,5 @@ Static [mesh particles](mesh-particles.md) are now delivered with shared materia
 3D spin and archive v21 state. Soft fading remains a quad/ribbon capability.
 
 Optional particle collision and independent projected decals are now delivered; see [contact/decal contracts](fx-contacts-decals.md) for responses, queued output, authoring, budgets and persistence. Rigid-body particles and PBR decal channels remain outside this increment.
+
+Event-driven child effects and finite fading decals are now implemented; see [composition contracts](fx-composition.md). Archive v29 adds graph dependencies and live composition/decal continuation while retaining the earlier fields above.

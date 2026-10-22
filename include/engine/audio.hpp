@@ -33,6 +33,27 @@ struct AudioVoiceId {
     bool operator==(const AudioVoiceId&) const = default;
 };
 struct AudioListenerPose { Vec3 position{},forward{0,0,-1},up{0,1,0}; };
+// Encoded media reference. The platform owns incremental decoding/buffering, not PCM.
+class AudioStreamAsset final {
+public:
+    static std::shared_ptr<const AudioStreamAsset> create(std::string uri);
+    const std::string& uri() const { return uri_; }
+private:
+    explicit AudioStreamAsset(std::string uri):uri_(std::move(uri)) {}
+    std::string uri_;
+};
+struct AudioCapabilities { bool occlusionFilter=false,reverb=false,streaming=false; };
+struct AudioReverbSettings {
+    float wet=0,decaySeconds=1.5f,preDelaySeconds=.02f;
+    void validate() const;
+};
+struct AudioOcclusionSettings {
+    bool enabled=false;
+    std::uint16_t layers=0xffff;
+    std::uint32_t maxQueriesPerUpdate=8; // Fair round robin, bounded 1..64.
+    float blockedGain=.35f,lowPassHz=800,transitionSeconds=.1f;
+    void validate() const;
+};
 struct AudioPlayOptions {
     AudioBusId bus{}; // Empty selects master.
     float volume=1;
@@ -41,6 +62,8 @@ struct AudioPlayOptions {
     Vec3 position{};
     float referenceDistance=1,maxDistance=10000,rolloff=1;
     float playbackRate=1; // Finite [0.125,8]; source seconds per device second.
+    bool occlusion=false; // Opt-in ray between listener and spatial voice.
+    float reverbSend=0; // [0,1], post-volume and post-occlusion room send.
 };
 class AudioEmitterComponent : public Component {
 public:
@@ -54,7 +77,8 @@ public:
     std::string_view typeName() const noexcept override { return "AudioListenerComponent"; }
 };
 // Backend owns device resources, shares buffers, reports real completion and activation.
-// start must publish an entire voice or return false; remaining methods must not throw.
+// start/startStream publish an entire pending voice or return false. Stream loading
+// may fail later; playing() includes pending voices. Controls marked noexcept do not throw.
 class AudioBackend {
 public:
     virtual ~AudioBackend()=default;
@@ -69,6 +93,15 @@ public:
     virtual bool active() const noexcept=0;
     virtual void activate() noexcept=0; // Initiate activation in a platform gesture.
     virtual void suspend(bool value) noexcept=0;
+    // Optional extensions. Unsupported backends retain their existing dry path.
+    virtual AudioCapabilities capabilities() const noexcept { return {}; }
+    virtual bool startStream(std::uint32_t,const AudioStreamAsset&,const AudioPlayOptions&,float) { return false; }
+    virtual bool reverb(const AudioReverbSettings&) { return false; } // Failure preserves previous room.
+    virtual void environment(std::uint32_t,float /*lowPassHz*/,float /*send*/) noexcept {}
+    virtual void muteOutput(bool) noexcept {} // Also silences a shared room's tail.
+    virtual void clearEffects() noexcept {} // Stop-all/disposal discards tails.
+    virtual bool seekStream(std::uint32_t,double) noexcept { return false; }
+    virtual double streamPosition(std::uint32_t) const noexcept { return -1; }
 };
 // Application-owned, single-threaded. No retained scene pointers or callbacks.
 class AudioSystem final {
@@ -86,6 +119,7 @@ public:
     float busVolume(AudioBusId) const;
     bool busMuted(AudioBusId) const;
     AudioVoiceId play(std::shared_ptr<const SoundAsset>,AudioPlayOptions={});
+    AudioVoiceId playStream(std::shared_ptr<const AudioStreamAsset>,AudioPlayOptions={});
     AudioVoiceId playEmitter(const AudioEmitterComponent&,AudioPlayOptions={});
     bool stop(AudioVoiceId,double fadeSeconds=0);
     void stopAll() noexcept;
@@ -95,6 +129,14 @@ public:
     bool setVoicePosition(AudioVoiceId,Vec3);
     bool setVoicePlaybackRate(AudioVoiceId,float);
     float voicePlaybackRate(AudioVoiceId) const;
+    bool seekStream(AudioVoiceId,double sourceSeconds);
+    double streamPosition(AudioVoiceId) const; // -1 if unavailable/not a stream.
+    bool setReverb(const AudioReverbSettings&);
+    const AudioReverbSettings& reverb() const { return reverb_; }
+    void setOcclusion(const AudioOcclusionSettings&);
+    const AudioOcclusionSettings& occlusion() const { return occlusion_; }
+    float voiceOcclusion(AudioVoiceId) const; // Smoothed 0..1; zero for unknown.
+    std::uint32_t lastOcclusionQueries() const { return lastOcclusionQueries_; }
     bool isPlaying(AudioVoiceId) const;
     float voiceVolume(AudioVoiceId) const;
     std::size_t voiceCount() const { return voices_.size(); }
@@ -109,10 +151,13 @@ private:
     struct Bus { std::string name;std::uint32_t parent=0;float volume=1;bool muted=false;Fade fade; };
     struct Voice {
         std::shared_ptr<const SoundAsset> sound;
+        std::shared_ptr<const AudioStreamAsset> stream;
         AudioPlayOptions options;
         ComponentId emitter{};
         bool muted=false,stopAfterFade=false;
         Fade fade;
+        float occlusion=0;
+        bool blocked=false;
     };
     std::unique_ptr<AudioBackend> backend_;
     std::uint64_t identity_;
@@ -122,9 +167,14 @@ private:
     std::map<std::uint32_t,Voice> voices_;
     ComponentId listenerBinding_{};
     AudioListenerPose listener_;
+    AudioReverbSettings reverb_;
+    AudioOcclusionSettings occlusion_;
+    std::uint32_t occlusionCursor_=0,lastOcclusionQueries_=0;
     Bus* bus(AudioBusId);
     Voice* voice(AudioVoiceId);
     float effectiveGain(const Voice&) const;
     void refreshGains() noexcept;
+    AudioVoiceId startVoice(std::shared_ptr<const SoundAsset>,std::shared_ptr<const AudioStreamAsset>,AudioPlayOptions);
+    void updateEnvironment(const Scene*,double);
 };
 } // namespace engine
