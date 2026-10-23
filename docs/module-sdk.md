@@ -85,3 +85,7 @@ backup, failed-write recovery, second-writer protection, scene travel, pause,
 stale commands and file interchange. Console/Node checks alone do not establish
 rendered host acceptance. Physical mobile and native macOS/Linux hosts remain
 outside the Paws acceptance scope.
+
+M7 general CI also checks the existing scene/effect writer version 34. Five
+legacy regression assertions still expected version 31 and are aligned with the
+current writer; serialization code and schema compatibility are unchanged.
