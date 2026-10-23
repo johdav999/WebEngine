@@ -1,3 +1,8 @@
+#ifdef WEBENGINE_MULTIPLAYER_DEMO
+#include "engine/network_scene.hpp"
+#include "../examples/multiplayer/gameplay.hpp"
+#include "engine/editor.hpp"
+#endif
 #include <set>
 #include <sstream>
 #include <iomanip>
@@ -36,7 +41,7 @@
 #include "engine/ai_controller.hpp"
 #include "fx_contact_fixture.hpp"
 #include "editor_browser.hpp"
-namespace {void advanceContentIteration(double);}
+namespace {void advanceContentIteration(double);void advanceAuthoringPanel();}
 #include "audio_demo.hpp"
 #include "engine/editor_cinematic.hpp"
 #include "engine/audio_browser.hpp"
@@ -384,7 +389,7 @@ EM_BOOL frame(double time,void*) {
             }
         };
         callbacks.present=[&](Scene&,const ApplicationFrame& clocks) {
-            advanceContentIteration(time/1000);
+            advanceContentIteration(time/1000);advanceAuthoringPanel();
             static double lastSkyReport=-1000;
             if(time-lastSkyReport>=250) {reportSkyState();lastSkyReport=time;}
             renderer->render(emscripten_get_now()-updateStart,clocks.interval*1000);
@@ -571,6 +576,19 @@ EMSCRIPTEN_KEEPALIVE void engine_archive_snapshot() {
     archive_orbit(value.target.x,value.target.y,value.target.z,value.resetTarget.x,value.resetTarget.y,value.resetTarget.z,value.yaw,value.elevation,value.distance,paused(),
         openedScene ? openedPhase : elapsed,browserEditorActive() ? false : openedScene ? openedDemoMotion : true);
 }
+#ifdef WEBENGINE_MULTIPLAYER_DEMO
+EM_JS(void, multiplayer_scene_bytes,(const void* data,int count),{window.engineMultiplayerSceneBytes=HEAPU8.slice(data,data+count);});
+EMSCRIPTEN_KEEPALIVE int engine_multiplayer_scene_export(const char* selected){
+    try {
+        if(!browserEditorActive()||browserEditorPlaying()||browserEditorFxActive()||browserEditorRegionActive()||replayReviewing()||(browserEditorSession()&&browserEditorSession()->transforming()))throw std::logic_error("Stop previews and finish the current edit first");
+        auto* node=displayedScene().findSavedNode(selected?selected:"");
+        while(node&&!dynamic_cast<Actor*>(node))node=node->parent();
+        if(!node)throw std::invalid_argument("Select a root mesh actor as player template");
+        const auto bytes=net::saveNetworkScene(displayedScene(),renderer->views(),displayedLibrary(),node->savedId(),multiplayer_gameplay::registry(),multiplayer_gameplay::invocations());
+        multiplayer_scene_bytes(bytes.data(),int(bytes.size()));return 1;
+    }catch(const std::exception& e){archive_message(e.what(),1);return 0;}
+}
+#endif
 EMSCRIPTEN_KEEPALIVE int engine_archive_save(int assets,const void* metadata,int count) {
     try {
         if(browserEditorPlaying()||browserEditorFxActive()||browserEditorRegionActive()||replayReviewing())throw std::logic_error("Close previews / Stop Play before saving the authoring document");
@@ -579,7 +597,7 @@ EMSCRIPTEN_KEEPALIVE int engine_archive_save(int assets,const void* metadata,int
         displayedScene().flushPendingDestroy();
         std::vector<std::byte> bytes;
         if(assets) { auto library=SceneArchive::collectAssets(displayedScene());appendLibrary(library,displayedLibrary());bytes=SceneArchive::saveAssets(library); }
-        else bytes=SceneArchive::save(displayedScene(),renderer->views(),displayedLibrary(),{static_cast<const std::byte*>(metadata),std::size_t(count)},{},aiControllerCodecs());
+        else bytes=SceneArchive::save(displayedScene(),renderer->views(),displayedLibrary(),{static_cast<const std::byte*>(metadata),std::size_t(count)},{},browserEditorCodecs());
         archive_bytes(bytes.data(),int(bytes.size()),assets);
         // Manual editor save acknowledgement is separate from autosave byte capture.
         return 1;
@@ -601,7 +619,7 @@ EMSCRIPTEN_KEEPALIVE int engine_archive_prepare(const void* data,int count,int a
             }
             for(const auto& asset:pendingLibrary.terrains) pendingAssetRoot->adoptChild(makeTerrainActor("Imported terrain",asset));
         } else {
-            auto candidate=SceneArchive::load(bytes,{},aiControllerCodecs());
+            auto candidate=SceneArchive::load(bytes,{},browserEditorCodecs());
             CameraComponent* preview=nullptr;
             if(!candidate.views.empty()) preview=candidate.views.front().camera;
             if(!preview) candidate.scene->visit([&](const Node& node,const Mat4&) { if(!preview) preview=const_cast<CameraComponent*>(dynamic_cast<const CameraComponent*>(&node)); });
@@ -1815,6 +1833,9 @@ EM_JS(int, renderer_requested, (), {
     return choice==='webgpu' ? 1 : choice==='webgl2' ? 2 : 0;
 });
 int main() {
+#ifdef WEBENGINE_MULTIPLAYER_DEMO
+    configureBrowserEditorComponents({multiplayer_gameplay::editorCodecs(),multiplayer_gameplay::factories()},multiplayer_gameplay::properties());
+#endif
     buildScene(); renderer=std::make_unique<Renderer>(scene,*camera);
     buildGuiDemo([] { engine_reset_camera(); });
     renderer->setGui(browserGui());
@@ -1959,3 +1980,5 @@ extern "C" EMSCRIPTEN_KEEPALIVE int engine_route_resources(){
 #include "cinematic_browser.inc"
 #include "replay_browser.inc"
 #include "content_iteration_browser.inc"
+
+#include "editor_authoring_browser.inc"

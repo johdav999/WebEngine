@@ -2,6 +2,7 @@
 #include "engine/rigid_body_component.hpp"
 #include <limits>
 #include <map>
+#include <cstring>
 #include "engine/scene.hpp"
 
 namespace engine {
@@ -20,6 +21,12 @@ void validateEdit(const TerrainEdit& edit) {
     const auto& a=edit.before->data();const auto& b=edit.after->data();
     require(a.samplesX==b.samplesX&&a.samplesZ==b.samplesZ&&a.chunkCells==b.chunkCells&&a.spacing.x==b.spacing.x&&a.spacing.y==b.spacing.y&&
         a.textureMeters==b.textureMeters&&a.lodLevels==b.lodLevels&&a.lodPixels==b.lodPixels,"Terrain edits cannot replace topology or LOD settings");
+    require(a.holes==b.holes||edit.holesChanged,"Missing terrain hole change flag");
+    if(a.holes!=b.holes) {
+        const auto columns=(a.samplesX-2)/a.chunkCells+1;
+        for(std::uint32_t z=0;z<a.samplesZ-1;++z)for(std::uint32_t x=0;x<a.samplesX-1;++x)
+            if(a.hole(x,z)!=b.hole(x,z))require(std::find(edit.affectedChunks.begin(),edit.affectedChunks.end(),(z/a.chunkCells)*columns+x/a.chunkCells)!=edit.affectedChunks.end(),"Missing dirty hole chunk");
+    }
     require(std::is_sorted(edit.affectedChunks.begin(),edit.affectedChunks.end())&&std::adjacent_find(edit.affectedChunks.begin(),edit.affectedChunks.end())==edit.affectedChunks.end(),"Invalid terrain dirty-chunk list");
     for(auto chunk:edit.affectedChunks) require(chunk<edit.before->chunkCount(),"Invalid terrain dirty chunk");
 }
@@ -30,7 +37,7 @@ TerrainOverrides paintedOverrides(const TerrainComponent& part,const TerrainAsse
 }
 // Compact coarse interiors retain EVERY full-resolution perimeter sample. Adjacent
 // chunks therefore have identical edge segments at any pair of LOD levels.
-std::shared_ptr<Mesh> coarseChunk(const TerrainData& d,std::uint32_t x0,std::uint32_t z0,std::uint32_t nx,std::uint32_t nz,std::uint32_t step,std::uint32_t offsetX=0,std::uint32_t offsetZ=0) {
+std::shared_ptr<Mesh> coarseChunk(const TerrainData& d,std::uint32_t x0,std::uint32_t z0,std::uint32_t nx,std::uint32_t nz,std::uint32_t step,std::uint32_t offsetX=0,std::uint32_t offsetZ=0,bool holeAware=false) {
     auto mesh=std::make_shared<Mesh>();std::map<std::uint64_t,std::uint32_t> vertices;
     auto sample=[&](float x,float z) {
         x=std::clamp(x,0.f,float(d.samplesX-1));z=std::clamp(z,0.f,float(d.samplesZ-1));
@@ -48,16 +55,38 @@ std::shared_ptr<Mesh> coarseChunk(const TerrainData& d,std::uint32_t x0,std::uin
         const auto index=std::uint32_t(mesh->vertices.size());vertices.emplace(key,index);
         mesh->vertices.push_back({p,unit(cross(dz,dx)),{p.x/d.textureMeters,p.z/d.textureMeters},{t.x,t.y,t.z,-1}});return index;
     };
-    for(std::uint32_t z=0;z<nz;z+=step) for(std::uint32_t x=0;x<nx;x+=step) {
-        const auto right=std::min(x+step,nx),bottom=std::min(z+step,nz);
+    auto tile=[&](auto&& self,std::uint32_t x,std::uint32_t z,std::uint32_t right,std::uint32_t bottom)->void {
+        if(holeAware){
+            bool cut=false,solid=false;
+            for(auto b=z;b<bottom;++b)for(auto a=x;a<right;++a){if(d.hole(x0+a,z0+b))cut=true;else solid=true;}
+            if(!solid)return;
+            if(right-x==1&&bottom-z==1){const auto a=vertex(float(x),float(z)),b=vertex(float(right),float(z)),c=vertex(float(x),float(bottom)),e=vertex(float(right),float(bottom));
+                mesh->indices.insert(mesh->indices.end(),{a,c,b,b,c,e});return;}
+            bool curved=false;
+            if(!cut){
+                const float h=point(d,x0+x,z0+z).y,dx=(point(d,x0+right,z0+z).y-h)/float(right-x),dz=(point(d,x0+x,z0+bottom).y-h)/float(bottom-z);
+                for(auto b=z;b<=bottom&&!curved;++b)for(auto a=x;a<=right;++a)
+                    if(std::abs(point(d,x0+a,z0+b).y-(h+dx*(a-x)+dz*(b-z)))>1e-5f){curved=true;break;}
+            }
+            if(cut||curved){
+                // Keep source triangles on curved cut tiles. Otherwise independent
+                // full-detail shadows can reveal displaced coarse receivers.
+                const auto mx=x+(right-x)/2,mz=z+(bottom-z)/2;
+                if(mx>x&&mz>z){self(self,x,z,mx,mz);self(self,mx,z,right,mz);self(self,x,mz,mx,bottom);self(self,mx,mz,right,bottom);}
+                else if(mx>x){self(self,x,z,mx,bottom);self(self,mx,z,right,bottom);}
+                else{self(self,x,z,right,mz);self(self,x,mz,right,bottom);}return;
+            }
+        }
         const auto center=vertex((float(x)+right)*.5f,(float(z)+bottom)*.5f);
         std::vector<std::uint32_t> edge;edge.reserve(4+step*4);
-        for(auto y=z;y<bottom;y+=x==0 ? 1 : bottom-z) edge.push_back(vertex(float(x),float(y)));
-        for(auto a=x;a<right;a+=bottom==nz ? 1 : right-x) edge.push_back(vertex(float(a),float(bottom)));
-        for(auto y=bottom;y>z;y-=right==nx ? 1 : bottom-z) edge.push_back(vertex(float(right),float(y)));
-        for(auto a=right;a>x;a-=z==0 ? 1 : right-x) edge.push_back(vertex(float(a),float(z)));
+        for(auto y=z;y<bottom;y+=(holeAware||x==0) ? 1 : bottom-z) edge.push_back(vertex(float(x),float(y)));
+        for(auto a=x;a<right;a+=(holeAware||bottom==nz) ? 1 : right-x) edge.push_back(vertex(float(a),float(bottom)));
+        for(auto y=bottom;y>z;y-=(holeAware||right==nx) ? 1 : bottom-z) edge.push_back(vertex(float(right),float(y)));
+        for(auto a=right;a>x;a-=(holeAware||z==0) ? 1 : right-x) edge.push_back(vertex(float(a),float(z)));
         for(std::size_t i=0;i<edge.size();++i) mesh->indices.insert(mesh->indices.end(),{center,edge[i],edge[(i+1)%edge.size()]});
-    }
+    };
+    for(std::uint32_t z=0;z<nz;z+=step)for(std::uint32_t x=0;x<nx;x+=step)
+        tile(tile,x,z,std::min(x+step,nx),std::min(z+step,nz));
     mesh->materials={d.material};mesh->parts={{0,std::uint32_t(mesh->indices.size()),0}};return mesh;
 }
 std::shared_ptr<const Mesh> generateChunk(const TerrainData& d,std::uint32_t x0,std::uint32_t z0,std::uint32_t nx,std::uint32_t nz,std::uint32_t offsetX=0,std::uint32_t offsetZ=0) {
@@ -68,14 +97,18 @@ std::shared_ptr<const Mesh> generateChunk(const TerrainData& d,std::uint32_t x0,
             const auto p=point(d,x,z,offsetX,offsetZ);const auto tangent=normalized(dx);
             mesh->vertices.push_back({p,unit(cross(dz,dx)),{p.x/d.textureMeters,p.z/d.textureMeters},{tangent.x,tangent.y,tangent.z,-1}});
         }
+        bool hasHoles=false;
         for(std::uint32_t z=0;z<nz;++z) for(std::uint32_t x=0;x<nx;++x) {
+            if(d.hole(x0+x,z0+z)) {hasHoles=true;continue;}
             const auto a=z*(nx+1)+x,b=a+1,c=a+nx+1,e=c+1;
             mesh->indices.insert(mesh->indices.end(),{a,c,b,b,c,e});
         }
         mesh->materials={d.material};mesh->parts={{0,std::uint32_t(mesh->indices.size()),0}};
         auto previous=mesh->indices.size();
+        // Cut chunks partition mixed tiles and retain all solid-tile perimeter
+        // samples, including hole boundaries and interfaces to finer neighbours.
         for(std::uint32_t level=0;level<d.lodLevels;++level) {
-            auto coarse=coarseChunk(d,x0,z0,nx,nz,2u<<level,offsetX,offsetZ);
+            auto coarse=coarseChunk(d,x0,z0,nx,nz,2u<<level,offsetX,offsetZ,hasHoles);
             if(coarse->indices.size()<previous) {previous=coarse->indices.size();mesh->lods.push_back({std::move(coarse),d.lodPixels[level]});}
         }
     return mesh;
@@ -108,6 +141,8 @@ template<class F> void terrainVisit(const Node& root,F&& function) {
 void TerrainData::validate() const {
     require(samplesX>=2&&samplesZ>=2&&samplesX<=4097&&samplesZ<=4097&&std::uint64_t(samplesX)*samplesZ<=1048576,"Terrain sample budget exceeded or invalid dimensions");
     require(heights.size()==std::size_t(samplesX)*samplesZ,"Terrain height count mismatch");
+    require(holes.empty()||holes.size()==std::size_t(samplesX-1)*(samplesZ-1),"Terrain hole count mismatch");
+    for(auto value:holes) require(value<=1,"Terrain holes must be 0 or 1");
     require(chunkCells>=1&&chunkCells<=128,"Terrain chunk cells must be 1..128");
     require(std::uint64_t((samplesX-2)/chunkCells+1)*((samplesZ-2)/chunkCells+1)<=4096,"Terrain chunk budget exceeded");
     require(std::isfinite(spacing.x)&&std::isfinite(spacing.y)&&spacing.x>=.0001f&&spacing.y>=.0001f&&
@@ -137,7 +172,9 @@ std::shared_ptr<const TerrainAsset> TerrainAsset::createPatch(TerrainData data,T
         std::uint64_t(patch.offsetX)+data.samplesX<=65537&&std::uint64_t(patch.offsetZ)+data.samplesZ<=65537&&
         double(patch.offsetX+data.samplesX-1)*data.spacing.x<=1000000&&double(patch.offsetZ+data.samplesZ-1)*data.spacing.y<=1000000,"Invalid terrain source patch");
     if(prepared) {
-        require(build&&prepared->vertices.size()==std::size_t(patch.cellsX+1)*(patch.cellsZ+1)&&prepared->indices.size()==std::size_t(patch.cellsX)*patch.cellsZ*6,"Invalid prepared terrain chunk");
+        std::size_t solidCells=0;
+        for(std::uint32_t z=patch.z;z<patch.z+patch.cellsZ;++z) for(std::uint32_t x=patch.x;x<patch.x+patch.cellsX;++x) if(!data.hole(x,z)) ++solidCells;
+        require(build&&prepared->vertices.size()==std::size_t(patch.cellsX+1)*(patch.cellsZ+1)&&prepared->indices.size()==solidCells*6,"Invalid prepared terrain chunk");
         auto structure=[&](const Mesh& mesh) {
             require(mesh.materials.size()==1&&mesh.materials[0]==data.material&&mesh.parts.size()==1&&mesh.parts[0].firstIndex==0&&mesh.parts[0].indexCount==mesh.indices.size()&&mesh.parts[0].materialIndex==0&&mesh.skin.empty()&&mesh.morphTargets.empty()&&!mesh.skeleton,"Invalid prepared terrain mesh metadata");
             for(const auto& v:mesh.vertices) {require(finite(v.position)&&finite(v.normal)&&std::isfinite(v.uv.x)&&std::isfinite(v.uv.y),"Nonfinite prepared terrain vertex");for(float f:v.tangent) require(std::isfinite(f),"Invalid prepared terrain tangent");}
@@ -149,6 +186,7 @@ std::shared_ptr<const TerrainAsset> TerrainAsset::createPatch(TerrainData data,T
         }
         std::size_t at=0;
         for(std::uint32_t z=0;z<patch.cellsZ;++z) for(std::uint32_t x=0;x<patch.cellsX;++x) {
+            if(data.hole(patch.x+x,patch.z+z)) continue;
             const auto a=z*(patch.cellsX+1)+x,b=a+1,c=a+patch.cellsX+1,e=c+1;
             for(auto index:{a,c,b,b,c,e}) require(prepared->indices[at++]==index,"Invalid prepared terrain topology");
         }
@@ -162,6 +200,16 @@ std::shared_ptr<const TerrainAsset> TerrainAsset::createPatch(TerrainData data,T
             for(const auto& v:lod.mesh->vertices) require(finite(v.position)&&finite(v.normal)&&v.position.x>=float(patch.offsetX+patch.x)*data.spacing.x&&
                 v.position.x<=float(patch.offsetX+patch.x+patch.cellsX)*data.spacing.x&&v.position.z>=float(patch.offsetZ+patch.z)*data.spacing.y&&
                 v.position.z<=float(patch.offsetZ+patch.z+patch.cellsZ)*data.spacing.y,"Invalid prepared LOD bounds");
+        }
+        if(solidCells!=std::size_t(patch.cellsX)*patch.cellsZ&&!prepared->lods.empty()){
+            // A prepared cut patch must carry canonical hole-aware topology. Bounds
+            // checks alone cannot reject a triangle that bridges a missing cell.
+            auto expected=generateChunk(data,patch.x,patch.z,patch.cellsX,patch.cellsZ,patch.offsetX,patch.offsetZ);
+            for(const auto& lod:prepared->lods){
+                const auto match=std::find_if(expected->lods.begin(),expected->lods.end(),[&](const MeshLod& candidate){return candidate.maxPixels==lod.maxPixels;});
+                require(match!=expected->lods.end()&&match->mesh->indices==lod.mesh->indices&&match->mesh->vertices.size()==lod.mesh->vertices.size(),"Prepared LOD disagrees with hole topology");
+                for(std::size_t i=0;i<lod.mesh->vertices.size();++i)require(std::memcmp(&match->mesh->vertices[i],&lod.mesh->vertices[i],sizeof(Vertex))==0,"Prepared hole LOD vertex mismatch");
+            }
         }
     }
     auto result=std::shared_ptr<TerrainAsset>(new TerrainAsset(std::move(data),false));result->patch_=patch;
@@ -206,6 +254,7 @@ std::optional<TerrainGround> TerrainAsset::ground(float x,float z) const {
     if(x<0||z<0||x>float(d.samplesX-1)*d.spacing.x||z>float(d.samplesZ-1)*d.spacing.y) return {};
     const float gx=std::min(x/d.spacing.x,float(d.samplesX-1)),gz=std::min(z/d.spacing.y,float(d.samplesZ-1));
     const auto ix=std::min(std::uint32_t(gx),d.samplesX-2),iz=std::min(std::uint32_t(gz),d.samplesZ-2);
+    if(d.hole(ix,iz)) return {};
     const float u=gx-ix,v=gz-iz;const auto a=point(d,ix,iz),b=point(d,ix+1,iz),c=point(d,ix,iz+1),e=point(d,ix+1,iz+1);
     if(u+v<=1) return TerrainGround{{inputX,a.y+(b.y-a.y)*u+(c.y-a.y)*v,inputZ},unit(cross(c-a,b-a))};
     return TerrainGround{{inputX,e.y+(c.y-e.y)*(1-u)+(b.y-e.y)*(1-v),inputZ},unit(cross(c-b,e-b))};
@@ -216,23 +265,25 @@ std::shared_ptr<const CollisionShape> TerrainAsset::collisionShape() const {
     vertices.reserve(d.heights.size());indices.reserve(std::size_t(d.samplesX-1)*(d.samplesZ-1)*6);
     for(std::uint32_t z=0;z<d.samplesZ;++z) for(std::uint32_t x=0;x<d.samplesX;++x) vertices.push_back(point(d,x,z));
     for(std::uint32_t z=0;z<d.samplesZ-1;++z) for(std::uint32_t x=0;x<d.samplesX-1;++x) {
+        if(d.hole(x,z)) continue;
         const auto a=z*d.samplesX+x,b=a+1,c=a+d.samplesX,e=c+1;indices.insert(indices.end(),{a,c,b,b,c,e});
     }
+    if(indices.empty()) return {};
     auto shape=CollisionShape::triangleMesh(vertices,indices);std::vector<std::shared_ptr<const PhysicalSurface>> triangles;
-    if(!d.cellSurfaces.empty())for(const auto& surface:d.cellSurfaces){triangles.push_back(surface);triangles.push_back(surface);}
+    if(!d.cellSurfaces.empty())for(std::uint32_t z=0;z<d.samplesZ-1;++z)for(std::uint32_t x=0;x<d.samplesX-1;++x)if(!d.hole(x,z)){const auto& surface=d.cellSurfaces[std::size_t(z)*(d.samplesX-1)+x];triangles.push_back(surface);triangles.push_back(surface);}
     return shape->withSurfaces(d.physicalSurface,std::move(triangles));
 }
 std::shared_ptr<const CollisionShape> TerrainAsset::chunkCollision(std::uint32_t chunk) const {
-    auto mesh=buildChunk(chunk);std::vector<Vec3> points;points.reserve(mesh->vertices.size());
+    auto mesh=buildChunk(chunk);if(mesh->indices.empty())return {};std::vector<Vec3> points;points.reserve(mesh->vertices.size());
     for(const auto& vertex:mesh->vertices) points.push_back(vertex.position);
     const auto& d=data_;const auto columns=(d.samplesX-2)/d.chunkCells+1;
     const auto x0=patch_?patch_->x:(chunk%columns)*d.chunkCells,z0=patch_?patch_->z:(chunk/columns)*d.chunkCells;
     const auto nx=patch_?patch_->cellsX:std::min(d.chunkCells,d.samplesX-1-x0),nz=patch_?patch_->cellsZ:std::min(d.chunkCells,d.samplesZ-1-z0);
-    std::vector<std::shared_ptr<const PhysicalSurface>> triangles;if(!d.cellSurfaces.empty())for(std::uint32_t z=z0;z<z0+nz;++z)for(std::uint32_t x=x0;x<x0+nx;++x){auto surface=d.cellSurfaces[std::size_t(z)*(d.samplesX-1)+x];triangles.push_back(surface);triangles.push_back(surface);}
+    std::vector<std::shared_ptr<const PhysicalSurface>> triangles;if(!d.cellSurfaces.empty())for(std::uint32_t z=z0;z<z0+nz;++z)for(std::uint32_t x=x0;x<x0+nx;++x)if(!d.hole(x,z)){auto surface=d.cellSurfaces[std::size_t(z)*(d.samplesX-1)+x];triangles.push_back(surface);triangles.push_back(surface);}
     return CollisionShape::triangleMesh(points,mesh->indices)->withSurfaces(d.physicalSurface,std::move(triangles));
 }
 void TerrainBrush::validate() const {
-    require(mode>=TerrainBrushMode::Raise&&mode<=TerrainBrushMode::Paint,"Invalid terrain brush mode");
+    require(mode>=TerrainBrushMode::Raise&&mode<=TerrainBrushMode::Fill,"Invalid terrain brush mode");
     require(std::isfinite(center.x)&&std::isfinite(center.y)&&std::isfinite(radius)&&radius>=.0001f&&radius<=1000000,"Invalid terrain brush position or radius");
     require(std::isfinite(strength)&&std::abs(strength)<=1000000&&std::isfinite(targetHeight)&&std::abs(targetHeight)<=1000000,"Invalid terrain brush strength or target");
     if(mode!=TerrainBrushMode::Raise) require(strength>=0&&strength<=1,"Blend brush strength must be 0..1");
@@ -255,12 +306,34 @@ TerrainEdit TerrainAsset::withLayers(const MaterialLayers& layers) const {
     next->chunks_=chunks_;next->patch_=patch_;
     result.after=std::move(next);result.paintChanged=true;return result;
 }
+TerrainEdit TerrainAsset::withHoles(std::vector<std::uint8_t> holes) const {
+    require(!patch_,"Paged terrain patches cannot edit holes");
+    auto data=data_;data.holes=std::move(holes);data.validate();
+    TerrainEdit result;result.before=result.after=shared_from_this();
+    const auto columns=(data.samplesX-2)/data.chunkCells+1;
+    std::vector<bool> dirty(chunkCount());
+    for(std::uint32_t z=0;z<data.samplesZ-1;++z)for(std::uint32_t x=0;x<data.samplesX-1;++x)
+        if(data.hole(x,z)!=data_.hole(x,z))dirty[(z/data.chunkCells)*columns+x/data.chunkCells]=true;
+    for(std::uint32_t i=0;i<dirty.size();++i)if(dirty[i])result.affectedChunks.push_back(i);
+    if(result.affectedChunks.empty())return result;
+    auto next=std::shared_ptr<TerrainAsset>(new TerrainAsset(std::move(data),false));
+    if(eager()){next->chunks_=chunks_;for(auto i:result.affectedChunks){next->chunks_[i].reset();next->chunks_[i]=next->buildChunk(i);}}
+    result.after=std::move(next);result.holesChanged=true;return result;
+}
 TerrainEdit TerrainAsset::edit(const TerrainBrush& brush) const {
     require(!patch_,"Paged terrain patches are immutable provider data; replace the page revision to edit");
     brush.validate();TerrainEdit result;result.before=result.after=shared_from_this();
     if(brush.strength==0) return result;
     if(double(brush.center.x)+brush.radius<0||double(brush.center.y)+brush.radius<0||
        double(brush.center.x)-brush.radius>double(data_.samplesX-1)*data_.spacing.x||double(brush.center.y)-brush.radius>double(data_.samplesZ-1)*data_.spacing.y) return result;
+    if(brush.mode==TerrainBrushMode::Hole||brush.mode==TerrainBrushMode::Fill){
+        auto mask=data_.holes;if(mask.empty())mask.resize(std::size_t(data_.samplesX-1)*(data_.samplesZ-1));
+        for(std::uint32_t z=0;z<data_.samplesZ-1;++z)for(std::uint32_t x=0;x<data_.samplesX-1;++x){
+            const double dx=(x+.5)*data_.spacing.x-brush.center.x,dz=(z+.5)*data_.spacing.y-brush.center.y;
+            if(dx*dx+dz*dz<=double(brush.radius)*brush.radius)mask[std::size_t(z)*(data_.samplesX-1)+x]=brush.mode==TerrainBrushMode::Hole;
+        }
+        return withHoles(std::move(mask));
+    }
     auto d=data_;float minX=std::numeric_limits<float>::infinity(),minZ=minX,maxX=-minX,maxZ=-minX;
     auto falloff=[&](float x,float z) {const double dx=double(x)-brush.center.x,dz=double(z)-brush.center.y;
         const float t=float(std::max(0.0,1-std::sqrt(dx*dx+dz*dz)/brush.radius));return t*t*(3-2*t);};
@@ -351,9 +424,50 @@ std::unique_ptr<Actor> makeTerrainActor(std::string name,std::shared_ptr<const T
     require(asset!=nullptr,"Missing terrain asset");auto actor=std::make_unique<Actor>(std::move(name));
     for(std::uint32_t i=0;i<asset->chunkCount();++i) actor->addComponent<TerrainComponent>("Terrain chunk "+std::to_string(i),asset,i);
     if(collision) {
-        actor->addComponent<ColliderComponent>("Terrain collision",asset->collisionShape());
+        auto shape=asset->collisionShape();
+        auto& collider=actor->addComponent<ColliderComponent>("Terrain collision",shape?shape:CollisionShape::box({.01f,.01f,.01f}));
+        collider.setEnabled(bool(shape));
         RigidBodySettings settings;settings.motion=BodyMotion::Static;settings.friction=.8f;
         actor->addComponent<RigidBodyComponent>("Terrain body",settings);
+    }
+    return actor;
+}
+std::unique_ptr<Actor> makeMeshTerrainActor(std::string name,std::shared_ptr<const Mesh> mesh,bool collision,
+    std::shared_ptr<const PhysicalSurface> surface) {
+    require(bool(mesh),"Missing mesh terrain source");
+    if(surface)surface->validate();
+    auto validate=[](const Mesh& m) {
+        require(!m.skeleton&&m.skin.empty()&&m.morphTargets.empty(),"Mesh terrain requires static geometry");
+        require(m.vertices.size()>=3&&m.vertices.size()<=100000&&!m.indices.empty()&&m.indices.size()<=300000,"Mesh terrain section budget exceeded");
+        std::vector<Vec3> positions;positions.reserve(m.vertices.size());
+        for(const auto& v:m.vertices) {
+            require(finite(v.position)&&finite(v.normal)&&std::isfinite(v.uv.x)&&std::isfinite(v.uv.y),"Invalid mesh terrain vertex");
+            for(float f:v.tangent)require(std::isfinite(f),"Invalid mesh terrain tangent");
+            positions.push_back(v.position);
+        }
+        for(const auto& material:m.materials){require(bool(material),"Missing mesh terrain material");material->validate();}
+        std::uint64_t end=0;
+        for(const auto& part:m.parts){require(part.firstIndex==end&&part.indexCount%3==0&&
+            std::uint64_t(part.firstIndex)+part.indexCount<=m.indices.size()&&part.materialIndex<m.materials.size(),"Invalid mesh terrain part");end=std::uint64_t(part.firstIndex)+part.indexCount;}
+        require(m.parts.empty()||end==m.indices.size(),"Incomplete mesh terrain material ranges");
+        // Reuse the portable triangle contract, including finite/nondegenerate data
+        // and the existing 100k vertex/100k triangle per-section budget.
+        return CollisionShape::triangleMesh(positions,m.indices);
+    };
+    auto shape=validate(*mesh);require(mesh->lods.size()<=16,"Too many mesh terrain LODs");
+    float previous=std::numeric_limits<float>::infinity();
+    for(const auto& lod:mesh->lods) {
+        require(lod.mesh&&lod.mesh->lods.empty()&&std::isfinite(lod.maxPixels)&&lod.maxPixels>0&&lod.maxPixels<previous,"Invalid mesh terrain LOD");
+        previous=lod.maxPixels;validate(*lod.mesh);
+        require(lod.mesh->parts.size()==mesh->parts.size()&&lod.mesh->materials==mesh->materials,"Mesh terrain LOD material slots differ");
+        for(std::size_t i=0;i<mesh->parts.size();++i)require(mesh->parts[i].materialIndex==lod.mesh->parts[i].materialIndex,"Mesh terrain LOD part slots differ");
+    }
+    auto actor=std::make_unique<Actor>(std::move(name));
+    actor->addComponent<MeshComponent>("Mesh terrain surface",std::move(mesh)).color={1,1,1};
+    if(collision) {
+        actor->addComponent<ColliderComponent>("Mesh terrain collision",shape->withSurfaces(std::move(surface)));
+        RigidBodySettings body;body.motion=BodyMotion::Static;body.friction=.8f;
+        actor->addComponent<RigidBodyComponent>("Mesh terrain body",body);
     }
     return actor;
 }
@@ -364,13 +478,15 @@ void applyTerrainEdit(Actor& actor,const TerrainEdit& edit) {
     std::vector<std::shared_ptr<const Mesh>> meshes;meshes.reserve(chunks.size());
     std::vector<bool> seen(chunks.size());std::vector<TerrainOverrides> overrides;overrides.reserve(chunks.size());
     for(auto* chunk:chunks) {chunk->validate();require(chunk->asset()==edit.before,"Stale terrain edit");require(!seen[chunk->chunk()],"Duplicate terrain chunk");seen[chunk->chunk()]=true;
-        const bool dirty=edit.heightsChanged&&std::find(edit.affectedChunks.begin(),edit.affectedChunks.end(),chunk->chunk())!=edit.affectedChunks.end();
+        const bool dirty=(edit.heightsChanged||edit.holesChanged)&&std::find(edit.affectedChunks.begin(),edit.affectedChunks.end(),chunk->chunk())!=edit.affectedChunks.end();
         meshes.push_back(dirty ? edit.after->buildChunk(chunk->chunk()) : chunk->mesh);
         if(edit.paintChanged) overrides.push_back(paintedOverrides(*chunk,*edit.after));
     }
-    auto* collider=actor.getComponent<ColliderComponent>();auto shape=collider&&(edit.heightsChanged||edit.surfacesChanged) ? edit.after->collisionShape() : nullptr;
+    auto* collider=actor.getComponent<ColliderComponent>();const bool collisionDirty=collider&&(edit.heightsChanged||edit.surfacesChanged||edit.holesChanged);
+    auto shape=collisionDirty ? edit.after->collisionShape() : nullptr;
+    const bool wasEmpty=collider&&edit.holesChanged&&!edit.before->collisionShape();
     for(std::size_t i=0;i<chunks.size();++i) {if(edit.paintChanged) chunks[i]->materialOverrides.swap(overrides[i]);chunks[i]->publish(edit.after,std::move(meshes[i]),false);}
-    if(shape) collider->setShape(std::move(shape));
+    if(collisionDirty){if(shape){collider->setShape(std::move(shape));if(wasEmpty)collider->setEnabled(true);}else collider->setEnabled(false);}
 }
 void TerrainStreamSettings::validate() const {
     require(radiusChunks<=32&&maxResident>=1&&maxResident<=256&&buildsPerUpdate>=1&&buildsPerUpdate<=64,"Invalid terrain streaming budget");
@@ -414,10 +530,10 @@ void TerrainStream::update(Vec2 focus) {
         if(std::any_of(resident_.begin(),resident_.end(),[&](auto entry){return entry.first==chunk&&scene_.findActor(entry.second);})) continue;
         ++pending;if(prepared.size()>=settings_.buildsPerUpdate) continue;
         auto actor=std::make_unique<Actor>("Streamed terrain chunk "+std::to_string(chunk));actor->transform.position=settings_.origin;
-        auto& visual=actor->addComponent<TerrainComponent>("Terrain chunk",asset_,chunk);
+        actor->addComponent<TerrainComponent>("Terrain chunk",asset_,chunk);
         if(settings_.collision) {
-            std::vector<Vec3> points;points.reserve(visual.mesh->vertices.size());for(const auto& v:visual.mesh->vertices) points.push_back(v.position);
-            actor->addComponent<ColliderComponent>("Chunk collision",asset_->chunkCollision(chunk));
+            auto shape=asset_->chunkCollision(chunk);
+            auto& collider=actor->addComponent<ColliderComponent>("Chunk collision",shape?shape:CollisionShape::box({.01f,.01f,.01f}));collider.setEnabled(bool(shape));
             RigidBodySettings body;body.motion=BodyMotion::Static;body.friction=.8f;actor->addComponent<RigidBodyComponent>("Chunk body",body);
         }
         prepared.emplace_back(chunk,std::move(actor));
@@ -433,21 +549,21 @@ void TerrainStream::apply(const TerrainEdit& edit) {
     scene_.requireIdle();
     validateEdit(edit);
     require(edit.before==asset_&&edit.after&&!edit.after->eager(),"Stale or incompatible streaming edit");if(!edit.changed()) return;
-    struct Prepared {TerrainComponent* part;ColliderComponent* collider;std::shared_ptr<const Mesh> mesh;std::shared_ptr<const CollisionShape> shape;TerrainOverrides overrides;};
+    struct Prepared {TerrainComponent* part;ColliderComponent* collider;std::shared_ptr<const Mesh> mesh;std::shared_ptr<const CollisionShape> shape;TerrainOverrides overrides;bool collisionDirty=false,wasEmpty=false;};
     std::vector<Prepared> prepared;std::size_t rebuilt=0;
     for(auto [chunk,id]:resident_) if(auto* actor=scene_.findActor(id)) {
-        const bool dirty=edit.heightsChanged&&std::find(edit.affectedChunks.begin(),edit.affectedChunks.end(),chunk)!=edit.affectedChunks.end();
+        const bool dirty=(edit.heightsChanged||edit.holesChanged)&&std::find(edit.affectedChunks.begin(),edit.affectedChunks.end(),chunk)!=edit.affectedChunks.end();
         if(dirty) ++rebuilt;
         auto* part=actor->getComponent<TerrainComponent>();require(part&&part->asset()==edit.before,"Streamed terrain ownership changed");part->validate();
         auto* collider=actor->getComponent<ColliderComponent>();auto mesh=dirty ? edit.after->buildChunk(chunk) : part->mesh;
         std::shared_ptr<const CollisionShape> shape;
         if((dirty||edit.surfacesChanged)&&collider)shape=edit.after->chunkCollision(chunk);
-        prepared.push_back({part,collider,std::move(mesh),std::move(shape),edit.paintChanged ? paintedOverrides(*part,*edit.after) : TerrainOverrides{}});
+        prepared.push_back({part,collider,std::move(mesh),std::move(shape),edit.paintChanged ? paintedOverrides(*part,*edit.after) : TerrainOverrides{},bool(collider)&&(dirty||edit.surfacesChanged),bool(collider)&&edit.holesChanged&&!edit.before->chunkCollision(chunk)});
     }
-    for(auto& p:prepared) {if(edit.paintChanged) p.part->materialOverrides.swap(p.overrides);p.part->publish(edit.after,std::move(p.mesh),false);if(p.shape) p.collider->setShape(std::move(p.shape));}
+    for(auto& p:prepared) {if(edit.paintChanged) p.part->materialOverrides.swap(p.overrides);p.part->publish(edit.after,std::move(p.mesh),false);if(p.collisionDirty){if(p.shape){p.collider->setShape(std::move(p.shape));if(p.wasEmpty)p.collider->setEnabled(true);}else p.collider->setEnabled(false);}}
     asset_=edit.after;stats_.lastRebuilt=rebuilt;scene_.synchronize();measure();
 }
-std::optional<TerrainHit> terrainRaycast(const Node& root,Vec3 origin,Vec3 direction,float maximum) {
+std::optional<TerrainHit> terrainRaycast(const Node& root,Vec3 origin,Vec3 direction,float maximum,bool includeHoles) {
     require(finite(origin)&&finite(direction)&&std::isfinite(maximum)&&maximum>=0,"Invalid terrain ray");
     const float length=std::sqrt(dot(direction,direction));require(std::isfinite(length)&&length>1e-7f,"Invalid terrain ray direction");direction=direction*(1/length);
     std::optional<TerrainHit> hit;
@@ -456,12 +572,20 @@ std::optional<TerrainHit> terrainRaycast(const Node& root,Vec3 origin,Vec3 direc
         const auto bounds=t.mesh->localBounds();float start=0,end=hit ? hit->distance : maximum;
         if(!interval(bounds.minimum,bounds.maximum,o,v,start,end)) return;
         const auto& m=*t.mesh;
-        for(std::size_t i=0;i<m.indices.size();i+=3) {
-            const auto a=m.vertices[m.indices[i]].position,b=m.vertices[m.indices[i+1]].position,c=m.vertices[m.indices[i+2]].position;
-            const auto distance=triangle(o,v,a,b,c,hit ? hit->distance : maximum);if(!distance) continue;
+        auto test=[&](Vec3 a,Vec3 b,Vec3 c){
+            const auto distance=triangle(o,v,a,b,c,hit ? hit->distance : maximum);if(!distance)return;
             const auto normal=unit(transformDirection(transpose(inv),unit(cross(b-a,c-a))));
             hit=TerrainHit{origin+direction*(*distance),normal,*distance,t.id()};
-        }
+        };
+        if(includeHoles){
+            const auto& d=t.asset()->data();const auto& patch=t.asset()->patch();const auto columns=(d.samplesX-2)/d.chunkCells+1;
+            const auto x0=patch?patch->x:(t.chunk()%columns)*d.chunkCells,z0=patch?patch->z:(t.chunk()/columns)*d.chunkCells;
+            const auto nx=patch?patch->cellsX:std::min(d.chunkCells,d.samplesX-1-x0),nz=patch?patch->cellsZ:std::min(d.chunkCells,d.samplesZ-1-z0);
+            const auto ox=patch?patch->offsetX:0,oz=patch?patch->offsetZ:0;
+            for(std::uint32_t z=z0;z<z0+nz;++z)for(std::uint32_t x=x0;x<x0+nx;++x){
+                auto a=point(d,x,z,ox,oz),b=point(d,x+1,z,ox,oz),c=point(d,x,z+1,ox,oz),e=point(d,x+1,z+1,ox,oz);test(a,c,b);test(b,c,e);
+            }
+        }else for(std::size_t i=0;i<m.indices.size();i+=3)test(m.vertices[m.indices[i]].position,m.vertices[m.indices[i+1]].position,m.vertices[m.indices[i+2]].position);
     });return hit;
 }
 std::optional<TerrainHit> terrainGround(const Node& root,float x,float z) {

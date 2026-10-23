@@ -26,6 +26,8 @@ CameraComponent* viewCamera=nullptr;
 OrbitController* viewOrbit=nullptr; // Borrowed with the authoring camera; cleared before scene replacement.
 std::vector<const CameraComponent*> borrowedCameras;
 std::unique_ptr<EditorSession> session;
+EditorComponentSupport componentSupport{aiControllerCodecs(),{}};
+std::shared_ptr<const EditorPropertyRegistry> componentProperties=EditorPropertyRegistry::builtins();
 EditorPlaySession play;
 std::unique_ptr<OrbitController> playOrbit;
 std::unique_ptr<RegionExample> regionPreview;
@@ -65,8 +67,8 @@ EM_JS(void, editor_state,(const char* id,const char* name,const char* reason,con
 EM_JS(void, editor_selection,(),{window.__editorSelection=[];});
 EM_JS(void, editor_selected,(const char* id),{window.__editorSelection.push(UTF8ToString(id));});
 EM_JS(void, editor_play_state,(int playing),{window.EngineEditor?.playState(!!playing);});
-EM_JS(void, editor_terrain_state,(const char* id,const char* name,const char* reason,int samplesX,int samplesZ,int layers,float low,float high),{
-    window.EngineEditorTerrain?.inspect({id:UTF8ToString(id),name:UTF8ToString(name),reason:UTF8ToString(reason),samplesX,samplesZ,layers:!!layers,minimum:low,maximum:high});
+EM_JS(void, editor_terrain_state,(const char* id,const char* name,const char* reason,int samplesX,int samplesZ,int layers,float low,float high,int holes),{
+    window.EngineEditorTerrain?.inspect({id:UTF8ToString(id),name:UTF8ToString(name),reason:UTF8ToString(reason),samplesX,samplesZ,layers:!!layers,minimum:low,maximum:high,holes});
 });
 EM_JS(void, editor_terrain_cursor,(const float* points,int count,float x,float z,float height),{
     window.EngineEditorTerrain?.cursor(Array.from(new Float32Array(HEAPU8.buffer,points,count)),x,z,height);
@@ -102,7 +104,7 @@ std::string structureReason(const Node& node){
     for(auto* camera:borrowedCameras)for(const Node* p=camera;p;p=p->parent())if(p==&node)return "A render view borrows this camera subtree";
     return {};
 }
-EM_JS(void, editor_content_begin,(),{window.__editorContent={properties:[],components:[],materials:[],assets:[],readOnly:"",canDuplicate:false};});
+EM_JS(void, editor_content_begin,(),{window.__editorContent={properties:[],components:[],materials:[],assets:[],componentTypes:[],readOnly:"",canDuplicate:false};});
 EM_JS(void, editor_property,(const char* key,const char* label,const char* group,int type,double number,const char* stringValue,double minimum,double maximum,double step,int writable),{
     window.__editorContent.properties.push({key:UTF8ToString(key),label:UTF8ToString(label),group:UTF8ToString(group),type,
         value:type===2?UTF8ToString(stringValue):type===1?!!number:number,minimum,maximum,step,readOnly:!writable,choices:[]});
@@ -111,6 +113,7 @@ EM_JS(void, editor_choice,(const char* label),{window.__editorContent.properties
 EM_JS(void, editor_component,(const char* id,const char* name,const char* type),{
     window.__editorContent.components.push({id:UTF8ToString(id),name:UTF8ToString(name),type:UTF8ToString(type)});
 });
+EM_JS(void, editor_component_type,(const char* key,const char* label),{window.__editorContent.componentTypes.push({key:UTF8ToString(key),label:UTF8ToString(label)});});
 EM_JS(void, editor_asset,(int kind,int index,int retained,const char* name,int detail),{
     window.__editorContent.assets.push({kind,index,retained,name:UTF8ToString(name),detail});
 });
@@ -188,7 +191,7 @@ void reportFxAuthoring() {
     }
 }
 void reportContent() {
-    rebuildCatalog();editor_content_begin();const auto* node=session->selected();
+    rebuildCatalog();editor_content_begin();for(const auto& factory:session->componentFactories())editor_component_type(factory.key.c_str(),factory.label.c_str());const auto* node=session->selected();
     std::array<int,4> layerTextures{-1,-1,-1,-1};
     if(const auto* terrain=session->terrainActor()){
         const auto& layers=terrain->getComponents<TerrainComponent>().front()->asset()->data().material->layers;
@@ -244,7 +247,7 @@ void report(bool tree=false) {
     const auto terrainSource=terrain?terrain->getComponents<TerrainComponent>().front()->asset():nullptr;
     const auto terrainWhy=terrain?session->terrainReadOnlyReason(*terrain):"Select a terrain actor or chunk to sculpt";
     float low=0,high=0;if(terrainSource){const auto& heights=terrainSource->data().heights;const auto range=std::minmax_element(heights.begin(),heights.end());low=*range.first;high=*range.second;}
-    editor_terrain_state(terrain?terrain->savedId().c_str():"",terrain?terrain->name.c_str():"",terrainWhy.c_str(),terrainSource?int(terrainSource->data().samplesX):0,terrainSource?int(terrainSource->data().samplesZ):0,terrainSource&&terrainSource->data().material->layers.enabled,low,high);
+    editor_terrain_state(terrain?terrain->savedId().c_str():"",terrain?terrain->name.c_str():"",terrainWhy.c_str(),terrainSource?int(terrainSource->data().samplesX):0,terrainSource?int(terrainSource->data().samplesZ):0,terrainSource&&terrainSource->data().material->layers.enabled,low,high,terrainSource?int(std::count(terrainSource->data().holes.begin(),terrainSource->data().holes.end(),std::uint8_t(1))):0);
     if(tree) {
         editor_tree_begin();
         auto walk=[&](auto&& self,const Node& node,int depth)->void {
@@ -274,14 +277,16 @@ template<class F> int command(F action,bool tree=false) {
     } catch(const std::exception& error) { editor_message(error.what(),1);report();return 0; }
 }
 }
+void configureBrowserEditorComponents(EditorComponentSupport support,std::shared_ptr<const EditorPropertyRegistry> properties){if(session||!properties)throw std::logic_error("Configure editor components before binding");componentSupport=std::move(support);componentProperties=std::move(properties);}
+ComponentCodecs browserEditorCodecs(){return componentSupport.codecs;}
 bool browserEditorActive() { return enabled; }
 void setBrowserEditorEnabled(bool value) { unbindBrowserEditor();enabled=value; }
-void unbindBrowserEditor() { invalidateBrowserContentIteration();invalidateBrowserAnimationBinding();invalidateBrowserPrefabBinding();regionPreview.reset(); stopDrivingAudio();stopAudioPreview(); vehiclePlayCamera.reset();stopBrowserAiPreview();fxOrbit.reset();fxPreview.stop();fxSource=nullptr;fxTarget.clear();playOrbit.reset();play.stop();session.reset();borrowedCameras.clear();document=nullptr;viewCamera=nullptr;viewOrbit=nullptr;retainedAssets=nullptr;catalogMeshes.clear();catalogTextures.clear(); }
+void unbindBrowserEditor() { invalidateBrowserAuthoring();invalidateBrowserContentIteration();invalidateBrowserAnimationBinding();invalidateBrowserPrefabBinding();regionPreview.reset(); stopDrivingAudio();stopAudioPreview(); vehiclePlayCamera.reset();stopBrowserAiPreview();fxOrbit.reset();fxPreview.stop();fxSource=nullptr;fxTarget.clear();playOrbit.reset();play.stop();session.reset();borrowedCameras.clear();document=nullptr;viewCamera=nullptr;viewOrbit=nullptr;retainedAssets=nullptr;catalogMeshes.clear();catalogTextures.clear(); }
 void bindBrowserEditor(Scene& scene,CameraComponent& camera,OrbitController& orbit,AssetLibrary& assets,std::span<const RenderView> views) {
     unbindBrowserEditor();if(!enabled) return;
     if(vehicleMainCamera.ownsPose(camera)){const auto offset=camera.follow().offset;orbit.adoptCamera(std::max(.1f,std::sqrt(dot(offset,offset))));vehicleMainCamera.reset();}
     for(const auto& view:views)if(view.camera)borrowedCameras.push_back(view.camera);
-    document=&scene;viewCamera=&camera;viewOrbit=&orbit;retainedAssets=&assets;session=std::make_unique<EditorSession>(scene,128,&assets);editor_bound(scene.savedId().c_str());report(true);
+    document=&scene;viewCamera=&camera;viewOrbit=&orbit;retainedAssets=&assets;session=std::make_unique<EditorSession>(scene,128,&assets,componentProperties,componentSupport);editor_bound(scene.savedId().c_str());report(true);
 }
 namespace {
 void navigate(OrbitController& orbit,const InputSystem& input,float dt,float height) {
@@ -307,7 +312,7 @@ void startBrowserEditorPlay(std::span<const RenderView> views){
     if(fxPreview.active())throw std::logic_error("Close the FX preview before Play");
     if(!session||!enabled||play.playing())throw std::logic_error("Enter edit mode before Play");
     session->cancel();
-    play.start(*document,views,*retainedAssets,aiControllerCodecs());
+    play.start(*document,views,*retainedAssets,componentSupport.codecs);
     try {if(play.views().empty()||!play.views().front().camera)throw std::logic_error("Play requires a camera");playOrbit=std::make_unique<OrbitController>(*play.views().front().camera,true);playOrbit->restore(viewOrbit->snapshot());}
     catch(...){play.stop();throw;}
     vehiclePlayCamera.reset();editor_play_state(1);report();
@@ -402,7 +407,7 @@ EMSCRIPTEN_KEEPALIVE int engine_editor_terrain_hit(float x,float y,float radius)
     if(!enabled||!session||play.playing()||!std::isfinite(radius)||radius<.0001f||radius>1000000)return 0;
     try{auto* actor=session->terrainActor();if(!actor||!session->terrainReadOnlyReason(*actor).empty())return 0;
         const auto vp=viewport();if(x<vp.x||y<vp.y||x>vp.x+vp.width||y>vp.y+vp.height)return 0;
-        const auto ray=pointerRay(x,y);const auto hit=terrainRaycast(*actor,ray.origin,ray.direction,1000000);if(!hit)return 0;
+        const auto ray=pointerRay(x,y);const auto hit=terrainRaycast(*actor,ray.origin,ray.direction,1000000,true);if(!hit)return 0;
         const auto p=transformPoint(inverseAffine(actor->worldMatrix()),hit->position);const auto source=actor->getComponents<TerrainComponent>().front()->asset();
         std::vector<float> points;points.reserve(98);
         for(int i=0;i<=48;++i){const float angle=2*pi*i/48;const float px=p.x+std::cos(angle)*radius,pz=p.z+std::sin(angle)*radius;
@@ -417,7 +422,7 @@ EMSCRIPTEN_KEEPALIVE int engine_editor_terrain_layer_texture(int layer,int textu
     return command([&]{if(layer<0||layer>3||texture< -1||texture>=int(catalogTextures.size()))return false;return session->setTerrainLayerTexture(std::size_t(layer),texture<0?std::shared_ptr<const Texture>{}:catalogTextures[texture]);});
 }
 EMSCRIPTEN_KEEPALIVE int engine_editor_terrain_stamp(int mode,float x,float z,float radius,float strength,float height,int layer){
-    return command([&]{if(mode<0||mode>3||layer<0||layer>3)return false;TerrainBrush brush;brush.mode=TerrainBrushMode(mode);brush.center={x,z};brush.radius=radius;brush.strength=strength;brush.targetHeight=height;brush.layer=unsigned(layer);return session->stampTerrain(brush);});
+    return command([&]{if(mode<0||mode>5||layer<0||layer>3)return false;TerrainBrush brush;brush.mode=TerrainBrushMode(mode);brush.center={x,z};brush.radius=radius;brush.strength=strength;brush.targetHeight=height;brush.layer=unsigned(layer);return session->stampTerrain(brush);});
 }
 EMSCRIPTEN_KEEPALIVE int engine_editor_terrain_end(int cancel){return command([&]{return cancel?session->cancel():session->commitTerrainStroke();});}
 EMSCRIPTEN_KEEPALIVE int engine_editor_focus(const char* id) {

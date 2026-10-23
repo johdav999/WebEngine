@@ -37,7 +37,8 @@ bool EditorSession::beginTerrainStroke() {
     history_.reserve(history_.size()+1);
     Command command;command.change={actor->savedId(),actor->parent()->savedId(),actor->parent()->worldMatrix(),actor->transform,actor->transform};
     const auto source=actor->getComponents<TerrainComponent>().front()->asset();const auto hash=fingerprint(*actor);
-    command.edit=TerrainChange{{source,source,{},false,false},selectionIds(),hash,hash};terrainTransaction_=std::move(command);return true;
+    TerrainChange change{{source,source,{},false,false},selectionIds(),hash,hash};change.captureCollision(*actor,false);change.captureCollision(*actor,true);
+    command.edit=std::move(change);terrainTransaction_=std::move(command);return true;
 }
 bool EditorSession::setTerrainLayerTexture(std::size_t layer,std::shared_ptr<const Texture> texture) {
     if(transforming()||layer>=4)return false;
@@ -48,14 +49,14 @@ bool EditorSession::setTerrainLayerTexture(std::size_t layer,std::shared_ptr<con
     if(!edit.changed())return true;
     history_.reserve(history_.size()+1);
     Command command;command.change={actor->savedId(),actor->parent()->savedId(),actor->parent()->worldMatrix(),actor->transform,actor->transform};
-    TerrainChange change{std::move(edit),selectionIds(),fingerprint(*actor),0};
-    publishTerrain(*actor,change.edit);change.afterFingerprint=fingerprint(*actor);
+    TerrainChange change{std::move(edit),selectionIds(),fingerprint(*actor),0};change.captureCollision(*actor,false);
+    publishTerrain(*actor,change.edit);change.captureCollision(*actor,true);change.afterFingerprint=fingerprint(*actor);
     command.edit=std::move(change);push(std::move(command));return true;
 }
 bool EditorSession::setTerrainPhysicalSurfaces(std::shared_ptr<const PhysicalSurface> surface,std::vector<std::shared_ptr<const PhysicalSurface>> cells){
     if(transforming())return false;auto* actor=terrainActor();if(!actor||!terrainReadOnlyReason(*actor).empty())return false;
     const auto source=actor->getComponents<TerrainComponent>().front()->asset();auto edit=source->withPhysicalSurfaces(std::move(surface),std::move(cells));if(!edit.changed())return true;
-    history_.reserve(history_.size()+1);Command command;command.change={actor->savedId(),actor->parent()->savedId(),actor->parent()->worldMatrix(),actor->transform,actor->transform};TerrainChange change{std::move(edit),selectionIds(),fingerprint(*actor),0};publishTerrain(*actor,change.edit);change.afterFingerprint=fingerprint(*actor);command.edit=std::move(change);push(std::move(command));return true;
+    history_.reserve(history_.size()+1);Command command;command.change={actor->savedId(),actor->parent()->savedId(),actor->parent()->worldMatrix(),actor->transform,actor->transform};TerrainChange change{std::move(edit),selectionIds(),fingerprint(*actor),0};change.captureCollision(*actor,false);publishTerrain(*actor,change.edit);change.captureCollision(*actor,true);change.afterFingerprint=fingerprint(*actor);command.edit=std::move(change);push(std::move(command));return true;
 }
 void EditorSession::publishTerrain(Actor& actor,const TerrainEdit& edit) {
     applyTerrainEdit(actor,edit);
@@ -68,15 +69,20 @@ bool EditorSession::stampTerrain(const TerrainBrush& brush) {
     if(!actor||!terrainReadOnlyReason(*actor).empty()||fingerprint(*actor)!=change.afterFingerprint)return false;
     auto stamp=change.edit.after->edit(brush);if(!stamp.changed())return true;
     auto combined=change.edit;combined.after=stamp.after;
-    combined.heightsChanged|=stamp.heightsChanged;combined.paintChanged|=stamp.paintChanged;
+    combined.heightsChanged|=stamp.heightsChanged;combined.paintChanged|=stamp.paintChanged;combined.holesChanged|=stamp.holesChanged;
     for(auto i:stamp.affectedChunks)if(std::find(combined.affectedChunks.begin(),combined.affectedChunks.end(),i)==combined.affectedChunks.end())combined.affectedChunks.push_back(i);
-    publishTerrain(*actor,stamp);change.edit=std::move(combined);change.afterFingerprint=fingerprint(*actor);return true;
+    std::sort(combined.affectedChunks.begin(),combined.affectedChunks.end());
+    publishTerrain(*actor,stamp);change.edit=std::move(combined);change.captureCollision(*actor,true);change.afterFingerprint=fingerprint(*actor);return true;
 }
 bool EditorSession::replayTerrain(Command& command,bool redo) {
     auto& change=std::get<TerrainChange>(command.edit);auto* actor=dynamic_cast<Actor*>(resolve(command.change,redo?command.change.before:command.change.after));
     if(!actor||!terrainReadOnlyReason(*actor).empty()||fingerprint(*actor)!=(redo?change.beforeFingerprint:change.afterFingerprint))return false;
     auto edit=change.edit;if(!redo)std::swap(edit.before,edit.after);
     publishTerrain(*actor,edit);
+    if(auto* collider=actor->getComponent<ColliderComponent>()){
+        const auto shape=redo?change.afterCollision:change.beforeCollision;
+        if(shape){collider->setShape(shape);collider->setEnabled(redo?change.afterCollisionEnabled:change.beforeCollisionEnabled);scene_.synchronize();}
+    }
     // Collision reconciliation may rebuild runtime resources; store the accepted fingerprint.
     if(redo)change.afterFingerprint=fingerprint(*actor);else change.beforeFingerprint=fingerprint(*actor);
     restoreSelection(change.selection);return true;

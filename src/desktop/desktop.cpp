@@ -1,10 +1,11 @@
 #include "engine/desktop.hpp"
-#include "sdl_gpu_host.hpp"
+#include "desktop_graphics.hpp"
 #include "sdl_text_input.hpp"
 #include "desktop_files.hpp"
 #include "windows_lifecycle.hpp"
 #include "sdl_display.hpp"
-#include "webgpu_renderer.hpp"
+#include "sdl_pointer_input.hpp"
+#include "windows_accessibility.hpp"
 #define SDL_MAIN_HANDLED
 #include <SDL3/SDL_main.h>
 #include <SDL3/SDL.h>
@@ -59,44 +60,49 @@ void validate(const DesktopSettings& settings) {
     if(settings.title.empty()||settings.title.find('\0')!=std::string::npos||!settings.width||!settings.height||settings.width>16384||settings.height>16384)
         throw std::invalid_argument("Invalid desktop window settings");
     settings.quality.validate();
+    if(settings.backend!=DesktopBackend::Dawn&&settings.backend!=DesktopBackend::Direct3D12&&settings.backend!=DesktopBackend::DawnVulkan&&settings.backend!=DesktopBackend::Automatic&&settings.backend!=DesktopBackend::DawnD3D11)throw std::invalid_argument("Unknown desktop graphics backend");
 }
 }
 struct DesktopHost::Impl {
     SdlRuntime runtime;
     Window window{nullptr,SDL_DestroyWindow};
-    std::unique_ptr<SdlGpuHost> gpu;
+    std::unique_ptr<DesktopGraphics> graphics;
+    DesktopBackend backend;
     Application app;
     GuiSystem gui;
     std::unique_ptr<SdlTextInput> text;
     std::unique_ptr<WindowsLifecycle> lifecycle;
+    std::unique_ptr<WindowsAccessibility> accessibility;
+    std::unique_ptr<SdlPointerInput> contacts;
     InputBindings bindings;
-    std::unique_ptr<WebGpuRenderer> renderer;
     std::map<std::uint64_t,std::pair<SceneId,std::vector<DesktopView>>> sceneViews;
     std::function<bool(const DesktopEvent&)> handler;
     Gamepad pad{nullptr,SDL_CloseGamepad};
     RenderQuality quality;
-    RenderCapabilities emptyCapabilities;
     std::thread::id owner=std::this_thread::get_id();
     bool closing=false,focused=true,minimized=false,enabled=true,shadows=true,padArmed=false;
     bool stepping=false,advancing=false,cancelling=false,pointerOwned=false;
-    bool allowGraphicsFaultInjection=false;
+    bool allowGraphicsFaultInjection=false,graphicsBlocked=false;
     std::uint64_t textFocus=0;
     ApplicationState lastState=ApplicationState::Created;
 
-    explicit Impl(const DesktopSettings& settings):app(settings.application),
+    explicit Impl(const DesktopSettings& settings):backend(settings.backend),app(settings.application),
         bindings([this](std::span<const InputPacket> packets){return app.submitInput(packets);}),quality(settings.quality) {
         allowGraphicsFaultInjection=settings.allowGraphicsFaultInjection;
         window.reset(SDL_CreateWindow(settings.title.c_str(),int(settings.width),int(settings.height),
             SDL_WINDOW_RESIZABLE|SDL_WINDOW_HIGH_PIXEL_DENSITY|(settings.hidden?SDL_WINDOW_HIDDEN:0)));
-        check(bool(window));gpu=std::make_unique<SdlGpuHost>(*window);text=std::make_unique<SdlTextInput>(*window,gui);
+        check(bool(window));graphics=makeDesktopGraphics(backend,*window,gui,quality);text=std::make_unique<SdlTextInput>(*window,gui);
         lifecycle=std::make_unique<WindowsLifecycle>(static_cast<HWND>(SDL_GetPointerProperty(SDL_GetWindowProperties(window.get()),SDL_PROP_WINDOW_WIN32_HWND_POINTER,nullptr)));
+        accessibility=std::make_unique<WindowsAccessibility>(static_cast<HWND>(SDL_GetPointerProperty(SDL_GetWindowProperties(window.get()),SDL_PROP_WINDOW_WIN32_HWND_POINTER,nullptr)));
+        contacts=std::make_unique<SdlPointerInput>(gui,[this](std::span<const InputPacket> packets){return app.submitInput(packets);});
         app.setSceneBinding([this](Scene* scene){bindScene(scene);});openPad();
     }
     ~Impl() {
+        accessibility.reset(); // Disconnect COM snapshots before releasing GUI/window.
         lifecycle.reset(); // Unhook before window destruction and user-owned state release.
         handler={}; // Never call application captures during teardown.
         bindings.cancel(); // GUI destruction must not invoke application widget hooks.
-        renderer.reset();app.shutdown();pad.reset();
+        if(graphics)graphics->bind(nullptr,{});app.shutdown();graphics.reset();pad.reset();
     }
     void requireOwner() const { if(owner!=std::this_thread::get_id())throw std::logic_error("DesktopHost requires its owner thread"); }
     bool emit(const DesktopEvent& event) { if(!handler)return false;auto callback=handler;return callback(event); }
@@ -106,8 +112,11 @@ struct DesktopHost::Impl {
         const auto* input=gui.focusedInput();const auto id=input?input->id():0;
         if(id!=textFocus){textFocus=id;cancelBindings();}
     }
-    void layout() { const auto size=gpu->logicalSize();gui.layout({float(size.width),float(size.height)});syncText(); }
+    void layout() { const auto size=desktopLogicalSize(*window);gui.layout({float(size.width),float(size.height)});syncText();
+        accessibility->publish(gui,desktopCoordinateScale(*window),focused&&!minimized&&!app.suspended()&&app.state()!=ApplicationState::Stopped); }
     void cancelBindings() {
+        if(contacts)contacts->cancel();
+        if(accessibility)accessibility->cancel();
         bindings.cancel();padArmed=false;
         InputPacket packet;packet.type=int(InputEventType::CancelAll);app.submitInput({&packet,1});
         if(!cancelling) { cancelling=true;try { emit({DesktopEventType::InputCancelled}); }catch(...) { cancelling=false;throw; }cancelling=false; }
@@ -127,15 +136,8 @@ struct DesktopHost::Impl {
         static const std::vector<DesktopView> empty;return empty;
     }
     void bindScene(Scene* scene) {
-        if(!scene) {gpu->cancelCapture();renderer.reset();return;}
-        const auto views=resolve(*scene,viewsFor(*scene),true);
-        cancelBindings();
-        if(renderer) renderer->setScene(*scene,views);
-        else {
-            auto candidate=std::make_unique<WebGpuRenderer>(*scene,*gpu);candidate->setViews(views);
-            candidate->setFallbackAllowed(false);candidate->setGui(&gui);candidate->setQuality(quality);candidate->setShadowsEnabled(shadows);
-            renderer=std::move(candidate);renderer->initialize();
-        }
+        if(!scene){graphics->bind(nullptr,{});return;}
+        const auto views=resolve(*scene,viewsFor(*scene),true);cancelBindings();graphics->bind(scene,views);
     }
     void openPad() {
         if(pad)return;int count=0;auto* devices=SDL_GetGamepads(&count);
@@ -150,6 +152,8 @@ struct DesktopHost::Impl {
         else if(!repeat&&!consumed&&gameplay()&&value!=DesktopControl::Unknown)bindings.control(controlId(value),1);
     }
     void pointer(const SDL_Event& event) {
+        const auto which=event.type==SDL_EVENT_MOUSE_MOTION?event.motion.which:event.button.which;
+        if(which==SDL_TOUCH_MOUSEID||which==SDL_PEN_MOUSEID)return;
         layout();
         const bool move=event.type==SDL_EVENT_MOUSE_MOTION;
         const float units=desktopCoordinateScale(*window);
@@ -158,23 +162,29 @@ struct DesktopHost::Impl {
         const bool primary=move||event.button.button==SDL_BUTTON_LEFT;
         const bool owned=pointerOwned;
         if(primary&&action==GuiPointer::Down&&gui.focusedInput())text->cancel();
-        const bool consumed=primary&&gui.pointer(action,position,(SDL_GetModState()&SDL_KMOD_SHIFT)!=0);
-        if(primary&&action==GuiPointer::Down&&consumed) { pointerOwned=true;cancelBindings(); }
+        const bool contactOwner=contacts->ownsGui();
+        const bool consumed=primary&&(contactOwner||gui.pointer(action,position,(SDL_GetModState()&SDL_KMOD_SHIFT)!=0));
+        if(primary&&action==GuiPointer::Down&&consumed&&!contactOwner) { pointerOwned=true;cancelBindings(); }
         if(primary&&action==GuiPointer::Up)pointerOwned=false;
-        if(!move) {
+        if(!move&&(!contactOwner||!event.button.down)) {
             const auto button=event.button.button==SDL_BUTTON_LEFT?DesktopControl::MouseLeft:event.button.button==SDL_BUTTON_RIGHT?DesktopControl::MouseRight:DesktopControl::MouseMiddle;
             control(button,event.button.down,false,consumed||owned);
         }
         if(gameplay()&&!consumed&&!owned) {
-            const auto logical=gpu->logicalSize();int width=0,height=0;gpu->drawableSize(width,height);
+            const auto logical=desktopLogicalSize(*window);int width=0,height=0;const auto d=graphics->diagnostics();width=int(d.width);height=int(d.height);
             InputPacket packet;packet.type=int(move?InputEventType::PointerMove:event.button.down?InputEventType::PointerDown:InputEventType::PointerUp);
-            packet.id=1;packet.x=position.x;packet.y=position.y;packet.pixelX=position.x*width/std::max(1.,logical.width);packet.pixelY=position.y*height/std::max(1.,logical.height);
-            packet.buttons=move?event.motion.state:SDL_GetMouseState(nullptr,nullptr);packet.timestamp=gpu->nowMs()/1000;
+            packet.id=1;packet.x=position.x;packet.y=position.y;packet.pixelX=position.x*width/std::max(1.f,logical.width);packet.pixelY=position.y*height/std::max(1.f,logical.height);
+            const auto buttons=move?event.motion.state:SDL_GetMouseState(nullptr,nullptr);
+            packet.buttons=((buttons&SDL_BUTTON_LMASK)?1u:0u)|((buttons&SDL_BUTTON_RMASK)?2u:0u)|((buttons&SDL_BUTTON_MMASK)?4u:0u)|
+                ((buttons&SDL_BUTTON_X1MASK)?8u:0u)|((buttons&SDL_BUTTON_X2MASK)?16u:0u);packet.timestamp=double(SDL_GetTicksNS())/1e9;
             app.submitInput({&packet,1});
         }
     }
     void poll() {
         syncText();
+        if(focused&&!minimized&&!app.suspended()) {
+            if(accessibility->dispatch(gui)){cancelBindings();syncText();}
+        } else accessibility->cancel();
         SDL_Event event;
         const auto id=SDL_GetWindowID(window.get());
         while(SDL_PollEvent(&event)) {
@@ -203,6 +213,10 @@ struct DesktopHost::Impl {
                 control(keyControl(event.key.scancode),event.key.down,event.key.repeat,consumed);
             } else if((event.type==SDL_EVENT_TEXT_INPUT||event.type==SDL_EVENT_TEXT_EDITING)&&focused&&!minimized) {
                 text->event(event);
+            } else if(((event.type>=SDL_EVENT_FINGER_DOWN&&event.type<=SDL_EVENT_FINGER_CANCELED)||
+                (event.type>=SDL_EVENT_PEN_PROXIMITY_IN&&event.type<=SDL_EVENT_PEN_AXIS))&&focused&&!minimized) {
+                layout();const auto logical=desktopLogicalSize(*window);const auto d=graphics->diagnostics();
+                contacts->event(event,*window,{float(logical.width),float(logical.height)},{float(d.width),float(d.height)},gameplay(),pointerOwned);
             } else if((event.type==SDL_EVENT_MOUSE_MOTION||event.type==SDL_EVENT_MOUSE_BUTTON_DOWN||event.type==SDL_EVENT_MOUSE_BUTTON_UP)&&focused&&!minimized) {
                 if((event.type==SDL_EVENT_MOUSE_MOTION?event.motion.windowID:event.button.windowID)==id)pointer(event);
             } else if(event.type==SDL_EVENT_MOUSE_WHEEL&&event.wheel.windowID==id&&focused&&!minimized) {
@@ -254,7 +268,7 @@ void DesktopHost::setViews(SceneId id,std::span<const DesktopView> source) {
     auto* scene=p.app.findScene(id);if(!scene)throw std::invalid_argument("Unknown desktop scene");
     const std::vector<DesktopView> candidate(source.begin(),source.end());const auto views=p.resolve(*scene,candidate,true);
     auto replacement=p.sceneViews;replacement.insert_or_assign(id.value,std::make_pair(id,candidate));
-    if(scene==p.app.activeScene()&&p.renderer)p.renderer->setViews(views);
+    if(scene==p.app.activeScene())p.graphics->setViews(views);
     p.sceneViews.swap(replacement);
 }
 bool DesktopHost::step(const ApplicationFrameCallbacks& callbacks,std::optional<double> timestamp) {
@@ -267,14 +281,17 @@ bool DesktopHost::step(const ApplicationFrameCallbacks& callbacks,std::optional<
     p.poll();
     if(p.app.state()==ApplicationState::Stopped)return false;
     if(p.closing){p.cancel();p.app.shutdown();return false;}
-    if(p.renderer)p.renderer->serviceRecovery();
-    if(!p.gpu->error.empty())throw std::runtime_error(p.gpu->error);
-    if(p.renderer&&!p.renderer->ready()) {SDL_Delay(1);return true;}
+    const auto previousBackend=p.graphics->backend();p.graphics->service();
+    if(previousBackend!=p.graphics->backend()){p.graphicsBlocked=true;p.cancelBindings();if(p.closing){p.app.shutdown();return false;}}
+    const auto graphicsState=p.graphics->diagnostics();
+    if(!graphicsState.error.empty())throw std::runtime_error(graphicsState.error);
+    if(p.app.activeScene()&&!graphicsState.ready) {if(!p.graphicsBlocked)p.cancel();p.graphicsBlocked=true;if(p.closing){p.app.shutdown();return false;}SDL_Delay(1);return true;}
+    if(p.graphicsBlocked){p.app.resetClocks();p.graphicsBlocked=false;}
     auto frameCallbacks=callbacks;
     frameCallbacks.present=[&p,present=callbacks.present](Scene& scene,const ApplicationFrame& frame) {
         if(present)present(scene,frame);
         // Resolve handles again after user callbacks/ticks may have destroyed cameras.
-        if(p.renderer) {p.renderer->setViews(p.resolve(scene,p.viewsFor(scene),false));p.layout();p.renderer->setWaterTime(frame.presentation.seconds);p.renderer->render(0,frame.interval*1000);}
+        p.graphics->setViews(p.resolve(scene,p.viewsFor(scene),false));p.layout();p.graphics->setWaterTime(frame.simulation.seconds);p.graphics->render(frame.presentation.seconds,frame.interval*1000);
     };
     {Guard applicationGuard(p.advancing);p.app.advance(timestamp.value_or(nowSeconds()),frameCallbacks);}
     if(p.app.suspended())SDL_Delay(5);
@@ -290,29 +307,34 @@ bool DesktopHost::inputEnabled() const{return impl_->enabled;}
 void DesktopHost::requestClose(){impl_->requireOwner();impl_->closing=true;}
 bool DesktopHost::closeRequested() const{return impl_->closing;}
 void DesktopHost::setFullscreen(bool enabled){impl_->requireOwner();impl_->cancel();check(SDL_SetWindowFullscreen(impl_->window.get(),enabled));}
+DesktopBackend DesktopHost::backend() const{return impl_->graphics->backend();}
 bool DesktopHost::fullscreen() const{return (SDL_GetWindowFlags(impl_->window.get())&SDL_WINDOW_FULLSCREEN)!=0;}
 void DesktopHost::setWindowSize(std::uint32_t w,std::uint32_t h){impl_->requireOwner();if(!w||!h||w>16384||h>16384)throw std::invalid_argument("Invalid desktop window size");check(SDL_SetWindowSize(impl_->window.get(),int(w),int(h)));}
-DesktopSize DesktopHost::size() const{const auto s=impl_->gpu->logicalSize();return {float(s.width),float(s.height),float(s.pixelRatio)};}
-double DesktopHost::nowSeconds() const{return impl_->gpu->nowMs()/1000;}
-void DesktopHost::setQuality(const RenderQuality& quality){impl_->requireOwner();quality.validate();if(impl_->renderer)impl_->renderer->setQuality(quality);impl_->quality=quality;}
+DesktopSize DesktopHost::size() const{const auto s=desktopLogicalSize(*impl_->window);return {float(s.width),float(s.height),float(s.pixelRatio)};}
+double DesktopHost::nowSeconds() const{return double(SDL_GetTicksNS())/1e9;}
+void DesktopHost::setQuality(const RenderQuality& quality){impl_->requireOwner();quality.validate();impl_->graphics->setQuality(quality);impl_->quality=quality;}
 const RenderQuality& DesktopHost::quality() const{return impl_->quality;}
-const RenderCapabilities& DesktopHost::capabilities() const{return impl_->renderer?impl_->renderer->capabilities():impl_->emptyCapabilities;}
-void DesktopHost::setShadowsEnabled(bool enabled){impl_->requireOwner();if(impl_->renderer)impl_->renderer->setShadowsEnabled(enabled);impl_->shadows=enabled;}
+const RenderCapabilities& DesktopHost::capabilities() const{return impl_->graphics->capabilities();}
+void DesktopHost::setShadowsEnabled(bool enabled){impl_->requireOwner();impl_->graphics->setShadows(enabled);impl_->shadows=enabled;}
 bool DesktopHost::shadowsEnabled() const{return impl_->shadows;}
-DesktopDiagnostics DesktopHost::diagnostics() const {
-    const auto& p=*impl_;int w=0,h=0;p.gpu->drawableSize(w,h);
-    return {p.renderer&&p.renderer->ready(),p.gpu->presentedFrames,std::uint32_t(w),std::uint32_t(h),p.renderer?p.renderer->effectiveMsaaSamples():1,p.gpu->error,p.gpu->stateJson,p.gpu->performanceJson};
-}
-void DesktopHost::retryGraphics(){impl_->requireOwner();impl_->gpu->error.clear();if(impl_->renderer)impl_->renderer->retryRecovery();}
+void DesktopHost::setWaterInteractions(std::span<const WaterInteraction> values){impl_->requireOwner();WaterInteractions candidate;candidate.set(values);impl_->graphics->setWaterInteractions(candidate);}
+DesktopDiagnostics DesktopHost::diagnostics() const { auto d=impl_->graphics->diagnostics();d.requestedBackend=impl_->backend;d.backend=impl_->graphics->backend();return d; }
+std::string DesktopHost::gpuProfileTrace() const {impl_->requireOwner();if(impl_->stepping)throw std::logic_error("GPU trace export requires an idle host");return impl_->graphics->gpuProfileTrace();}
+void DesktopHost::retryGraphics(){impl_->requireOwner();const bool unavailable=!impl_->graphics->diagnostics().ready;impl_->graphics->retry();if(unavailable)impl_->graphicsBlocked=true;}
 bool DesktopHost::simulateGraphicsLoss(){
     auto& p=*impl_;p.requireOwner();
     if(!p.allowGraphicsFaultInjection||p.stepping)throw std::logic_error("Graphics fault injection requires explicit opt-in and an idle host");
-    if(!p.renderer||!p.renderer->ready())return false;
-    p.cancel();if(!p.renderer||p.closing)return false;p.renderer->simulateDeviceLoss();return true;
+    if(!p.graphics->diagnostics().ready)return false;
+    p.cancel();if(p.closing)return false;return p.graphics->simulateLoss();
 }
-void DesktopHost::captureFrame(const std::filesystem::path& path){impl_->requireOwner();if(path.empty())throw std::invalid_argument("Empty capture path");impl_->gpu->capture(path);}
-bool DesktopHost::capturePending() const{return impl_->gpu->capturePending();}
-std::string DesktopHost::captureError() const{return impl_->gpu->captureError();}
+bool DesktopHost::simulateGraphicsFailure(){
+    auto& p=*impl_;p.requireOwner();
+    if(!p.allowGraphicsFaultInjection||p.stepping)throw std::logic_error("Graphics fault injection requires explicit opt-in and an idle host");
+    p.cancel();if(p.closing)return false;return p.graphics->simulateFailure();
+}
+void DesktopHost::captureFrame(const std::filesystem::path& path){impl_->requireOwner();if(path.empty())throw std::invalid_argument("Empty capture path");impl_->graphics->capture(path);}
+bool DesktopHost::capturePending() const{return impl_->graphics->capturePending();}
+std::string DesktopHost::captureError() const{return impl_->graphics->captureError();}
 std::filesystem::path DesktopHost::baseDirectory() const{return utf8Path(SDL_GetBasePath());}
 DesktopFileDialogResult DesktopHost::showFileDialog(const DesktopFileDialogOptions& options) {
     auto& p=*impl_;p.requireOwner();if(p.advancing||p.app.state()==ApplicationState::Stopped)throw std::logic_error("File dialogs require a live idle Application boundary");

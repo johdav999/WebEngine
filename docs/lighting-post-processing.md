@@ -5,6 +5,12 @@ cascades, and optional HDR bloom/color grading. Portable settings contain no GPU
 or browser types. These are presentation mechanisms; light switching, camera
 ownership and visual defaults remain application policy.
 
+Native Dawn and direct D3D12 (milestone 3) support the same post controls.
+Direct D3D12 queries FP16 render/blend/sample/load and HDR MSAA resolve support;
+`hdrPostProcessing`, `effectivePost` and `effectiveMsaaSamples` report availability
+and actual presentation. Post stays off by default and GUI draws after composition.
+See [native backend scope](windows-d3d12.md) for static-content limitations.
+
 ```cpp
 auto& lamp = actor.addComponent<engine::LightComponent>("Headlight", engine::LightType::Spot);
 lamp.direction = {0, -.2f, -1};

@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><title>WebEngine | Planet flight</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#02050b;color:#edf5ef;font:15px system-ui}canvas{display:block;width:100vw;height:100vh;outline:none}header{position:absolute;left:28px;top:24px;pointer-events:none;max-width:620px}small{letter-spacing:.18em;color:#a7c3bd}h1{font-size:30px;font-weight:500;margin:8px 0}p{color:#b8c9c9;line-height:1.6;margin:6px 0}nav{display:flex;gap:8px;pointer-events:auto;margin:18px 0}button{background:#12262ed9;color:#f0faf5;border:1px solid #45616c;border-radius:5px;padding:10px 16px;cursor:pointer}button:hover{background:#25434c}#status{font-variant-numeric:tabular-nums;color:#d5e6d8}footer{position:absolute;bottom:22px;left:28px;color:#a5bcbd;pointer-events:none;font-size:13px}#crosshair{position:absolute;left:50%;top:50%;width:12px;height:12px;border:1px solid #d6e8d480;border-radius:50%;pointer-events:none}
+</style></head><body>
+<canvas id="viewport" width="1280" height="900" tabindex="0" aria-label="Planet flight. Right drag to look; WASD to fly; Q and E descend and ascend."></canvas>
+<header><small>WEBENGINE · PROCEDURAL EXPLORATION</small><h1>Land and explore a planet</h1><p>Fly from orbit, touch down, and walk across one continuous world.</p>
+<nav><button id="orbit" onclick="planetCommand(0)">Orbit bookmark</button><button id="descend" onclick="planetCommand(1)">Land on surface</button><button id="ascend" onclick="planetCommand(2)">Take off to space</button><button id="stop" onclick="planetCommand(3)">Stop tour</button></nav>
+<nav style="margin-top:0"><button id="jump" onclick="planetCommand(6)">Jump</button><button id="gravity" onclick="planetCommand(7)">Toggle thrusters · G</button><button id="hover" onclick="planetCommand(9)">20 m hover bookmark</button><button id="detail" onclick="planetCommand(8)">Terrain detail</button></nav>
+<div id="status" role="status">Preparing planet…</div></header><div id="crosshair"></div>
+<footer>Click the view · WASD fly / walk · Q / E down / take off · Space jump · G toggle thrusters · Shift boost · Right-drag look · Esc release<br>Stage 2 · radial gravity · stable terrain collision · land, walk, jump and take off · orange cargo uses rigid-body gravity</footer>
+<script>
+const canvas=document.getElementById('viewport');let pointer=null;
+window.engineStatus=(text,error)=>{if(error){window.planetHostError=text;document.getElementById('status').textContent=text;}};
+window.engineStats=()=>{};window.enginePerformance=()=>{};
+var Module={canvas,onAbort:error=>{window.planetError=String(error);document.getElementById('status').textContent='Error: '+error;}};
+const send=(kind,code=0,x=0,y=0)=>Module._planet_input?.(kind,code,x,y);
+function cancel(){send(4);const id=pointer;pointer=null;if(id!==null&&canvas.hasPointerCapture(id))canvas.releasePointerCapture(id);}
+function planetCommand(code){cancel();Module._planet_command?.(code);canvas.focus();}
+const keys={KeyW:1,KeyS:2,KeyA:3,KeyD:4,KeyQ:5,KeyE:6,ShiftLeft:7,ShiftRight:8,Space:10,KeyG:11};
+canvas.addEventListener('contextmenu',e=>e.preventDefault());
+canvas.addEventListener('pointerdown',e=>{canvas.focus();if(e.button!==2)return;e.preventDefault();pointer=e.pointerId;canvas.setPointerCapture(pointer);send(0,9,1);send(1,0,e.clientX,e.clientY);});
+canvas.addEventListener('pointermove',e=>{if(e.pointerId===pointer)send(2,0,e.clientX,e.clientY);});
+canvas.addEventListener('pointerup',e=>{if(e.pointerId===pointer){send(3,0,e.clientX,e.clientY);cancel();}});
+canvas.addEventListener('lostpointercapture',()=>{if(pointer!==null)cancel();});canvas.addEventListener('blur',cancel);window.addEventListener('blur',cancel);
+document.addEventListener('visibilitychange',()=>{if(document.hidden)cancel();});
+window.addEventListener('keydown',e=>{if(e.key==='Escape'){cancel();Module._planet_command?.(3);canvas.blur();return;}const code=keys[e.code];if(!code||document.activeElement!==canvas||e.ctrlKey||e.metaKey||e.altKey)return;e.preventDefault();if(!e.repeat)send(0,code,1);});
+window.addEventListener('keyup',e=>{const code=keys[e.code];if(code)send(0,code,0);});
+</script><script src="planet_demo.js"></script></body></html>

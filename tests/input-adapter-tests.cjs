@@ -50,3 +50,14 @@ test('accessible virtual button activation uses its configured axis value',()=>{
   const event=new Event('click');Object.defineProperty(event,'detail',{value:0});element.dispatchEvent(event);
   assert.equal(input.queue.length,2);assert.equal(input.queue[0][3],-1);assert.equal(input.queue[1][3],0);input.dispose();
 });
+
+test('pen pressure and multitouch retain identities through coordinate-free capture loss',()=>{
+  const {input,canvas}=setup();input.setContext('Gameplay');canvas.width=800;canvas.height=600;
+  const event=(pointerId,pointerType,clientX=150)=>({pointerId,pointerType,clientX,clientY:100,button:0,buttons:1,pressure:.65,target:canvas,cancelable:true,preventDefault(){}});
+  input.pointerDown(event(9,'pen'));input.pointerDown(event(10,'touch',200));input.pointerDown(event(11,'touch',250));
+  const pen=input.queue.find(p=>p[0]===2&&p[1]===9);assert.equal(pen[8],2);assert.equal(pen[9],.65);assert.equal(pen[5],300);
+  input.queue=[];input.pointerEnd({pointerId:9,type:'lostpointercapture'});
+  assert.equal(input.queue.length,1);assert.equal(input.queue[0][0],5);assert.equal(input.queue[0][8],2);assert(input.queue[0].every(Number.isFinite));
+  assert.equal(input.pointers.size,2);input.pointerMove(event(10,'touch',210));assert(input.queue.some(p=>p[0]===3&&p[1]===10));
+  input.cancelAll();assert.equal(input.pointers.size,0);input.dispose();
+});

@@ -39,8 +39,16 @@ CameraComponent& cameraFor(SceneDocument& doc) {
 }
 }
 struct DesktopEditor::Impl {
-    DesktopHost& host;ComponentCodecs codecs;SceneId sourceId{},runtimeId{};ComponentId cameraId{};
+    DesktopHost& host;ComponentCodecs codecs;std::shared_ptr<const EditorPropertyRegistry> properties;std::vector<EditorComponentFactory> factories;SceneId sourceId{},runtimeId{};ComponentId cameraId{};
     Viewport authoredViewport;AssetLibrary assets;std::vector<std::byte> metadata;std::vector<DesktopView> views;
+    std::unique_ptr<EditorAuthoringPanel> tools;
+    std::function<void(const std::string&)> multiplayerLauncher;
+    DesktopEditor::MultiplayerSceneLauncher multiplayerSceneLauncher;
+    Button* hostSceneButton=nullptr;Button* joinSceneButton=nullptr;
+    TextInput* multiplayerEndpoint=nullptr;Button* multiplayerButton=nullptr;
+    Panel* lobbyPanel=nullptr;Button* lobbyToggle=nullptr;
+    TextInput* lobbyGuest=nullptr;TextInput* lobbyRoom=nullptr;TextInput* lobbyInvitation=nullptr;
+    bool lobbyEnabled=false,lobbyVisible=false;
     std::unique_ptr<EditorSession> editor;std::unique_ptr<OrbitController> orbit;
     Panel* root=nullptr,*toolbar=nullptr;ScrollPanel* outline=nullptr,*details=nullptr;ViewportWidget* viewport=nullptr;
     TextLabel* message=nullptr,*selection=nullptr;Button* playButton=nullptr,*discardButton=nullptr,*cancelButton=nullptr;
@@ -50,18 +58,18 @@ struct DesktopEditor::Impl {
     std::deque<std::function<void()>> commands;
     std::optional<SceneDocument> pending;std::filesystem::path pendingPath,file;
     std::string text="Ready",selectionId;std::uint64_t revision=~0ull;float width=0,height=0;bool refresh=true,closing=false;
-    Impl(DesktopHost& h,SceneDocument document,ComponentCodecs c):host(h),codecs(std::move(c)) {
+    Impl(DesktopHost& h,SceneDocument document,ComponentCodecs c,std::shared_ptr<const EditorPropertyRegistry> p,std::vector<EditorComponentFactory> f):host(h),codecs(std::move(c)),properties(std::move(p)),factories(std::move(f)) {
         if(host.application().state()!=ApplicationState::Created||host.application().loadedSceneCount())throw std::logic_error("DesktopEditor needs an unused DesktopHost");
         if(!document.scene)document=starter();cameraFor(document);
         assets=std::move(document.assets);metadata=std::move(document.applicationData);auto initialViews=std::move(document.views);
         sourceId=host.application().loadScene(std::move(document.scene));views=handles(initialViews);cameraId=views.front().camera;authoredViewport=dynamic_cast<CameraComponent*>(source().findComponent(cameraId))->viewport();
         bind(sourceId,views);host.application().start(sourceId);host.setPaused(true);
-        editor=std::make_unique<EditorSession>(source(),128,&assets);orbit=std::make_unique<OrbitController>(*dynamic_cast<CameraComponent*>(source().findComponent(cameraId)),true);
+        editor=std::make_unique<EditorSession>(source(),128,&assets,properties,EditorComponentSupport{codecs,factories});orbit=std::make_unique<OrbitController>(*dynamic_cast<CameraComponent*>(source().findComponent(cameraId)),true);
         try{host.gui().setFont(GuiFont::loadTrustedTrueType(readDesktopFile(host.baseDirectory()/"assets/fonts/NotoSans-Regular.ttf",8*1024*1024),17));}catch(...){throw std::runtime_error("Desktop editor needs assets/fonts/NotoSans-Regular.ttf beside its executable");}
-        build();
-        host.setEventHandler([this](const DesktopEvent& e){if(e.type==DesktopEventType::CloseRequested){if(editor&&editor->dirty()){closing=true;text="Unsaved document: Save, or Discard to close. Cancel keeps editing.";refresh=true;return true;}releaseBorrowed();return false;}if(e.type==DesktopEventType::FileDrop){queue([this,p=e.path]{stage(p);});return true;}if(e.type==DesktopEventType::Control&&!e.guiConsumed&&e.down&&!e.repeat&&e.control==DesktopControl::F11){host.setFullscreen(!host.fullscreen());return true;}return false;});
+        build();buildTools();
+        host.setEventHandler([this](const DesktopEvent& e){if(e.type==DesktopEventType::CloseRequested){if(editor&&(editor->dirty()||(tools&&tools->dirty()))){closing=true;text="Unsaved document: Save, or Discard to close. Cancel keeps editing.";refresh=true;return true;}releaseBorrowed();return false;}if(e.type==DesktopEventType::FileDrop){queue([this,p=e.path]{stage(p);});return true;}if(e.type==DesktopEventType::Control&&!e.guiConsumed&&e.down&&!e.repeat&&e.control==DesktopControl::F11){host.setFullscreen(!host.fullscreen());return true;}return false;});
     }
-    ~Impl(){host.setEventHandler({});host.cancelInput();if(root)root->setVisible(false);for(auto* b:buttons)b->onClick({});for(auto* i:inputs)i->onSubmit({});if(viewport){viewport->click={};viewport->orbit={};}}
+    ~Impl(){tools.reset();host.setEventHandler({});host.cancelInput();if(root)root->setVisible(false);for(auto* b:buttons)b->onClick({});for(auto* i:inputs)i->onSubmit({});if(viewport){viewport->click={};viewport->orbit={};}}
     Scene& source(){auto* s=host.application().findScene(sourceId);if(!s)throw std::logic_error("Authoring scene unavailable");return *s;}
     CameraComponent* camera(){return dynamic_cast<CameraComponent*>(host.application().activeScene()->findComponent(runtimeId?runtimeCamera():cameraId));}
     ComponentId runtimeCamera(){return runtimeViews.empty()?ComponentId{}:runtimeViews.front().camera;}
@@ -103,16 +111,40 @@ struct DesktopEditor::Impl {
         auto& components=details->add<Panel>();components.setSize({290,72});
         const std::array<const char*,4> types{"LightComponent","CameraComponent","ColliderComponent","RigidBodyComponent"};const std::array<const char*,4> labels{"Add light","Add camera","Add collider","Add body"};
         for(int i=0;i<4;++i)button(components,labels[i],{float(i%2*148),float(i/2*38)},{140,32},[this,type=std::string(types[i])]{editable();if(!editor->addComponent(type))throw std::runtime_error("Select an actor compatible with this component");});
+        for(const auto& factory:factories)button(*details,"Add "+factory.label,{},{290,32},[this,key=factory.key]{editable();if(!editor->addComponent(key))throw std::runtime_error("Select an actor");});
         viewport=&root->add<ViewportWidget>();
         viewport->click=[this](Vec2 p){queue([this,p]{if(runtimeId)return;auto* c=camera();if(!c)return;const auto s=host.size();const Vec2 point{p.x+viewport->bounds().x,p.y+viewport->bounds().y};editor->select(editor->pick(c->screenPointToRay(point,c->pixelViewport(s.width,s.height))));});};
         viewport->orbit=[this](Vec2 d){queue([this,d]{if(!runtimeId)orbit->orbit(d.x*.007f,d.y*.007f);});};
         auto& navigation=toolbar->add<Panel>();navigation.setPosition({8,90});navigation.setSize({1100,34});navigation.style.background={0,0,0,0};navigation.style.border={0,0,0,0};
         button(navigation,"Frame selection",{0,0},{150,30},[this]{if(runtimeId)return;auto* n=editor->selected();if(n)orbit->focus(transformPoint(n->worldMatrix(),{}),6);});
         button(navigation,"Zoom +",{156,0},{90,30},[this]{if(!runtimeId)orbit->zoom(-1);});button(navigation,"Zoom -",{252,0},{90,30},[this]{if(!runtimeId)orbit->zoom(1);});
-        auto& hint=navigation.add<TextLabel>("Viewport: click selects; drag orbits. Enter commits fields.");hint.setPosition({356,3});hint.setSize({700,26});
+        button(navigation,"Authoring tools",{350,0},{160,30},[this]{tools->setVisible(!tools->visible());});
+        multiplayerEndpoint=&input(navigation,{522,0},{270,30});multiplayerEndpoint->setText("ws://127.0.0.1:8177");multiplayerEndpoint->setAccessibleName("Multiplayer server endpoint");
+        multiplayerButton=&button(navigation,"Multiplayer test",{800,0},{170,30},[this]{openMultiplayer(multiplayerEndpoint->text());});multiplayerButton->setEnabled(false);
+        hostSceneButton=&button(*toolbar,"Host selected actor",{530,126},{200,30},[this]{openMultiplayerScene(multiplayerEndpoint->text(),true);});hostSceneButton->setEnabled(false);
+        button(*details,"Add replication settings",{},{290,32},[this]{editable();if(!editor->addComponent("NetworkReplication"))throw std::runtime_error("Select a root mesh actor");});
+        button(*toolbar,"Lobby options",{8,126},{160,30},[this]{lobbyVisible=!lobbyVisible;lobbyPanel->setVisible(lobbyVisible);width=height=0;});
+        lobbyPanel=&toolbar->add<Panel>();lobbyPanel->setPosition({8,164});lobbyPanel->setSize({1100,72});lobbyPanel->setVisible(false);
+        lobbyToggle=&button(*lobbyPanel,"Lobby auth: off",{0,0},{160,30},[this]{lobbyEnabled=!lobbyEnabled;lobbyToggle->setText(lobbyEnabled?"Lobby auth: on":"Lobby auth: off");});
+        lobbyGuest=&input(*lobbyPanel,{170,0},{200,30});lobbyGuest->setText("Guest");lobbyGuest->setAccessibleName("Lobby guest name");
+        lobbyRoom=&input(*lobbyPanel,{380,0},{260,30});lobbyRoom->setText("Game");lobbyRoom->setAccessibleName("Lobby room name");
+        lobbyInvitation=&input(*lobbyPanel,{0,36},{640,30});lobbyInvitation->setPlaceholder("Invitation (empty Host creates a lobby)");lobbyInvitation->setAccessibleName("Lobby invitation");
+        joinSceneButton=&button(*toolbar,"Join authored scene",{740,126},{220,30},[this]{openMultiplayerScene(multiplayerEndpoint->text(),false);});joinSceneButton->setEnabled(false);
     }
-    void releaseBorrowed(){commands.clear();orbit.reset();editor.reset();}
+    void buildTools(){tools=std::make_unique<EditorAuthoringPanel>(host.gui(),source(),*editor);tools->onFile([this](bool saving){editable();const auto ext=tools->extension();DesktopFileDialogOptions options;options.kind=saving?DesktopDialogKind::Save:DesktopDialogKind::Open;options.title=saving?"Save authoring document":"Replace current authoring document";options.filters={{"WebEngine authoring document",ext}};options.defaultExtension=ext;auto result=host.showFileDialog(options);if(result.status==DesktopDialogStatus::Failed)throw std::runtime_error(result.error);if(result.status!=DesktopDialogStatus::Selected)return;if(saving){writeDesktopFileAtomic(result.path,tools->saveDocument());tools->markSaved();}else tools->openDocument(readDesktopFile(result.path,64*1024*1024),true);});}
+    void releaseBorrowed(){commands.clear();tools.reset();orbit.reset();editor.reset();}
     void editable(){if(!editor)throw std::logic_error("Editor is closed");if(runtimeId||pending||closing)throw std::logic_error("Stop Play or resolve the pending document action before editing");}
+    void openMultiplayer(const std::string& endpoint){editable();if(!multiplayerLauncher)throw std::logic_error("Build the multiplayer demo to enable the test launcher");multiplayerLauncher(endpoint);text="Opened isolated multiplayer arena; authoring document retained";refresh=true;}
+    void openMultiplayerScene(const std::string& endpoint,bool publish){
+        editable();if(editor->transforming())throw std::logic_error("Finish the current edit first");
+        if(!multiplayerSceneLauncher)throw std::logic_error("Build the multiplayer scene client");
+        std::string selected;
+        if(publish){auto* node=editor->selected();while(node&&!dynamic_cast<Actor*>(node))node=node->parent();if(!node)throw std::invalid_argument("Select a root mesh actor as the player template");selected=node->savedId();}
+        ensureCamera();ViewportRestore restore(*dynamic_cast<CameraComponent*>(source().findComponent(cameraId)),authoredViewport);
+        multiplayerSceneLauncher(endpoint,source(),renderViews(),assets,selected);
+        lobbyVisible=false;lobbyPanel->setVisible(false);width=height=0;
+        text=publish?"Opened authored scene host; source retained":"Opened authored scene client; source retained";refresh=true;
+    }
     void applyTransform(){editable();if(!editor->selected())throw std::runtime_error("Select an object first");std::array<float,9> v{};for(int i=0;i<9;++i){if(trs[i]->composing())throw std::runtime_error("Finish text composition first");const auto n=number(trs[i]->text());if(std::abs(n)>1e6)throw std::runtime_error("Transform exceeds supported range");v[i]=float(n);}Transform t;t.position={v[0],v[1],v[2]};t.rotation={v[3]*pi/180,v[4]*pi/180,v[5]*pi/180};t.scale={v[6],v[7],v[8]};if(!editor->setTransform(t))throw std::runtime_error("Transform rejected by the selected object's contract");}
     void property(std::size_t index){editable();auto& row=propertyRows.at(index);if(row.input->composing())throw std::runtime_error("Finish text composition first");EditorValue value;const auto& s=row.input->text();if(row.info.type==EditorPropertyType::Text)value=s;else if(row.info.type==EditorPropertyType::Boolean){if(s!="true"&&s!="false")throw std::runtime_error("Boolean values are true or false");value=s=="true";}else value=number(s);if(!editor->setProperty(row.info.key,value))throw std::runtime_error("Property edit rejected");}
     void refreshUi(){
@@ -131,16 +163,16 @@ struct DesktopEditor::Impl {
         for(std::size_t i=0;i<propertyRows.size();++i){auto& r=propertyRows[i];r.panel->setVisible(i<properties.size());if(i>=properties.size())continue;r.info=properties[i];std::string label=r.info.group+" / "+r.info.label;if(r.info.type==EditorPropertyType::Choice){label+=" (";for(std::size_t j=0;j<r.info.choices.size();++j)label+=std::to_string(j)+"="+r.info.choices[j]+" ";label+=")";}r.label->setText(label);r.input->setAccessibleName(r.info.label);r.input->setText(std::visit([](const auto& v)->std::string{using T=std::decay_t<decltype(v)>;if constexpr(std::is_same_v<T,std::string>)return v;else if constexpr(std::is_same_v<T,bool>)return v?"true":"false";else return number(float(v));},r.info.value));}
         message->setText((editor->dirty()?"* ":"")+text);revision=editor->revision();selectionId=selected?selected->savedId():"";refresh=false;
     }
-    void layout(){const auto s=host.size();if(s.width==width&&s.height==height)return;width=s.width;height=s.height;root->setSize({width,height});toolbar->setSize({width,130});message->setSize({std::max(1.f,width-24),38});const float left=std::min(246.f,width*.22f),right=std::min(320.f,width*.3f),content=std::max(1.f,height-130);outline->setPosition({0,130});outline->setSize({left,content});details->setPosition({width-right,130});details->setSize({right,content});viewport->setPosition({left,130});viewport->setSize({std::max(1.f,width-left-right),content});if(auto* c=camera())c->setViewport({left/width,130/height,std::max(1.f,width-left-right)/width,content/height});}
-    void stage(SceneDocument document,std::filesystem::path path){if(runtimeId)throw std::logic_error("Stop Play before replacing a document");cameraFor(document);if(editor->dirty()){pending=std::move(document);pendingPath=std::move(path);text="Unsaved changes: Save first, Discard to replace, or Cancel.";}else adopt(std::move(document),std::move(path));}
+    void layout(){const auto s=host.size();if(s.width==width&&s.height==height)return;width=s.width;height=s.height;root->setSize({width,height});const float top=lobbyVisible?244.f:166.f;toolbar->setSize({width,top});message->setSize({std::max(1.f,width-24),38});const float left=std::min(246.f,width*.22f),right=std::min(320.f,width*.3f),content=std::max(1.f,height-top);outline->setPosition({0,top});outline->setSize({left,content});details->setPosition({width-right,top});details->setSize({right,content});viewport->setPosition({left,top});viewport->setSize({std::max(1.f,width-left-right),content});if(auto* c=camera())c->setViewport({left/width,top/height,std::max(1.f,width-left-right)/width,content/height});}
+    void stage(SceneDocument document,std::filesystem::path path){if(runtimeId)throw std::logic_error("Stop Play before replacing a document");cameraFor(document);if(editor->dirty()||(tools&&tools->dirty())){pending=std::move(document);pendingPath=std::move(path);text="Unsaved changes: Save first, Discard to replace, or Cancel.";}else adopt(std::move(document),std::move(path));}
     void stage(const std::filesystem::path& path){stage(SceneArchive::load(readDesktopFile(path),{},codecs),path);}
     void adopt(SceneDocument document,std::filesystem::path path){
         cameraFor(document);auto nextAssets=std::move(document.assets);auto nextMetadata=std::move(document.applicationData);auto documentViews=std::move(document.views);const auto next=host.application().loadScene(std::move(document.scene));auto nextViews=handles(documentViews);
         try{bind(next,nextViews);host.application().requestTransition(next);host.application().commitTransition();}catch(...){host.application().unloadScene(next);throw;}
-        const auto old=sourceId;editor.reset();orbit.reset();sourceId=next;views=std::move(nextViews);assets=std::move(nextAssets);metadata=std::move(nextMetadata);cameraId=views.front().camera;authoredViewport=dynamic_cast<CameraComponent*>(source().findComponent(cameraId))->viewport();editor=std::make_unique<EditorSession>(source(),128,&assets);orbit=std::make_unique<OrbitController>(*dynamic_cast<CameraComponent*>(source().findComponent(cameraId)),true);host.application().unloadScene(old);file=std::move(path);pending.reset();closing=false;host.setPaused(true);width=height=0;text="Document opened";refresh=true;
+        const auto old=sourceId;tools.reset();editor.reset();orbit.reset();sourceId=next;views=std::move(nextViews);assets=std::move(nextAssets);metadata=std::move(nextMetadata);cameraId=views.front().camera;authoredViewport=dynamic_cast<CameraComponent*>(source().findComponent(cameraId))->viewport();editor=std::make_unique<EditorSession>(source(),128,&assets,properties,EditorComponentSupport{codecs,factories});orbit=std::make_unique<OrbitController>(*dynamic_cast<CameraComponent*>(source().findComponent(cameraId)),true);host.application().unloadScene(old);buildTools();file=std::move(path);pending.reset();closing=false;host.setPaused(true);width=height=0;text="Document opened";refresh=true;
     }
     struct ViewportRestore {CameraComponent& camera;Viewport temporary;ViewportRestore(CameraComponent& c,Viewport authored):camera(c),temporary(c.viewport()){camera.setViewport(authored);}~ViewportRestore(){camera.setViewport(temporary);}};
-    void save(const std::filesystem::path& path){if(runtimeId)throw std::logic_error("Stop Play before saving");ensureCamera();ViewportRestore viewportRestore(*dynamic_cast<CameraComponent*>(source().findComponent(cameraId)),authoredViewport);const auto bytes=SceneArchive::save(source(),renderViews(),assets,metadata,{},codecs);writeDesktopFileAtomic(path,bytes);file=path;editor->markSaved();text="Saved "+path.filename().string();if(closing){closing=false;host.requestClose();}refresh=true;}
+    void save(const std::filesystem::path& path){if(runtimeId)throw std::logic_error("Stop Play before saving");ensureCamera();ViewportRestore viewportRestore(*dynamic_cast<CameraComponent*>(source().findComponent(cameraId)),authoredViewport);const auto bytes=SceneArchive::save(source(),renderViews(),assets,metadata,{},codecs);writeDesktopFileAtomic(path,bytes);file=path;editor->markSaved();text="Saved "+path.filename().string();if(closing&&(!tools||!tools->dirty())){closing=false;host.requestClose();}refresh=true;}
     void dialog(bool saving){if(runtimeId)throw std::logic_error("Stop Play before opening files");DesktopFileDialogOptions o;o.kind=saving?DesktopDialogKind::Save:DesktopDialogKind::Open;o.title=saving?"Save scene":"Open scene";o.filters={{"WebEngine scene","wescene"}};o.defaultExtension="wescene";const auto result=host.showFileDialog(o);if(result.status==DesktopDialogStatus::Failed)throw std::runtime_error(result.error);if(result.status==DesktopDialogStatus::Selected){if(saving)save(result.path);else stage(result.path);}}
     void importMesh(){editable();DesktopFileDialogOptions o;o.title="Import GLB mesh";o.filters={{"Binary glTF","glb"}};const auto result=host.showFileDialog(o);if(result.status==DesktopDialogStatus::Failed)throw std::runtime_error(result.error);if(result.status!=DesktopDialogStatus::Selected)return;const auto mesh=GlbImporter::loadMemory(readDesktopFile(result.path,32*1024*1024));if(!editor->placeMesh(mesh,result.path.stem().string(),{}))throw std::runtime_error("Mesh placement rejected");text="Imported GLB mesh";}
     void play(){editable();ensureCamera();SceneDocument candidate;{ViewportRestore viewportRestore(*dynamic_cast<CameraComponent*>(source().findComponent(cameraId)),authoredViewport);candidate=SceneArchive::clone(source(),renderViews(),assets,{},codecs);}const auto id=host.application().loadScene(std::move(candidate.scene));try{bind(id,handles(candidate.views));host.application().requestTransition(id);host.application().commitTransition();}catch(...){host.application().unloadScene(id);throw;}runtimeId=id;runtimeViews=handles(candidate.views);host.setPaused(false);width=height=0;text="Play: isolated runtime; Stop restores authoring state";refresh=true;}
@@ -150,21 +182,35 @@ struct DesktopEditor::Impl {
         while(!commands.empty()){auto action=std::move(commands.front());commands.pop_front();try{ensureCamera();action();ensureCamera();}catch(const std::exception& e){text=e.what();}refresh=true;}
         if(host.closeRequested()){releaseBorrowed();return host.step({},timestamp);}
         if(host.application().state()==ApplicationState::Stopped)return false;
-        ensureCamera();if(refresh||editor->revision()!=revision||(editor->selected()?editor->selected()->savedId():"")!=selectionId)refreshUi();layout();
+        ensureCamera();tools->setBounds({std::max(8.f,(host.size().width-920.f)/2),138,920,std::max(200.f,host.size().height-150.f)});tools->update(!runtimeId&&!pending&&!closing);if(refresh||editor->revision()!=revision||(editor->selected()?editor->selected()->savedId():"")!=selectionId)refreshUi();layout();
         return host.step({},timestamp);
     }
 };
-DesktopEditor::DesktopEditor(DesktopHost& host,SceneDocument doc,ComponentCodecs codecs):impl_(std::make_unique<Impl>(host,std::move(doc),std::move(codecs))){}
+DesktopEditor::DesktopEditor(DesktopHost& host,SceneDocument doc,ComponentCodecs codecs,std::shared_ptr<const EditorPropertyRegistry> properties,std::vector<EditorComponentFactory> factories):impl_(std::make_unique<Impl>(host,std::move(doc),std::move(codecs),std::move(properties),std::move(factories))){}
 DesktopEditor::~DesktopEditor()=default;
 bool DesktopEditor::step(std::optional<double> timestamp){return impl_->step(timestamp);}
 int DesktopEditor::run(){while(step()){}return 0;}
 EditorSession& DesktopEditor::session(){impl_->editable();return *impl_->editor;}
 Scene& DesktopEditor::source(){return impl_->source();}
+EditorAuthoringPanel& DesktopEditor::authoring(){impl_->editable();return *impl_->tools;}
 bool DesktopEditor::playing() const{return bool(impl_->runtimeId);}
 void DesktopEditor::play(){impl_->play();}
 void DesktopEditor::stop(){impl_->stop();}
 void DesktopEditor::save(const std::filesystem::path& path){impl_->save(path);}
-void DesktopEditor::open(const std::filesystem::path& path,bool discard){if(impl_->runtimeId)throw std::logic_error("Stop Play before opening a scene");if(impl_->editor->dirty()&&!discard)throw std::logic_error("Unsaved scene; save it or explicitly discard changes");impl_->adopt(SceneArchive::load(readDesktopFile(path),{},impl_->codecs),path);}
+void DesktopEditor::open(const std::filesystem::path& path,bool discard){if(impl_->runtimeId)throw std::logic_error("Stop Play before opening a scene");if((impl_->editor->dirty()||impl_->tools->dirty())&&!discard)throw std::logic_error("Unsaved scene; save it or explicitly discard changes");impl_->adopt(SceneArchive::load(readDesktopFile(path),{},impl_->codecs),path);}
 const std::filesystem::path& DesktopEditor::path() const{return impl_->file;}
 const std::string& DesktopEditor::status() const{return impl_->text;}
+void DesktopEditor::setMultiplayerLauncher(std::function<void(const std::string&)> launcher){impl_->multiplayerLauncher=std::move(launcher);impl_->multiplayerButton->setEnabled(bool(impl_->multiplayerLauncher));}
+void DesktopEditor::openMultiplayerTest(const std::string& endpoint){impl_->openMultiplayer(endpoint);}
+void DesktopEditor::setMultiplayerSceneLauncher(MultiplayerSceneLauncher launcher){impl_->multiplayerSceneLauncher=std::move(launcher);impl_->hostSceneButton->setEnabled(bool(impl_->multiplayerSceneLauncher));impl_->joinSceneButton->setEnabled(bool(impl_->multiplayerSceneLauncher));}
+void DesktopEditor::openMultiplayerScene(const std::string& endpoint,bool publish){impl_->openMultiplayerScene(endpoint,publish);}
+void DesktopEditor::setMultiplayerLobby(EditorLobbySettings settings){
+    auto valid=[](const std::string &value,std::size_t maximum){return value.size()<=maximum&&std::all_of(value.begin(),value.end(),[](unsigned char c){return c>=32&&c<127;});};
+    if(settings.guestName.empty()||settings.roomName.empty()||!valid(settings.guestName,32)||!valid(settings.roomName,64)||!valid(settings.invitation,64))throw std::invalid_argument("Lobby launch settings");
+    impl_->lobbyEnabled=settings.enabled;impl_->lobbyToggle->setText(settings.enabled?"Lobby auth: on":"Lobby auth: off");
+    impl_->lobbyGuest->setText(std::move(settings.guestName));impl_->lobbyRoom->setText(std::move(settings.roomName));impl_->lobbyInvitation->setText(std::move(settings.invitation));
+}
+EditorLobbySettings DesktopEditor::multiplayerLobby() const {
+    return {impl_->lobbyEnabled,impl_->lobbyGuest->text(),impl_->lobbyRoom->text(),impl_->lobbyInvitation->text()};
+}
 }

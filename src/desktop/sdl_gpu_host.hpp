@@ -9,11 +9,13 @@ namespace engine {
 // Private Windows presentation adapter; owns no scene or simulation clock.
 class SdlGpuHost final : public WebGpuHost {
 public:
-    explicit SdlGpuHost(SDL_Window& window):window_(window) {}
+    explicit SdlGpuHost(SDL_Window& window,wgpu::BackendType backend=wgpu::BackendType::D3D12):window_(window),backend_(backend) {}
     double nowMs() const override;
+    bool timingRequested() const override;
     GpuHostSize logicalSize() const override;
     void drawableSize(int&,int&) const override;
     void resizeDrawable(std::uint32_t,std::uint32_t) override;
+    wgpu::Instance createInstance() override;
     void adapterOptions(wgpu::RequestAdapterOptions&) override;
     void adapterSelected(const wgpu::Adapter&) override;
     wgpu::Surface createSurface(const wgpu::Instance&) override;
@@ -35,6 +37,7 @@ public:
 private:
     struct Capture;
     SDL_Window& window_; // Window must outlive this host and its renderer.
+    wgpu::BackendType backend_;
     std::uint32_t width_=1,height_=1;
     std::filesystem::path requestedCapture_;
     std::shared_ptr<Capture> capture_;

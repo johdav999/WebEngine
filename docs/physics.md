@@ -34,11 +34,16 @@ scene.update(0); // Reconcile lifecycle and create bodies before issuing command
 body.addImpulse({2, 0, 0});
 ```
 
-Physics units are metres, kilograms, and seconds; world up is +Y. Default gravity
+Physics units are metres, kilograms, and seconds; default world up is +Y. Default gravity
 is `{0, -9.81f, 0}`. Box dimensions are **half extents**, spheres use radius, and
 capsules use half the cylindrical height followed by radius, aligned along +Y.
 Visual meshes are independent of colliders. Size visual child meshes to match
 their collision geometry; the actor itself stays at unit scale.
+
+The optional [planet module](planet-physics.md) composes radial gravity and an
+arbitrary-up sphere motor over these same world queries and source colliders.
+It uses a stable local solver origin and separate render projection; it does not
+change the existing +Y character-motor or default scene-gravity contracts.
 
 ## Ownership and motion
 
@@ -371,3 +376,14 @@ component directly under a scene-root actor (used by RouteComponent). Moving
 bodies retain direct attachment; parent transforms and unmanaged nested physics
 are not implicitly accumulated. Queries/disable/removal retain the ordinary
 lifetime contracts. See [routes](splines-routes.md).
+
+
+## Server-authoritative replication (M9)
+
+Optional NetworkScene projects the existing authoritative body/velocity state and
+server Begin collisions to passive browser/Windows replicas. Paired root body and
+collider authoring, unit scale, existing geometry and solver validation still apply.
+Client bootstrap bodies/colliders are disabled before simulation; snapshots drive
+presentation. The example player retains its kinematic controller. See
+[server-physics contracts and limitations](multiplayer-physics.md) and
+[separate runtime evidence](multiplayer-runtime-validation.md).

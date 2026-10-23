@@ -12,6 +12,14 @@
 #include "engine/prefab_asset.hpp"
 
 namespace engine {
+struct EditorComponentFactory {
+    std::string key,label;
+    std::function<std::unique_ptr<Component>()> create;
+};
+struct EditorComponentSupport {
+    ComponentCodecs codecs;
+    std::vector<EditorComponentFactory> factories;
+};
 enum class EditorGizmo { Move, Rotate, Scale };
 struct EditorSnap {
     bool translation=false,rotation=false;
@@ -23,7 +31,7 @@ struct EditorSnap {
 class EditorSession {
 public:
     explicit EditorSession(Scene& scene,std::size_t historyLimit=128,AssetLibrary* assets=nullptr,
-        std::shared_ptr<const EditorPropertyRegistry> properties=EditorPropertyRegistry::builtins());
+        std::shared_ptr<const EditorPropertyRegistry> properties=EditorPropertyRegistry::builtins(),EditorComponentSupport components={});
     ~EditorSession();
     EditorSession(const EditorSession&)=delete;
     EditorSession& operator=(const EditorSession&)=delete;
@@ -49,6 +57,7 @@ public:
     RouteComponent* selectedRoute() const;
     bool setRoute(std::shared_ptr<const RouteAsset>); // One exact-state grouped edit; source/collision published together.
     bool createVehicle(Vec3 position={0,.95f,0}); // Example preset, undoable.
+    const auto& componentFactories() const {return components_.factories;}
     bool addComponent(std::string_view type,std::shared_ptr<const Mesh> mesh={});
     bool removeSelectedComponents();
     bool reparentSelected(std::string_view parent,ReparentMode mode=ReparentMode::KeepWorld);
@@ -151,6 +160,11 @@ private:
         TerrainEdit edit;
         std::vector<std::string> selection;
         std::uint64_t beforeFingerprint=0,afterFingerprint=0;
+        std::shared_ptr<const CollisionShape> beforeCollision,afterCollision;
+        bool beforeCollisionEnabled=false,afterCollisionEnabled=false;
+        void captureCollision(const Actor& actor,bool after){if(const auto* c=actor.getComponent<ColliderComponent>()){
+            (after?afterCollision:beforeCollision)=c->shape();(after?afterCollisionEnabled:beforeCollisionEnabled)=c->enabled;
+        }}
     };
     struct AiControllerEdit {AiControllerSettings before,after;};
     struct AnimationEdit {std::unique_ptr<Node> parked;std::uint64_t expected=0;};
@@ -177,6 +191,7 @@ private:
     AssetLibrary* assets_;
     std::shared_ptr<const EditorPropertyRegistry> properties_;
     EditorSnap snap_;
+    EditorComponentSupport components_;
     Node* resolve(const Change& change,const Transform& expected) const;
     void apply(Node& node,const Transform& transform);
     std::optional<Vec3> sample(Ray ray) const;

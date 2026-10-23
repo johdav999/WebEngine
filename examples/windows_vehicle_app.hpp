@@ -62,6 +62,7 @@ public:
             const auto size=host_.size();rig_->update(frame.presentation.delta,size.width/std::max(1.f,size.height));
             speed_->setText(std::to_string(int(std::abs(vehicle().state().speed)*3.6f))+" km/h  |  Gear "+std::to_string(vehicle().state().gear));
             layoutMenu();fullscreen_->setChecked(host_.fullscreen());
+            shadow_->setEnabled(host_.capabilities().shadowMaps);msaa_->setEnabled(host_.capabilities().msaa4x);
             if(soundRequest_.progress().status==AssetStatus::Ready&&!sound_)sound_=soundRequest_.get<SoundAsset>();
             playSound_->setEnabled(bool(sound_));
             refreshModelLoad();

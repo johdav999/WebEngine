@@ -124,6 +124,8 @@ struct GuiAccessibleNode {
     GuiRect bounds;
     bool disabled=false,focused=false,live=false,checked=false;
     float minimum=0,maximum=1,number=0,step=0.01f;
+    GuiRect clippedBounds; // Visible logical bounds; empty for offscreen controls.
+    bool keyboardFocusable=false;
 };
 // Hook positions are widget-local design units. Capture reserves the entire
 // drag for this widget; Handled permits an ancestor ScrollPanel to take over.

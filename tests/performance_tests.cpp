@@ -31,6 +31,7 @@ int main() {
         require(json.find("\"guiDrawCalls\":4")!=std::string::npos && json.find("\"guiUploadBytes\":256")!=std::string::npos && json.find("\"guiTextureBytes\":1024")!=std::string::npos,"GUI draw, upload and payload counters are exported separately");
         monitor.recordGpu({0.1,0.2,0.3},900);
         json=monitor.json(1000,"available");
+        require(json.find("\"gpu\":"+monitor.gpuJson(1000,"available"))!=std::string::npos,"Standalone GPU summary preserves shared report schema");
         require(json.find("\"ageMs\":100.000000")!=std::string::npos && json.find("\"mean\":0.600000")!=std::string::npos,"GPU duration sums passes and reports sample age");
         monitor.reset();json=monitor.json(1000,"available");
         require(json.find("\"epoch\":1")!=std::string::npos && json.find("\"totalFrames\":0")!=std::string::npos && json.find("\"totalMs\":null")!=std::string::npos,"Reset clears both windows and cumulative counters");

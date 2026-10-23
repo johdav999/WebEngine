@@ -10,6 +10,7 @@
 #include <vector>
 
 namespace engine {
+namespace net { class PrefabSpawner; }
 class Scene;
 class RegionStream;
 class Actor;
@@ -75,6 +76,7 @@ private:
     friend class Scene;
     friend class SelectionSystem;
     friend class Prefab;
+    friend class net::PrefabSpawner;
     friend class AnimationLibrary;
     friend class RouteComponent;
     friend class RegionStream;

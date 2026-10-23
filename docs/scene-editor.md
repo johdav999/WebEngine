@@ -8,8 +8,21 @@ scene directly. **Play** creates an isolated runtime copy; **Stop** returns to t
 
 A separate [native Windows scene workbench](windows-editor.md) now reuses the
 portable commands, archive files and isolated Play behaviour. Its initial GUI
-covers ordinary scene editing; the specialized graphical panels described here
-remain browser-only.
+covers ordinary scene editing and [shared authoring tools](editor-authoring.md)
+for terrain, animation, AI, prefabs, FX and cinematics. The advanced graphical
+controls described below remain in the specialized browser panels.
+
+## Multiplayer test
+
+The server endpoint and **Multiplayer test** action open the isolated
+[cross-runtime arena](multiplayer.md) in a separate tab. Build the multiplayer
+demo and serve its generated `multiplayer/` directory to enable the action.
+Source scene/history remain local. **Host selected actor** and **Join authored
+scene** provide the [M2 authored-scene workflow](multiplayer-scenes.md): select a
+root mesh actor as the player template, publish supported static scene content,
+and join from either runtime. These sessions open in isolated client tabs and do
+not apply runtime edits back. General component replication and collaborative
+editing remain future work.
 
 ## Camera navigation
 
@@ -142,9 +155,12 @@ under **Details → Terrain**:
 - **Flatten** blends toward the chosen local height.
 - **Smooth** blends toward the neighboring source samples.
 - **Paint surface** blends toward one of the four existing material layers.
+- **Cut hole / Restore ground** removes/restores both triangles of cells inside
+  the brush circle. These are binary edits; any positive strength applies fully.
 
 Radius is measured in source-local terrain metres. Strength is 0.01–1 per stamp.
-The projected ring follows the actual terrain surface. Drag left mouse to brush;
+The projected ring follows the source surface, including missing cells so Restore
+ground can fill holes. Drag left mouse to brush;
 stamps follow movement at 20% of the radius or repeat after 100 ms while held.
 Right mouse + WASD, middle pan and Alt orbit remain available. Select **Select /
 navigate** or use W/E/R to return to object transforms.
@@ -481,3 +497,42 @@ collision; source asset buffers remain separately registered files. See
 [Prefab asset editor](prefab-editor.md): capture selected actors, author reusable
 definitions in an independent workbench, save `.weprefab`, derive variants and
 update linked instances through one scene history command.
+
+
+Multiplayer [milestone 3](multiplayer-prediction.md) adds automatic local movement prediction and
+server reconciliation to authored-scene Host/Join sessions on both runtimes.
+
+
+Multiplayer [milestone 4](multiplayer-presentation.md) now interpolates remote players and smooths
+local reconciliation corrections automatically in authored-scene Host/Join clients.
+
+
+Multiplayer [milestone 5](multiplayer-replication.md) adds per-peer delta snapshots, periodic
+keyframes, baseline recovery and distance interest filtering to authored-scene
+Host/Join on browser and Windows. Rebuild scene server/clients together for MP05;
+saved scenes and source editor documents remain compatible.
+
+
+Multiplayer [milestone 6](multiplayer-authoring.md) adds saved ownership/relevance settings,
+server-owned mesh actors and isolated-session diagnostics to both editors.
+Scene clients/server now use MP06; saved archive and package envelopes are unchanged.
+
+Multiplayer [milestone 7](multiplayer-components.md) adds registered custom
+component factories, typed configuration and State replication (Off/Everyone/Owner
+only) through shared editor history, duplication and save/load. Pass
+EditorComponentSupport to EditorSession; DesktopEditor accepts optional property
+registry and factory values after its codecs argument. Browser application setup
+configures equivalent support before binding. Host/Join uses MP07 with WES3 component
+manifests. Native authoring evidence uses EditorSession APIs and file round trips;
+browser evidence uses actual fields. See [contracts](multiplayer-components.md) and
+[validation](multiplayer-components-validation.md).
+
+
+## Multiplayer runtime authoring (M8–M10)
+
+Replication settings now include Runtime prefab templates. Register invocation
+properties/factories to expose RPC/event permissions alongside gameplay fields and
+component audiences. Existing physics controls configure server bodies. Browser and
+native Host/Join retain source/history; lobby settings are transient host options.
+See [runtime contracts](multiplayer-runtime.md), [physics](multiplayer-physics.md)
+and [guest sessions](multiplayer-lobbies.md).

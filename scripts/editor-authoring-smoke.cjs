@@ -1,0 +1,32 @@
+const {chromium}=require('playwright');
+const fs=require('node:fs/promises'),http=require('node:http'),path=require('node:path'),assert=require('node:assert/strict');
+const build=path.resolve(process.env.AUTHORING_BUILD||'build/web-assets-release/site'),out=path.resolve(process.env.EVIDENCE_DIR||'build/evidence/editor-authoring-browser');
+(async()=>{
+ const server=http.createServer(async(req,res)=>{try{const name=decodeURIComponent(new URL(req.url,'http://localhost').pathname).slice(1)||'index.html';if(name.includes('..'))throw Error('Bad path');let file=path.resolve(name.startsWith('assets/')||['webengine.js','webengine.wasm','asset_decode.js','asset_decode.wasm'].includes(name)?build:'web',name);const b=await fs.readFile(file);res.setHeader('Content-Type',name.endsWith('.wasm')?'application/wasm':name.endsWith('.js')?'text/javascript':name.endsWith('.css')?'text/css':name.endsWith('.ttf')?'font/ttf':'text/html');res.end(b);}catch{res.writeHead(404);res.end();}});
+ await new Promise(r=>server.listen(0,'127.0.0.1',r));await fs.mkdir(out,{recursive:true});
+ const browser=await chromium.launch({headless:true,executablePath:process.env.BROWSER_EXECUTABLE||'C:/Program Files/Google/Chrome/Application/chrome.exe'}),report={backends:[],errors:[]};
+ try{for(const backend of ['webgpu','webgl2']){
+  const page=await browser.newPage({viewport:{width:1640,height:1120},acceptDownloads:true});page.on('pageerror',e=>report.errors.push(backend+': '+e));await page.route('https://fonts.googleapis.com/**',r=>r.fulfill({contentType:'text/css',body:''}));
+  await page.goto(`http://127.0.0.1:${server.address().port}/?editor=1&renderer=${backend}&gpuTiming=off`);await page.waitForFunction(()=>window.EngineEditor?.active()&&document.body.dataset.engine==='ready',null,{timeout:90000});
+  assert.equal(await page.evaluate(()=>EngineQuality.snapshot().backend),backend);await page.locator('#editor-authoring-toggle').click();await page.waitForFunction(()=>window.authoringState?.visible&&EngineGui.snapshot().fontReady);
+  const frames=async()=>{const n=await page.evaluate(()=>Number(document.body.dataset.frames));await page.waitForFunction(n=>Number(document.body.dataset.frames)>n+2,n);};
+  const click=async name=>{assert(await page.evaluate(name=>{const w=EngineGui.snapshot().widgets.find(w=>w.active&&w.type==='button'&&w.name===name);return w&&Module._engine_gui_focus(w.id,1);},name),'Missing button '+name);await frames();assert.equal(await page.evaluate(()=>authoringState.status),'Authoring command complete',name);};
+  const fill=async(name,value)=>{assert(await page.evaluate(({name,value})=>{const w=EngineGui.snapshot().widgets.find(w=>w.active&&w.type==='input'&&w.name===name);if(!w)return false;const el=document.getElementById('engine-widget-'+w.id);if(!el)return false;el.focus();el.value=value;el.setSelectionRange(value.length,value.length);el.dispatchEvent(new Event('input',{bubbles:true}));return true;}, {name,value}),'Missing input '+name);await frames();assert.equal(await page.evaluate(name=>EngineGui.snapshot().widgets.find(w=>w.active&&w.type==='input'&&w.name===name)?.text,name),value,'Text bridge '+name);};
+  const shot=async name=>{await frames();await page.locator('#viewport').screenshot({path:path.join(out,backend+'-'+name+'.png')});};
+  const save=async ext=>{const event=page.waitForEvent('download');await page.evaluate(()=>Module._engine_authoring_save());const d=await event;const file=path.join(out,backend+'.'+ext);await d.saveAs(file);return file;};
+  const open=async ext=>{await page.evaluate(()=>EngineAuthoringFiles.request(false));await page.locator('#editor-authoring-file').setInputFiles(path.resolve('build/evidence/editor-authoring-fixtures/fixture.'+ext));await frames();};
+  await click('Create terrain');await click('Stamp terrain');await shot('terrain');
+  const aiRect=await page.evaluate(()=>EngineGui.snapshot().widgets.find(w=>w.active&&w.type==='button'&&w.name==='AI').bounds);const canvas=await page.locator('#viewport').boundingBox();await page.mouse.click(canvas.x+aiRect.x+aiRect.width/2,canvas.y+aiRect.y+aiRect.height/2);await frames();assert.equal(await page.evaluate(()=>authoringState.area),2);
+  await click('AI');await fill('AI state name','Native shared state');await click('Add AI state');await fill('AI transition to state index','1');await click('Add AI transition');assert.match(await fs.readFile(await save('weai'),'utf8'),/Native shared state/);await shot('ai');
+  await click('Animation');await open('weanim');await fill('Clip label','Browser authored idle');await click('Apply animation clip');await save('weanim');await shot('animation');
+  await click('Prefab');await open('weprefab');await click('Place linked prefab');await save('weprefab');await shot('prefab');
+  await click('FX');await fill('FX spawn rate','9');await click('Apply FX emitter');await click('Place FX');await save('wefx');await shot('fx');
+  await click('Cinematic');await click('Add cinematic track for selection');await fill('Key / sample time seconds','4');await click('Record selected pose at time');await save('wecin');await shot('cinematic');
+  await click('Document undo');await click('Document redo');
+  const expected=await page.evaluate(()=>({...authoringState}));await click('AI');const staleBytes=[...await fs.readFile(path.join(out,backend+'.wecin'))];assert.equal(await page.evaluate(({b,g,a})=>{const p=Module._malloc(b.length);try{Module.HEAPU8.set(b,p);return Module._engine_authoring_open(p,b.length,g,a);}finally{Module._free(p);}}, {b:staleBytes,g:expected.generation,a:expected.area}),0,'Changed-area upload was accepted');
+  await click('Cinematic');assert.equal(await page.evaluate(({b,g,a})=>{const p=Module._malloc(b.length);try{Module.HEAPU8.set(b,p);return Module._engine_authoring_open(p,b.length,g-1,a);}finally{Module._free(p);}}, {b:staleBytes,g:expected.generation,a:expected.area}),0,'Stale workspace upload was accepted');
+  await click('Close tools');assert.equal(await page.evaluate(()=>authoringState.visible),false);assert.equal(report.errors.length,0);
+  report.backends.push({backend,tools:6,files:5,history:true,rendered:true,pointerInput:true,staleUploadsRejected:true});await page.close();
+ }report.passed=true;}finally{await fs.writeFile(path.join(out,'report.json'),JSON.stringify(report,null,2));await browser.close();server.close();}
+ console.log(JSON.stringify(report));
+})().catch(e=>{console.error(e);process.exitCode=1;});

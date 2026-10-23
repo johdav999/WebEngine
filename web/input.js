@@ -151,7 +151,12 @@
         this.setValue(pointer.control.action,pointer.source,0,0);pointer.element.style.removeProperty('--stick-x');pointer.element.style.removeProperty('--stick-y');
       }
       if(pointer.owner==='scene'){
-        this.raw(cancelled?Types.Cancel:Types.Up,event);const p=this.local(event);
+        // lostpointercapture/disposal may have no coordinates or device metadata.
+        // A cancellation only needs the retained identity; keep its packet finite
+        // so cancelling one contact cannot invalidate the entire input batch.
+        if(cancelled)this.enqueue(Types.Cancel,pointer.id,0,pointer.x,pointer.y,
+          [pointer.x*this.canvas.width/Math.max(this.canvas.clientWidth,1),pointer.y*this.canvas.height/Math.max(this.canvas.clientHeight,1),0,pointer.device==='touch'?1:pointer.device==='pen'?2:0,0,Number.isFinite(event.timeStamp)?event.timeStamp:0]);
+        else this.raw(Types.Up,event);const p=cancelled?{x:pointer.x,y:pointer.y}:this.local(event);
         if(!cancelled&&!pointer.dragged&&Math.hypot(p.x-pointer.startX,p.y-pointer.startY)<=6&&pointer.buttons===1)this.pulse(Actions.Select);
         this.rebaseTouches();
       }

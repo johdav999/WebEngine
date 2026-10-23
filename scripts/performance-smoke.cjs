@@ -18,15 +18,18 @@ const metrics = page => page.evaluate(() => window.EnginePerformance.snapshot())
     };
     watch(page); await page.goto(`${base}/?shadows=off&culling=off`);
     await page.waitForFunction(() => document.body.dataset.defaultModel === 'ready' && window.EnginePerformance.snapshot().latest?.windowSamples >= 120);
+    // Exact geometry/cache assertions isolate meshes from the playground's sky.
+    await page.evaluate(() => Module._engine_sky(0,0,1));
     await page.locator('#pause').click();
     await page.waitForTimeout(300);
     await page.waitForFunction(() => window.EnginePerformance.snapshot().latest.current.uploadCalls === 0);
     const knarr = await metrics(page), frame = knarr.latest.current;
     assert.equal(frame.drawCalls, 11); assert.equal(frame.triangles, 41414);
     assert.equal(frame.meshes, 40); assert.equal(frame.passes, 3);
-    assert.equal(frame.cachedMeshes, 3); assert.equal(frame.cachedTextures, 27);
+    // The shared sphere asset remains strongly cached after sky rendering stops.
+    assert.equal(frame.cachedMeshes, 4); assert.equal(frame.cachedTextures, 27);
     assert.equal(frame.gpuTextureBytes, 117541856);
-    assert.equal(frame.gpuMeshBytes, 2100972);
+    assert.equal(frame.gpuMeshBytes, 2100972 + 126768);
     assert(frame.frameStorageBytes > 0);
     assert.equal(frame.frameStorageGrowths, 0); assert.equal(frame.objectBufferGrowths, 0);
     assert.equal(frame.uploadCalls, 0); assert.equal(frame.uploadBytes, 0);
@@ -80,13 +83,18 @@ const metrics = page => page.evaluate(() => window.EnginePerformance.snapshot())
     assert.equal(reset.latest.current.frameStorageBytes, frame.frameStorageBytes);
     result.checks.push('Reset clears rolling/cumulative measurements while retaining GPU resources');
     await page.locator('#restore-demo').click();
+    await page.evaluate(() => Module._engine_sky(0,0,1));
     await page.waitForFunction(() => window.EnginePerformance.snapshot().latest?.current.drawCalls === 3);
     const restored = await metrics(page);
     assert.equal(restored.latest.current.triangles, 530);
-    assert.equal(restored.latest.current.cachedMeshes, 2);
-    assert.equal(restored.latest.current.cachedTextures, 6);
-    assert(restored.latest.current.gpuTextureBytes < frame.gpuTextureBytes);
-    result.checks.push('Demo restoration updates actual submission counts and removes released resource payload');
+    assert.equal(restored.latest.current.cachedMeshes, 3);
+    // The fleet fixture deliberately retains its fitted Knarr asset and shared
+    // textures for later use, while the imported geometry is released.
+    assert(restored.shipStress.ready);
+    assert.equal(restored.latest.current.cachedTextures, 27);
+    assert.equal(restored.latest.current.gpuTextureBytes, frame.gpuTextureBytes);
+    assert.equal(restored.latest.current.gpuMeshBytes, 1428 + 126768);
+    result.checks.push('Demo restoration releases imported geometry, retains the shared sky sphere and fleet texture asset, and updates exact submission/cache payloads');
     await page.locator('#fbx-file').setInputFiles({ name: 'broken.fbx', mimeType: 'application/octet-stream', buffer: Buffer.from('broken FBX') });
     await page.waitForFunction(() => document.body.dataset.import === 'error');
     const failed = (await metrics(page)).assets.at(-1);
@@ -116,12 +124,14 @@ const metrics = page => page.evaluate(() => window.EnginePerformance.snapshot())
     });
     await unsupported.goto(`${base}/?shadows=off&culling=off`);
     await unsupported.waitForFunction(() => document.body.dataset.defaultModel === 'ready' && window.EnginePerformance.snapshot().latest?.totalFrames > 10);
+    await unsupported.evaluate(() => Module._engine_sky(0,0,1));
+    await unsupported.waitForFunction(() => window.EnginePerformance.snapshot().latest?.current.drawCalls === 11);
     const noFeature = await metrics(unsupported);
     assert.equal(noFeature.latest.gpu.state, 'unsupported'); assert.equal(noFeature.latest.gpu.totalMs, null);
     assert.equal(noFeature.latest.current.drawCalls, 11);
     result.checks.push('Missing timestamp-query feature leaves the real renderer working and measurements explicitly unavailable');
     assert.deepEqual(result.errors, []);
     result.passed = true; console.log(JSON.stringify(result, null, 2));
-  } catch (error) { result.passed = false; result.failure = String(error); process.exitCode = 1; console.error(JSON.stringify(result, null, 2)); }
+  } catch (error) { result.passed = false; result.failure = String(error.stack || error);const page=browser.contexts()[0]?.pages()[0];if(page)result.report=await metrics(page);process.exitCode = 1; console.error(JSON.stringify(result, null, 2)); }
   finally { await fs.writeFile(path.join(evidence, 'performance-smoke.json'), JSON.stringify(result, null, 2));await browser.close(); }
 })();

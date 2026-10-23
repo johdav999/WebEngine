@@ -115,3 +115,7 @@ Validation: `surface_trail_tests`, CTest `surface_trail`, optional
 `surface_trail_wasm_tests`, `scripts/surface-trail-smoke.cjs`, existing trail/depth
 and editor FX suites. Use the pinned local SDK and the build commands in README.
 See [validation evidence](surface-trails-validation.md).
+
+
+Native Dawn and direct D3D12 support this presentation contract; see
+[native FX scope and validation](windows-fx-rendering.md).

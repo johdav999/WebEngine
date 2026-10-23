@@ -4,10 +4,20 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <vector>
 
 namespace engine {
 class Scene;
 struct MeshDraw;
+// Validated finite convex prism in a water surface's local XZ space. Points are
+// counterclockwise; bottom is a finite negative local Y below the mean surface.
+struct WaterRegion {
+    std::vector<Vec2> outline; // 3..16 strictly convex vertices.
+    float bottom=-1;
+    void validate()const;
+    bool contains(Vec3 local)const;
+    std::array<float,4> plane(std::size_t edge)const; // Validated region; inward XZ half-plane.
+};
 // Transient presentation inputs. Applications own contact detection and wake emission.
 struct WaterInteraction {
     Vec3 position{},direction{1,0,0}; // World-space origin and wake heading.
@@ -64,6 +74,7 @@ struct UnderwaterView {
     Mat4 worldToLocal;
     Vec3 minimum,maximum; // Local XZ footprint; local Y<=0 is water, no bottom boundary.
     WaterSettings settings;
+    std::optional<WaterRegion> region; // Missing: legacy rectangular, bottomless footprint.
 };
 // First active World water containing the eye. Works even when its surface is offscreen.
 std::optional<UnderwaterView> underwaterView(const Scene& scene,Vec3 eye,std::uint32_t visibilityMask=0xffffffffu);

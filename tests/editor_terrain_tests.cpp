@@ -61,5 +61,18 @@ int main(){try{
     check(editor.beginTerrainStroke()&&editor.stampTerrain(brush),"Begin external change guard");actor->name="External terrain";check(!editor.cancel(),"Cancel refuses external changes");check(actor->name=="External terrain","External changes preserved");
     Scene other;auto paged=TerrainAsset::create(data(),false);auto candidate=makeTerrainActor("Stream owned",paged);auto* raw=candidate.get();other.adoptChild(std::move(candidate));EditorSession streaming(other);streaming.select(raw->savedId());check(!streaming.beginTerrainStroke(),"Source-only stream-owned instances reject editing");
     Scene undoScene;EditorSession creation(undoScene);creation.createTerrain(data());auto created=creation.selected()->savedId();check(creation.undo()&&!undoScene.findSavedNode(created)&&creation.redo()&&undoScene.findSavedNode(created),"Creation undo and redo retain saved identity");
-    std::cout<<"Editor terrain creation, stroke/history, collision, paint, cancellation, guards and archives passed\n";
+    Scene holes;EditorSession holeEditor(holes);holeEditor.createTerrain(data(),{},true);auto* holeActor=holeEditor.terrainActor();const auto colliderId=holeActor->getComponent<ColliderComponent>()->id();
+    TerrainBrush cut;cut.mode=TerrainBrushMode::Hole;cut.radius=2;cut.center={28,28};
+    check(holeEditor.beginTerrainStroke()&&holeEditor.stampTerrain(cut),"Begin hole painting");cut.center={4,4};check(holeEditor.stampTerrain(cut)&&holeEditor.commitTerrainStroke(),"Descending dirty chunks combine");
+    check(!terrainGround(holes,4.5f,4.5f)&&!holes.physics().raycast({4.5f,3,4.5f},{0,-1,0},6),"Paint removes query and collision");
+    check(terrainRaycast(holes,{4.5f,3,4.5f},{0,-1,0},6,true).has_value(),"Restore brush picks missing source");
+    check(holeEditor.undo()&&terrainGround(holes,4.5f,4.5f)&&holeEditor.redo()&&!terrainGround(holes,4.5f,4.5f),"Multi-chunk hole history");
+    cut.radius=100;check(holeEditor.beginTerrainStroke()&&holeEditor.stampTerrain(cut)&&holeEditor.commitTerrainStroke(),"Empty entire terrain");
+    check(!holeActor->getComponent<ColliderComponent>()->enabled&&holeActor->getComponent<ColliderComponent>()->id()==colliderId,"Empty terrain keeps disabled collider identity");
+    cut.mode=TerrainBrushMode::Fill;check(holeEditor.beginTerrainStroke()&&holeEditor.stampTerrain(cut)&&holeEditor.commitTerrainStroke(),"Fill entirely missing ground");
+    check(holeActor->getComponent<ColliderComponent>()->enabled&&holes.physics().raycast({4,3,4},{0,-1,0},6).has_value(),"Fill restores physics");
+    check(holeEditor.undo()&&holeEditor.undo()&&holeEditor.undo()&&terrainGround(holes,4.5f,4.5f),"Adjacent history identities survive empty transitions");
+    check(holeEditor.redo()&&holeEditor.redo()&&holeEditor.redo(),"Redo all hole transitions");
+    cut.mode=TerrainBrushMode::Hole;check(holeEditor.beginTerrainStroke()&&holeEditor.stampTerrain(cut)&&holeEditor.cancel()&&terrainGround(holes,4.5f,4.5f),"Cancel restores filled terrain");
+    std::cout<<"Editor terrain creation, stroke/history, collision, paint, holes/fill, cancellation, guards and archives passed\n";
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

@@ -205,6 +205,7 @@ void TerrainPagedStream::enableEditing(TerrainPageWriter writer,TerrainPageEditi
 void TerrainPagedStream::cancelEdit() {auto& p=*impl_;p.scene.requireIdle();p.stamp.reset();p.measure();}
 void TerrainPagedStream::flush() {auto& p=*impl_;p.scene.requireIdle();require(bool(p.writer),"Terrain page writer is not configured");p.flushRequested=true;p.stats.writeFailed=false;p.stats.writeError.clear();}
 bool TerrainPagedStream::edit(const TerrainBrush& brush) {
+    if(brush.mode==TerrainBrushMode::Hole||brush.mode==TerrainBrushMode::Fill)throw std::invalid_argument("Paged terrain does not support hole edits");
     auto& p=*impl_;p.scene.requireIdle();require(bool(p.writer),"Enable paged terrain editing before sculpting or painting");brush.validate();require(!p.stamp,"Previous paged terrain stamp is still loading");
     const auto& d=p.layout;const double width=double(d.samplesX-1)*d.spacing.x,depth=double(d.samplesZ-1)*d.spacing.y;
     if(brush.strength==0||double(brush.center.x)+brush.radius<0||double(brush.center.y)+brush.radius<0||double(brush.center.x)-brush.radius>width||double(brush.center.y)-brush.radius>depth) return false;

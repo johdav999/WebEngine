@@ -51,10 +51,10 @@ function redReflection(on,off) {
   assert.equal(on.passes,off.passes+1,'Planar-only water must add exactly one pass per view');
   assert(on.gpuTextureBytes>off.gpuTextureBytes&&on.gpuDepthBytes>off.gpuDepthBytes,`Reflection targets should release when disabled: ${backend} texture ${off.gpuTextureBytes}->${on.gpuTextureBytes}, depth ${off.gpuDepthBytes}->${on.gpuDepthBytes}`);
   await preset(0);const saved=await shot('before-archive');
-  await page.evaluate(async()=>{const bytes=EngineSceneArchive.saveSceneBytes();if(bytes[8]!==29)throw Error('Expected current archive v19');if(!await EngineSceneArchive.openScene(new File([bytes],'planar.wescene')))throw Error('Archive open failed');});
+  await page.evaluate(async()=>{const bytes=EngineSceneArchive.saveSceneBytes();if(new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength).getUint32(8,true)<29)throw Error('Archive predates water settings');if(!await EngineSceneArchive.openScene(new File([bytes],'planar.wescene')))throw Error('Archive open failed');});
   const loaded=await shot('after-archive');assert(changed(saved,loaded,undefined,3)<40,'Planar material settings changed through scene archive load');
   result.backends[backend]={defaultPixels,reflectedRedPixels,belowPlaneRedPixels,offPasses:off.passes,onPasses:on.passes,quality};
-  result.checks.push(`${backend}: nearby-object pixels, below-plane clipping, optional pass/storage, 1x/4x, perspective/orthographic ordered views, resize, paused recovery, v17 scene archive`);
+  result.checks.push(`${backend}: nearby-object pixels, below-plane clipping, optional pass/storage, 1x/4x, perspective/orthographic ordered views, resize, paused recovery, scene archive round trip`);
   await page.close();
  }assert.deepEqual(result.errors,[]);console.log(JSON.stringify(result,null,2));}
  finally {await fs.writeFile(path.join(evidence,'result.json'),JSON.stringify(result,null,2));await browser.close();}

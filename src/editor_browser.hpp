@@ -3,6 +3,7 @@
 #include "engine/scene.hpp"
 #include "engine/scene_archive.hpp"
 #include "engine/editor_play.hpp"
+#include "engine/editor.hpp"
 #include "engine/effect_preview.hpp"
 #include "engine/orbit_controller.hpp"
 namespace engine {
@@ -13,8 +14,11 @@ void refreshBrowserEditor();
 void invalidateBrowserAnimationBinding();
 void invalidateBrowserPrefabBinding();
 void invalidateBrowserContentIteration();
+void invalidateBrowserAuthoring();
 bool browserEditorActive();
 void setBrowserEditorEnabled(bool enabled);
+void configureBrowserEditorComponents(EditorComponentSupport,std::shared_ptr<const EditorPropertyRegistry>);
+ComponentCodecs browserEditorCodecs();
 void bindBrowserEditor(Scene& scene,CameraComponent& camera,OrbitController& orbit,AssetLibrary& assets,std::span<const RenderView> views={});
 void updateBrowserEditorCamera(const InputSystem& input,float dt,float height);
 void unbindBrowserEditor(); // Before the borrowed scene, camera or orbit controller is destroyed.

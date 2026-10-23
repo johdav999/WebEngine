@@ -1,6 +1,61 @@
 # WebEngine
 
+## Procedural planet flight
+
+The optional [planet stage 1 demo](docs/planet-terrain.md) flies continuously from
+space to a procedural cube-sphere surface on browser WebGPU/WebGL2 and native
+Windows. It combines double-precision planet positions, camera-relative meshes,
+bounded quadtree refinement, parent-surface morphs and visual seam skirts. Enable
+`WEBENGINE_BUILD_PLANET_DEMO=ON`, build `planet_demo` for the browser or
+`webengine_planet_windows` for Windows, and use **Descend to surface** or manual
+WASD/right-drag flight. Generated browser files live in `build/web-release/planet-site`.
+Stage 2 adds [stable source collision, radial gravity, landing, surface walking,
+jumping and takeoff](docs/planet-physics.md). Visual LOD never changes collision.
+Atmosphere, oceans and persistence remain future stages. See
+[stage 2 validation](docs/planet-stage2-validation.md) and the
+[stage 1 record](docs/planet-validation.md).
+
+## Multiplayer development milestone
+
+Optional `WebEngine::Network` now supplies a shared C++ session protocol with browser
+and Windows WebSocket adapters. The first [multiplayer milestone](docs/multiplayer.md)
+includes a headless authoritative arena server, browser/Windows clients and isolated
+test launchers in both editors. Enable `WEBENGINE_BUILD_MULTIPLAYER_DEMO=ON` in both
+builds, install the pinned gateway dependency, start the server, and use **Multiplayer
+test** in the editor. The launcher uses the fixed arena. See [validation](docs/multiplayer-validation.md).
+
+[Milestone 2](docs/multiplayer-scenes.md) adds **Host selected actor** and
+**Join authored scene** in both editors, a scene server and browser/Windows
+clients. It transfers a bounded static mesh/camera/light scene and replicates
+server-owned player instances using the selected actor's authored visuals.
+Source documents remain unchanged. See [M2 validation](docs/multiplayer-scenes-validation.md).
+
+[Milestone 7](docs/multiplayer-components.md) adds registered gameplay-component
+state replication with shared editor factories/properties, Everyone/Owner only
+audiences, staged validation and custom save/load/duplication. Browser and native
+Windows clients apply server state to real components. The example includes Vitals
+and Progress; games register their own types. M7 introduced MP07/WES3;
+the current M8–M10 scene schema is MP09 with WES4 manifests.
+See [M7 runtime evidence](docs/multiplayer-components-validation.md).
+
+[Runtime prefabs and gameplay RPCs/events](docs/multiplayer-runtime.md) add
+server-controlled spawning/despawning, editor template/permission authoring and
+bounded invocation registries. [Authoritative physics](docs/multiplayer-physics.md)
+runs rigid bodies and collisions on the server while both clients render passive
+replicas. [Guest lobbies](docs/multiplayer-lobbies.md) add invitations, rosters,
+server-issued tokens and recovery of the same player/owned objects after temporary
+connection loss. These work through both editor launchers. Recovery is in memory
+for the running service; the sample player keeps its kinematic controller.
+See [current browser/Windows validation](docs/multiplayer-runtime-validation.md).
+
 ## Native Windows desktop host
+
+Native retained GUI now supports Windows UI Automation (Invoke, Toggle, Value and
+RangeValue), plus explicit SDL touch/pen contacts with pressure, DPI conversion
+and capture cancellation on both native renderers. Browser semantic accessibility
+and multi-touch remain available on WebGPU/WebGL2. See
+[accessibility/input contracts](docs/accessibility-input.md) and
+[validation](docs/accessibility-input-validation.md).
 
 Build an offline-installable ZIP with `./scripts/package-windows.ps1` after the
 Windows build. It includes a dependency-checking launcher, app-local runtimes,
@@ -12,8 +67,38 @@ The optional [broader Windows acceptance runner](docs/windows-acceptance.md)
 checks animation, terrain, water, particles, shadows, HDR post and GPU recovery
 on Dawn, with framebuffer comparisons and explicit hardware coverage gaps.
 
-An optional SDL3 + Dawn/D3D12 executable shares the portable C++ engine, WebGPU
-renderer and shaders with the browser. Run `./scripts/setup-windows.ps1`, then
+The SDL3 desktop executable offers selectable Dawn and direct D3D12 backends.
+Dawn shares the browser WebGPU renderer/shaders; direct D3D12 runs the vehicle
+and GUI with resize/fullscreen/captures, plus static PBR materials, IBL, point/spot
+lights, cascaded/spot shadows, hardware-checked 4x MSAA, sky/fog and HDR bloom/color
+grading, GPU skeletal skinning, cached morph targets and layered terrain with
+normal/height blending and triplanar projection, plus reflective animated water,
+refraction/foam, underwater fog/caustics and contact wakes, plus billboard/plane FX,
+flipbooks, ribbons/surface trails, mesh particles and soft depth fading. Milestone 8
+adds general mesh instancing, semantic BC7 uploads and bounded device recovery.
+See [recovery and performance contracts](docs/windows-d3d12-recovery-performance.md)
+and [validation](docs/windows-d3d12-milestone8-validation.md).
+Launch `./build/windows/Release/webengine_lighting_windows.exe --backend d3d12`
+for a native gallery with interactive material, lighting, sky, fog and post controls.
+Launch `./build/windows/Release/webengine_animation_windows.exe --backend d3d12`
+for imported-rig playback/blending and independent morph controls. See
+[animated rendering](docs/windows-animation-rendering.md) and
+[milestone 4 validation](docs/windows-d3d12-milestone4-validation.md).
+Launch `./build/windows/Release/webengine_terrain_windows.exe --backend d3d12`
+for layer/relief/projection controls and independent camera/shadow detail. See
+[terrain contracts](docs/terrain.md) and [milestone 5 validation](docs/windows-d3d12-milestone5-validation.md).
+Launch `./build/windows/Release/webengine_water_windows.exe --backend d3d12`
+for water/underwater controls and moving-object wakes. See [water](docs/water.md)
+and [milestone 6 validation](docs/windows-d3d12-milestone6-validation.md).
+Launch `./build/windows/Release/webengine_fx_windows.exe --backend d3d12`
+for native particle/trail presets and fog/HDR/MSAA controls. See
+[FX rendering](docs/windows-fx-rendering.md) and [milestone 7 validation](docs/windows-d3d12-milestone7-validation.md).
+Launch with `--backend auto` (default): Dawn D3D12 → Vulkan → D3D11.
+Explicit `dawn`, `vulkan`, `d3d11` and `d3d12` choices remain strict.
+See [automatic fallback, diagnostics and recovery](docs/windows-graphics-fallback.md).
+See [backend scope, build options and captures](docs/windows-d3d12.md) and
+[separate native/browser evidence](docs/windows-d3d12-validation.md).
+Run `./scripts/setup-windows.ps1`, then
 `./scripts/build-windows.ps1`, and launch `./build/windows/Release/webengine_windows.exe`.
 Requires Windows x64, Visual Studio C++ tools, CMake and Python 3.12+.
 WASD/arrows drive; Space brakes; Shift handbrakes; R resets; P/Escape opens the
@@ -67,6 +152,39 @@ cross-page sculpt/paint with atomic dirty-page writeback,
 static collision, ground/ray queries and built-in scene saves.
 Open `?scene=terrain` for the browser demo; see [Terrain](docs/terrain.md).
 
+Hybrid terrain adds authored mesh cave/overhang sections alongside
+heightfields, with cell holes shared by rendering, collision and ground queries.
+Milestone 2 adds interactive hole/fill brushes, editable cave width/height/depth,
+and grouped undo/redo for the opening and mesh on browser and Windows.
+Milestone 3 adds bounded automatic seam preparation, matching boundary samples,
+and normal/material blending, with a close-up view and blend comparison controls.
+Milestone 4 adds hole-aware heightfield LOD and cave interior simplification that
+locks seams and blend regions. Camera/shadow detail never changes source collision.
+Milestone 5 saves explicit LOD recipes and automatically regenerates them on load.
+Both demo hosts support durable checkpoints and live scene replacement, retaining
+holes, seam blending, collision and editable entrance settings. The current demo
+uses a continuous indexed limestone cave with a rounded arch, varying tunnel cross-sections,
+three spacious chambers at different horizontal positions and 0/−3/−8 m elevation,
+narrow winding tunnels and fine stone relief.
+The Lower Grotto now has roughly ten times its previous volume (2.154× width,
+height and length) and a sculpted rock basin beside its dry walking route.
+Use **Lower grotto** for the room or **Grotto basin** for the bowl close-up.
+Mesh-contact boundary loops can also derive heightfield holes automatically;
+see [mesh-shaped terrain cuts](docs/terrain-mesh-holes.md).
+Right-drag to look, WASD to fly, Q/E to descend/ascend, Shift to boost, and Escape
+to release camera controls. Click the browser scene to give it keyboard focus.
+Build the optional `hybrid_terrain_demo` browser or `webengine_hybrid_terrain_windows`
+example for the same walkable cave on both targets. See [hybrid terrain](docs/hybrid-terrain.md)
+for APIs, limitations, launch commands and validation.
+Reusable terrain-mesh formation preparation adds smoothly joined stalagmites and
+stalactites with direction, length, radius, bend and seed controls, protected tips
+in render LOD, full-base collision and existing archive persistence. Both cave
+demo hosts use it. See [terrain mesh formations](docs/terrain-mesh-formations.md).
+Terrain-mesh lakes add smooth basins, fitted water surfaces and finite water regions
+for cave ponds, with collision, LOD and saved state. See [lake contracts](docs/terrain-mesh-lakes.md).
+
+
+
 Versioned application snapshots, custom component codecs, stable saved identities
 and IndexedDB/localStorage byte adapters build on the scene archives. The inspector
 offers an explicit browser checkpoint under **Scenes & assets → Browser saves**.
@@ -106,6 +224,15 @@ A C++20 browser 3D engine starter, compiled to WebAssembly with Emscripten. The 
 The demo automatically loads `tests/fixtures/Knarr.fbx` through the FBX importer, including its seven embedded base-color textures and material assignments. It renders with a ground grid, a perspective orbit camera, a directional light, a moving point light, and overlay axes. Pause motion, switch lights, drag to orbit, scroll to zoom, or reset the camera.
 
 The browser build copies the Knarr asset to `dist/assets/Knarr.fbx`, which the page fetches at startup. Use **Import FBX / GLB** to select one local binary or ASCII `.fbx` file or binary glTF 2.0 `.glb` file together with its companion images. Embedded images load automatically; external references resolve against selected images by filename, case-insensitively. Missing images produce an inspector warning and use the material color. **Override texture** applies an image to every material of the imported mesh. Files stay local; no file upload is involved. **Restore demo** returns to the original cube scene. Reload the page to load Knarr again.
+
+## Shared Windows and browser authoring
+
+Run `build/windows/Release/webengine_editor.exe` after `scripts/build-windows.ps1`
+and choose **Authoring tools**. Terrain, animation, AI, prefab, FX and cinematic
+forms use the same optional `engine_editor_gui` panel available through **Shared
+authoring tools** in the browser editor. Standard asset files, independent document
+history and scene assignments remain shared. See [workflows and remaining advanced
+UI differences](docs/editor-authoring.md) and [validation](docs/editor-authoring-validation.md).
 
 ## Scene editor
 
@@ -1176,7 +1303,8 @@ local TRS poses (including FBX pivots, animation layers and transform inheritanc
 at 30 Hz, with both endpoints, then discards parser data. At runtime C++ samples
 poses, blends translations/scales and shortest-arc quaternion rotations, resolves
 the hierarchy, and builds bone matrices. **Vertex deformation and normal skinning
-run on the GPU**, using a shared immutable joint/weight vertex stream and a
+run on the GPU** in browser WebGPU and native Dawn/direct D3D12, using a shared
+immutable joint/weight vertex stream and a
 read-only bone storage buffer. Skeletal-only animation needs no per-frame CPU vertex
 deformation or mesh upload. Active morph targets use the cached CPU deformation
 path described below. Actor/component placement happens after skinning; preview fitting
@@ -1434,6 +1562,11 @@ for the moving marker plus 1,136 camera/light/environment/shadow bytes: **1,296 
 perform zero uniform writes and no scene matrix rebuilds; camera orbit/reset
 updates only globals. The controlled-clock checks establish upload reduction
 and rendering correctness, not an FPS benchmark.
+
+Direct D3D12 now provides [detailed GPU profiling](docs/windows-gpu-profiling.md):
+fenced timestamp samples, nested pass durations, rolling statistics and on-demand
+Perfetto/Chrome trace export. Use `WEBENGINE_GPU_TIMING=0` for native profiling-off
+comparisons; browser WebGPU retains `?gpuTiming=off`.
 
 ### Screen-size mesh detail and shadow budgets
 
@@ -1712,3 +1845,59 @@ Archive v31 saves authored references and selected restoration requirements, omi
 resident caches. Open `?editor=1&scene=regions`; applications own loaders, predictive
 movement gating and restore handoff. See [contracts](docs/region-streaming.md) and
 [validation](docs/region-streaming-validation.md).
+
+## Optional compiled code modules
+
+Use `WebEngine::Modules` and the [external plugin template](examples/modules/README.md)
+for optional reusable C++ code plugins. The library has no rendering or platform
+dependency and supports native Windows and Wasm. Explicit typed registration,
+dependency/version validation and staged immutable publication preserve module
+ownership and independent session state. It is source-linked, with no dynamic
+DLL/Wasm loading. See [API/lifetimes](docs/modules.md) and
+[native/browser reproduction](docs/modules-validation.md).
+
+## Optional quest kernel
+
+`WebEngine::Quests` builds on the compiled module system with validated content,
+typed extensible objectives/conditions, sequential stages and branches, scoped
+events, bounded candidate transactions and versioned snapshots. Application
+sessions own runtime state; game policy owns rewards, puzzle rules and saves.
+The same portable library runs in browser Wasm and Windows. Enable
+`WEBENGINE_BUILD_QUESTS`; see [API and ownership](docs/quests.md),
+[standalone/custom-module sample](examples/quests/CMakeLists.txt) and
+[native/browser validation](docs/quests-validation.md). The delivered M2 kernel
+does not migrate Paws or supply its Windows application.
+
+The [M3 quest host sample](examples/quests/README.md) adds a shared browser/Windows
+controller with persistent Save/Load, pause-aware Application timing, scene travel
+and portable file exchange. Progress lives outside presentation scenes; one save
+joins the sample wallet and quest receipts. See [ownership/storage](docs/quests-host.md)
+and [actual host verification](docs/quests-host-validation.md).
+
+
+Multiplayer [milestone 3](docs/multiplayer-prediction.md) adds automatic local movement prediction and
+server reconciliation to authored-scene Host/Join sessions on both runtimes.
+
+
+Multiplayer [milestone 4](docs/multiplayer-presentation.md) now interpolates remote players and smooths
+local reconciliation corrections automatically in authored-scene Host/Join clients.
+
+
+Multiplayer [milestone 5](docs/multiplayer-replication.md) adds per-peer delta snapshots, periodic
+keyframes, baseline recovery and distance interest filtering to authored-scene
+Host/Join on browser and Windows. Rebuild scene server/clients together for MP05;
+saved scenes and source editor documents remain compatible.
+
+
+Multiplayer [milestone 6](docs/multiplayer-authoring.md) adds saved ownership/relevance settings,
+server-owned mesh actors and isolated-session diagnostics to both editors.
+Scene clients/server now use MP06; saved archive and package envelopes are unchanged.
+
+### Joined terrain cliffs
+
+The optional hybrid terrain demo includes an open-path, steep limestone cliff
+joined to the heightfield through matching grid edges, heights, normals and
+triplanar materials. **Cliff / terrain join** opens its close view on browser and
+Windows. The portable builder returns an immutable cut/mesh pair with protected
+LOD and full-detail collision. See [cliff contracts](docs/terrain-cliffs.md) and
+[validation](docs/terrain-cliffs-validation.md).

@@ -5,20 +5,23 @@
 int main(int argc,char** argv) {
     std::unique_ptr<engine::DesktopSessionLog> log;std::filesystem::path probe;
     try {
+        engine::DesktopBackend backend=engine::DesktopBackend::Automatic;bool fullscreen=false;
         std::filesystem::path model;auto files=vehicle_example::vehicleFileSettings();engine::DesktopLogSettings logs;logs.application="Vehicle";logs.redirectStandardStreams=true;
         for(int i=1;i<argc;++i) {
             const std::string key=argv[i];
-            if((key=="--model"||key=="--assets"||key=="--user-dir"||key=="--log-dir"||key=="--distribution-test")&&i+1<argc) {
+            if(key=="--backend"&&i+1<argc){const std::string value=argv[++i];if(value=="auto")backend=engine::DesktopBackend::Automatic;else if(value=="vulkan")backend=engine::DesktopBackend::DawnVulkan;else if(value=="d3d11")backend=engine::DesktopBackend::DawnD3D11;else if(value=="dawn")backend=engine::DesktopBackend::Dawn;else if(value=="d3d12")backend=engine::DesktopBackend::Direct3D12;else throw std::invalid_argument("Backend must be auto, dawn, vulkan, d3d11 or d3d12");}
+            else if(key=="--fullscreen")fullscreen=true;
+            else if((key=="--model"||key=="--assets"||key=="--user-dir"||key=="--log-dir"||key=="--distribution-test")&&i+1<argc) {
                 const std::string value=argv[++i];const auto path=std::filesystem::path(std::u8string(value.begin(),value.end()));
                 if(key=="--model")model=path;else if(key=="--assets")files.assetDirectory=path;else if(key=="--log-dir")logs.directory=path;else if(key=="--distribution-test")probe=path;else files.userDirectory=path;
-            }else {std::cout<<"webengine_windows [--model file.glb] [--assets directory] [--user-dir directory]\nWASD/arrows drive; P/Escape opens settings/audio/files/checkpoints; R resets; F11 fullscreen.\n";return key=="--help"?0:1;}
+            }else {std::cout<<"webengine_windows [--backend auto|dawn|vulkan|d3d11|d3d12] [--fullscreen] [--model file.glb] [--assets directory] [--user-dir directory]\nWASD/arrows drive; P/Escape opens settings/audio/files/checkpoints; R resets; F11 fullscreen.\n";return key=="--help"?0:1;}
         }
         log=std::make_unique<engine::DesktopSessionLog>(logs);
         log->write(engine::DesktopLogLevel::Info,"Native vehicle starting; executable resolved independently of working directory");
         if(!probe.empty()&&files.userDirectory.empty())throw std::invalid_argument("Distribution tests require an explicit isolated --user-dir");
         engine::DesktopSettings settings;settings.title="WebEngine | Windows vehicle";
-        settings.hidden=!probe.empty();
-        engine::DesktopHost host(settings);
+        settings.hidden=!probe.empty();settings.backend=backend;
+        engine::DesktopHost host(settings);if(fullscreen)host.setFullscreen(true);
         vehicle_example::VehicleDesktopDemo demo(host,model,files);
         if(!probe.empty()){
             const auto deadline=host.nowSeconds()+120;double time=0;

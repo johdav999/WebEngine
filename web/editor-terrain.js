@@ -11,7 +11,7 @@
       <label><input id="editor-terrain-collision" type="checkbox" checked> Static terrain collision</label>
       <button id="editor-terrain-create">Create terrain</button>
     </details>
-    <label>Brush<select id="editor-terrain-tool"><option value="select">Select / navigate</option><option value="raise">Raise</option><option value="lower">Lower</option><option value="flatten">Flatten</option><option value="smooth">Smooth</option><option value="paint">Paint surface</option></select></label>
+    <label>Brush<select id="editor-terrain-tool"><option value="select">Select / navigate</option><option value="raise">Raise</option><option value="lower">Lower</option><option value="flatten">Flatten</option><option value="smooth">Smooth</option><option value="paint">Paint surface</option><option value="hole">Cut hole</option><option value="fill">Restore ground</option></select></label>
     <label>Radius (terrain metres)<input id="editor-terrain-radius" type="number" min="0.1" max="128" step="0.25" value="4"></label>
     <label>Strength per stamp<input id="editor-terrain-strength" type="number" min="0.01" max="1" step="0.05" value="0.4"></label>
     <label>Flatten height (local m)<input id="editor-terrain-flatten" type="number" min="-1000000" max="1000000" step="0.25" value="0"></label>
@@ -53,7 +53,7 @@
   function cursor(points,x,z,height){hit={x,z,height};overlay.setAttribute('viewBox',`0 0 ${canvas.width} ${canvas.height}`);ring.setAttribute('points',points.reduce((s,v,i)=>s+(i%2?'':(i?' ':''))+v+(i%2?'':','),''));overlay.style.display='block';}
   function locate(x,y){hit=null;const r=canvas.getBoundingClientRect(),s=settings();if(!enabled()||mode==='select'||!Number.isFinite(s.radius)||s.radius<.1||s.radius>128||!Module._engine_editor_terrain_hit((x-r.left)*canvas.width/r.width,(y-r.top)*canvas.height/r.height,s.radius)){overlay.style.display='none';return false;}return !!hit;}
   function stamp(){
-    if(!gesture||!hit)return;const s=settings(),m={raise:0,lower:0,flatten:1,smooth:2,paint:3}[mode];
+    if(!gesture||!hit)return;const s=settings(),m={raise:0,lower:0,flatten:1,smooth:2,paint:3,hole:4,fill:5}[mode];
     const ok=Module._engine_editor_terrain_stamp(m,hit.x,hit.z,s.radius,mode==='lower'?-s.strength:s.strength,s.height,s.layer);
     if(!ok){release();refresh();return;}
     gesture.last={x:hit.x,z:hit.z};gesture.time=performance.now();

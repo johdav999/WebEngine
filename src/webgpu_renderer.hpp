@@ -1,4 +1,5 @@
 #pragma once
+#include "underwater_render.hpp"
 #include "engine/scene.hpp"
 #include "engine/camera_component.hpp"
 #include "engine/performance.hpp"
@@ -203,7 +204,7 @@ private:
         FxFrame fxFrame;
         wgpu::BindGroup binding,reflectionBinding,underwaterBinding,particleBinding,clearBinding;
         wgpu::Buffer underwaterBuffer;
-        std::array<std::byte,256> underwaterShadow{};
+        UnderwaterUniform underwaterShadow{};
         bool underwaterValid=false;
         std::uint64_t underwaterRevision=0;
         wgpu::BindGroup skyBinding,skyTextureBinding;

@@ -4,7 +4,10 @@ WebEngine has an optional public Windows x64 desktop host alongside its browser 
 Applications link `WebEngine::Desktop` and include `engine/desktop.hpp`; see
 [public API and ownership contracts](windows-desktop.md).
 It compiles the existing portable engine to native C++ and uses SDL3 windows/input
-and Dawn WebGPU over Direct3D 12. It does not embed a browser.
+and selectable Dawn WebGPU over Direct3D 12 or direct D3D12. It does not embed a
+browser. Automatic selects the Dawn fallback chain by default; direct D3D12 currently covers
+the vehicle/native GUI, conventional/layered terrain materials, PBR/lighting/shadow/MSAA, sky/fog/HDR, animated skin/morph, water/underwater and FX milestones. See [backend scope and
+validation commands](windows-d3d12.md).
 
 ## Build and run
 
@@ -18,6 +21,7 @@ build this proof in Release, not Debug or MinGW.
 ./scripts/setup-windows.ps1
 ./scripts/build-windows.ps1
 ./build/windows/Release/webengine_windows.exe
+./build/windows/Release/webengine_windows.exe --backend d3d12 --fullscreen
 # Optional native GLB preview beside the course:
 ./build/windows/Release/webengine_windows.exe --model ./assets/formula1-red-driving.glb
 # For a separate build while the previous app is open:
@@ -84,9 +88,10 @@ Ctrl+A/C/X/V clipboard shortcuts; Enter returns focus to Resume. Text owns keys
 before driving shortcuts. Controller D-pad traverses/adjusts, A activates, B
 returns and Start toggles the menu, including while driving triggers await neutral.
 
-The browser and desktop targets retain the same core, WebGPU/WGSL and GUI render
-implementation. SDL/Windows/Dawn types stay private. The public browser Renderer
-facade retains WebGL2 fallback; native Dawn uses D3D12. See
+The browser and desktop targets retain the same core and GUI model. Native Dawn
+shares WebGPU/WGSL rendering; direct D3D12 consumes shared scene/GUI records through
+private HLSL pipelines. SDL/Windows/Dawn/D3D12 types stay private. The public browser Renderer
+facade retains WebGL2 fallback; native Automatic tries Dawn D3D12, Vulkan and D3D11. See
 [desktop API, lifetimes and limitations](windows-desktop.md).
 
 ## Validation
@@ -138,3 +143,12 @@ animation, terrain, water/underwater, particles, lighting/shadows, HDR post and
 MSAA with actual framebuffer comparisons. It also uses real resize, fullscreen
 and minimize/restore operations and induced Dawn device loss. Its report records
 which physical controller, mixed-DPI, sleep/wake and driver cases remain open.
+
+
+Native vehicle defaults to `--backend auto`; use `dawn`, `vulkan`, `d3d11` or
+`d3d12` for a strict explicit choice. See [graphics fallback](windows-graphics-fallback.md).
+
+
+Direct D3D12 now supports bounded device recovery, ordinary mesh instancing and
+semantic BC7 uploads with RGBA fallback. See [recovery/performance contracts](windows-d3d12-recovery-performance.md)
+and [milestone 8 evidence](windows-d3d12-milestone8-validation.md).

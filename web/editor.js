@@ -171,7 +171,7 @@
     return axis;
   }
   svg.addEventListener('pointerdown',event=>{
-    if(!active||busy||playing||window.EngineEditorFx?.active()||event.button!==0||!event.target.hasAttribute('data-axis'))return;
+    if(window.authoringState?.visible||!active||busy||playing||window.EngineEditorFx?.active()||event.button!==0||!event.target.hasAttribute('data-axis'))return;
     event.preventDefault();event.stopImmediatePropagation();canvas.focus({preventScroll:true});EngineInput.instance.cancelAll();
     if(Module._engine_editor_begin(mode,gizmoAxis(event),...point(event))!==1)return;
     drag={id:event.pointerId};svg.setPointerCapture(event.pointerId);refresh();
@@ -180,7 +180,7 @@
   svg.addEventListener('pointerup',event=>{if(drag?.id===event.pointerId){event.preventDefault();Module._engine_editor_drag(...point(event));Module._engine_editor_end(0);release();}});
   for(const type of ['pointercancel','lostpointercapture'])svg.addEventListener(type,event=>{if(drag?.id===event.pointerId)cancel();});
   canvas.addEventListener('pointerdown',event=>{
-    if(!active||busy||playing||window.EngineEditorFx?.active()||event.button!==0||event.altKey)return;
+    if(window.authoringState?.visible||!active||busy||playing||window.EngineEditorFx?.active()||event.button!==0||event.altKey)return;
     event.preventDefault();event.stopImmediatePropagation();canvas.focus({preventScroll:true});EngineInput.instance.cancelAll();
     click={id:event.pointerId,x:event.clientX,y:event.clientY};canvas.setPointerCapture(event.pointerId);
   },true);
@@ -191,6 +191,7 @@
   },true);
   canvas.addEventListener('pointercancel',()=>{click=null;},true);
   document.addEventListener('keydown',event=>{
+    if(window.authoringState?.visible)return;
     if(window.EngineEditorAi?.active()||window.EngineEditorAiActor?.active()||window.EngineEditorAnimation?.active())return;
     if(event.key==='Escape'&&window.EngineEditorFx?.cancelGesture()){event.preventDefault();event.stopImmediatePropagation();return;}
     if(event.key==='Escape'&&window.EngineEditorFx?.active()){Module._engine_editor_fx_preview(0);event.preventDefault();event.stopImmediatePropagation();return;}

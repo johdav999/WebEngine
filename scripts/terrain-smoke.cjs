@@ -45,7 +45,7 @@ function difference(a,b) {
    await page.mouse.move(box.x+box.width*.4,box.y+box.height*.5);await page.mouse.down();await page.mouse.move(box.x+box.width*.56,box.y+box.height*.56,{steps:10});await page.mouse.up();
    const orbited=await shot('orbited');assert(difference(marked,orbited)>3000,'Camera gesture has no effect');
    const download=page.waitForEvent('download');await page.locator('#save-scene').click();const file=await download;
-   const savedPath=path.join(evidence,`${backend}.wescene`);await file.saveAs(savedPath);const bytes=await fs.readFile(savedPath);assert.equal(bytes.readUInt32LE(8),23);
+   const savedPath=path.join(evidence,`${backend}.wescene`);await file.saveAs(savedPath);const bytes=await fs.readFile(savedPath);assert.equal(bytes.readUInt32LE(8),35);
    // Open the real downloaded file; scene graph, query metadata, material, collider and ball survive.
    assert(await page.evaluate(async data=>EngineSceneArchive.openScene(new File([new Uint8Array(data)],'terrain.wescene')),Array.from(bytes)));
    const loaded=await shot('loaded');assert(difference(orbited,loaded)<40,'Scene archive changed paused terrain pixels');

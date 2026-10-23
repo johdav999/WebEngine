@@ -1,0 +1,18 @@
+include_guard(GLOBAL)
+# Deliberately ordinary static libraries: selected code plugins share the build's
+# C++ toolchain. API descriptors do not promise cross-toolchain binary compatibility.
+function(webengine_add_module target)
+  cmake_parse_arguments(M "" "ALIAS;PUBLIC_INCLUDE_DIR" "SOURCES;PUBLIC_DEPENDENCIES;PRIVATE_DEPENDENCIES" ${ARGN})
+  if(M_UNPARSED_ARGUMENTS OR NOT M_ALIAS OR NOT M_SOURCES OR NOT M_PUBLIC_INCLUDE_DIR)
+    message(FATAL_ERROR "webengine_add_module requires ALIAS, SOURCES, PUBLIC_INCLUDE_DIR and known arguments")
+  endif()
+  add_library(${target} STATIC ${M_SOURCES})
+  add_library(${M_ALIAS} ALIAS ${target})
+  target_compile_features(${target} PUBLIC cxx_std_20)
+  target_include_directories(${target} PUBLIC "${M_PUBLIC_INCLUDE_DIR}")
+  target_link_libraries(${target} PUBLIC ${M_PUBLIC_DEPENDENCIES} PRIVATE ${M_PRIVATE_DEPENDENCIES})
+  if(EMSCRIPTEN)
+    target_compile_options(${target} PUBLIC -fexceptions)
+    target_link_options(${target} INTERFACE -fexceptions)
+  endif()
+endfunction()

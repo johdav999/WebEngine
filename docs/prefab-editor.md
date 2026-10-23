@@ -48,12 +48,16 @@ new upstream children appear where no local override conflicts. Unmapped/new
 instance children retain independent identities.
 
 An upstream deletion of a locally edited subtree is a conflict. Type changes,
-missing parents, key collisions, required-child changes, nested instance updates
+missing parents, key collisions, required-child changes, conflicting nested revisions
 and unsupported configuration overrides reject before publication. Configuration
 outside the property inspector is checked through the existing archive codecs;
 unexposed edits are rejected rather than silently replaced. Component-owned child
 structure overrides require unpacking; protected skeletal/FX/route children remain
-managed by their owner. Nested linked prefabs must be unpacked before capture.
+managed by their owner. Nested linked prefabs survive capture, instantiation and
+archive round trips. The definition workbench can nest another immutable source;
+dependency refresh preserves supported local overrides and rejects cycles before
+publication. See [content iteration](content-iteration.md) and the
+[shared native/browser frontend](editor-authoring.md).
 
 Publication exchanges complete staged actor subtrees on the idle scene owner.
 Saved identities survive; runtime handles are recreated through normal registration.
@@ -123,3 +127,12 @@ and instances. Duplication remaps link bindings along with normal saved identiti
 No factory registry or editor history is persisted.
 
 See [validation](prefab-editor-validation.md) and [scene archives](scene-archives.md).
+
+
+## Authoritative network instances (M8)
+
+Optional WebEngine::NetworkScene adds PrefabSpawner over existing Actor prototypes
+or PrefabAsset canonical definitions; it does not create a second asset format.
+The scene profile uses Runtime prefab ownership for its frozen whitelist. Scene
+owns instances; the spawner owns detached templates/handle maps and explicit clear
+requests deferred destruction. See [lifetime, limits and RPC authoring](multiplayer-runtime.md).

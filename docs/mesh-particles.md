@@ -124,3 +124,7 @@ DEVICE_SCALE_FACTOR). Use Playwright/pngjs, NODE_PATH, BROWSER_EXECUTABLE, DEMO_
 and EVIDENCE_DIR against the exact staged host/Wasm. See [validation](mesh-particles-validation.md).
 
 Optional particle collision and independent projected decals are now delivered; see [contact/decal contracts](fx-contacts-decals.md) for responses, queued output, authoring, budgets and persistence. Rigid-body particles and PBR decal channels remain outside this increment.
+
+
+Native Dawn and direct D3D12 support this presentation contract; see
+[native FX scope and validation](windows-fx-rendering.md).

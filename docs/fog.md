@@ -4,6 +4,12 @@
 New scenes have no fog. `setFog(std::nullopt)` disables it. Invalid settings throw
 before replacing the previous value. `Scene::fog()` returns a const optional.
 
+Native Dawn and direct D3D12 (milestone 3) share these settings, per-view opt-outs
+and analytic fog payload. Direct coverage includes conventional World materials
+(including skinning/morphs from milestone 4) and
+sky; water and particle/ribbon rendering remain outside that backend's scope.
+See [native backend scope](windows-d3d12.md).
+
 ```cpp
 engine::FogSettings fog;
 fog.color = {0.65f, 0.75f, 0.85f}; // Linear display light, not sRGB.

@@ -48,8 +48,10 @@ std::optional<float> boundsHit(Ray ray,const MeshBounds& bounds,const Mat4& mode
     return near;
 }
 }
-EditorSession::EditorSession(Scene& scene,std::size_t historyLimit,AssetLibrary* assets,std::shared_ptr<const EditorPropertyRegistry> properties)
-    :scene_(scene),limit_(historyLimit),assets_(assets ? assets : &ownedAssets_),properties_(std::move(properties)) {
+EditorSession::EditorSession(Scene& scene,std::size_t historyLimit,AssetLibrary* assets,std::shared_ptr<const EditorPropertyRegistry> properties,EditorComponentSupport components)
+    :scene_(scene),limit_(historyLimit),assets_(assets ? assets : &ownedAssets_),properties_(std::move(properties)),components_(std::move(components)) {
+    if(components_.factories.size()>64)throw std::invalid_argument("Editor factory budget");
+    std::vector<std::string> keys;for(const auto& factory:components_.factories){if(!Node::validSavedId(factory.key)||factory.label.empty()||!factory.create||std::find(keys.begin(),keys.end(),factory.key)!=keys.end())throw std::invalid_argument("Invalid editor component factory");keys.push_back(factory.key);}
     if(!properties_) throw std::invalid_argument("Missing editor property registry");
     if(!limit_||limit_>10000) throw std::invalid_argument("Invalid editor history limit");
 }

@@ -40,8 +40,8 @@ function changed(a,b) {
   try {
     const page=await pageFor();await ready(page,'renderer=webgl2&resilienceTest=1');
     assert.equal((await quality(page)).backend,'webgl2');
-    assert.equal((await quality(page)).shadows,false);assert.equal((await quality(page)).pbr,false);
-    assert.equal(await page.locator('#shadows').isDisabled(),true);
+    assert.equal((await quality(page)).shadows,true);assert.equal((await quality(page)).pbr,false);
+    assert.equal(await page.locator('#shadows').isDisabled(),false);
     await page.locator('#pause').click();await frames(page);
     const ship=await picture(page,'knarr');
     await page.locator('#sun').uncheck();await frames(page);assert(changed(ship,await picture(page,'no-sun'))>1000);
@@ -61,7 +61,7 @@ function changed(a,b) {
     await frames(page);assert.deepEqual(pixels(await picture(page,'after-restore')),pixels(before));
     assert.equal(await page.evaluate(()=>{Module._engine_lifecycle_snapshot();return window.__applicationSnapshot.simulationSeconds===beforeClock.simulationSeconds&&window.__applicationSnapshot.state===2;}),true);
     assert.equal(await page.evaluate(()=>Module.canvas.getContext('webgl2').getError()),0);
-    result.checks.push('Forced WebGL 2: textured ship, light controls, orbit, atomic quality budgets, disabled shadows, identical paused pixels/clocks after real context loss/restoration');
+    result.checks.push('Forced WebGL 2: textured ship, light controls, orbit, atomic quality budgets, directional shadows, identical paused pixels/clocks after real context loss/restoration');
     await page.close();
 
     for(const [name,init] of [

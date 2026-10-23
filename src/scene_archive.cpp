@@ -3,6 +3,7 @@
 #include "engine/prefab_asset.hpp"
 #include "engine/region_stream.hpp"
 #include "engine/scene_archive.hpp"
+#include "engine/mesh_optimizer.hpp"
 #include "engine/decal.hpp"
 #include "engine/vehicle_component.hpp"
 #include "engine/persistence.hpp"
@@ -45,7 +46,7 @@ public:
     bool reading=false;
     std::uint32_t collisionDepth=0;
     bool referencesOnly=false; // In-memory duplication transport; never a persisted format.
-    std::uint32_t version=34;
+    std::uint32_t version=36;
     std::uint32_t effectDepth=0,prefabDepth=0;
     std::span<const std::byte> input;
     std::vector<std::byte> output;
@@ -259,6 +260,7 @@ public:
         fields(v.samplesX,v.samplesZ,v.chunkCells,v.spacing,v.textureMeters,v.heights,v.material);
         if(version>=12) fields(v.lodLevels,v.lodPixels);else if(reading) v.lodLevels=0;
         if(version>=25)fields(v.physicalSurface,v.cellSurfaces);
+        if(version>=35)io(v.holes);
         v.validate();
     }
     void io(MaterialLayer& v) {fields(v.texture,v.color,v.roughness,v.uvScale,v.uvOffset);if(version>=23)fields(v.normalHeightTexture,v.normalScale,v.heightScale,v.heightBias);}
@@ -293,6 +295,7 @@ public:
     }
     void io(Mesh& v) {
         fields(v.vertices,v.morphTargets,v.skin,v.skeleton,v.indices,v.materials,v.parts,v.warnings);
+        if(version>=36)io(v.lodRecipe);
         require(v.indices.size()%3==0,"Invalid archive triangle count");
         for(auto index:v.indices) require(index<v.vertices.size(),"Archive mesh index out of range");
         std::uint64_t end=0;
@@ -308,6 +311,21 @@ public:
             require(std::abs(sum-1)<0.001f,"Unnormalized archive skin weights");
         }
         v.validateMorphTargets();
+        MeshOptimizer::validateLodRecipe(v);
+        if(reading&&v.lodRecipe){
+            // Charge derived caches and conservative temporary/work allowance to
+            // the aggregate decode budget before starting bounded CPU generation.
+            allocation(v.vertices.size()*512+v.indices.size()*64+v.parts.size()*v.vertices.size()*16);
+            MeshOptimizer::regenerateLods(v);
+        }
+    }
+    void io(MeshLodRecipe& v) {
+        fields(v.version,v.levels,v.lockBorders);
+        require(v.version==1&&v.levels>=1&&v.levels<=3,"Unsupported LOD recipe");
+        std::uint32_t count=static_cast<std::uint32_t>(v.lockedVertices.size());io(count);
+        require(count<=90000,"LOD recipe lock budget exceeded");
+        if(reading){allocation(count);v.lockedVertices.resize(count);}
+        bytes(v.lockedVertices.data(),count);
     }
     void io(EnvironmentLevel& v) { fields(v.size,v.pixels); }
     void io(Environment& v) { fields(v.name,v.specular,v.diffuse,v.lutSize,v.brdf);v.validate(); }
@@ -394,13 +412,14 @@ public:
         if(dynamic_cast<const Component*>(&node)&&customType(t)) return Kind::Custom;
         invalid("Custom node types require an application serializer; refusing to lose their behavior");
     }
-    static std::unique_ptr<Node> copy(const Node& source,const ArchiveLimits& limits,bool regenerate) {
+    static std::unique_ptr<Node> copy(const Node& source,const ArchiveLimits& limits,bool regenerate,const ComponentCodecs& codecs) {
         source.requireIdle();
         require(!source.archiveTransient()&&!dynamic_cast<const Scene*>(&source)&&!source.isProtectedChild(),"Cannot duplicate a scene root or protected implementation child");
         Node::TraversalGuard guard(*const_cast<Node*>(&source));
-        ArchiveCodec writer(limits);writer.referencesOnly=true;
+        ArchiveCodec writer(limits);writer.referencesOnly=true;writer.custom=codecs.entries();
+        source.visit([&](const Node& n,const Mat4&){if(const auto* codec=writer.customType(typeid(n)))require(!codec->resolve,"Subtree codecs requiring scene resolution need a full scene clone");});
         writer.indexNodes(source);writer.writeNode(*const_cast<Node*>(&source));
-        ArchiveCodec reader(writer.output,limits);reader.resources=writer.resources;
+        ArchiveCodec reader(writer.output,limits);reader.resources=writer.resources;reader.custom=writer.custom;
         auto clone=reader.readNode();
         require(reader.offset==reader.input.size(),"Unexpected duplication data");
         if(!regenerate)return clone;
@@ -813,13 +832,13 @@ namespace {
 constexpr std::array<std::byte,8> magic={std::byte{'W'},std::byte{'E'},std::byte{'S'},std::byte{'C'},std::byte{'E'},std::byte{'N'},std::byte{'E'},std::byte{0}};
 std::vector<std::byte> envelope(std::vector<std::byte> payload,const ArchiveLimits& limits) {
     ArchiveCodec header(limits);auto signature=magic;header.bytes(signature.data(),signature.size());
-    std::uint32_t version=34,crc=checksum(payload);std::uint64_t size=payload.size();header.fields(version,size,crc);header.bytes(payload.data(),payload.size());return std::move(header.output);
+    std::uint32_t version=36,crc=checksum(payload);std::uint64_t size=payload.size();header.fields(version,size,crc);header.bytes(payload.data(),payload.size());return std::move(header.output);
 }
 std::span<const std::byte> open(std::span<const std::byte> bytes,const ArchiveLimits& limits,std::uint32_t& version) {
     require(bytes.size()<=limits.maxBytes,"Archive size limit exceeded");ArchiveCodec header(bytes,limits);
     std::array<std::byte,8> signature{};header.bytes(signature.data(),signature.size());require(signature==magic,"This is not a WebEngine archive");
     std::uint32_t crc=0;std::uint64_t size=0;header.fields(version,size,crc);
-    require(version>=1&&version<=34,"Unsupported WebEngine archive version");require(size==bytes.size()-header.offset,"Truncated archive or trailing data");
+    require(version>=1&&version<=36,"Unsupported WebEngine archive version");require(size==bytes.size()-header.offset,"Truncated archive or trailing data");
     const auto payload=bytes.subspan(header.offset);require(checksum(payload)==crc,"Archive checksum mismatch");return payload;
 }
 }
@@ -847,8 +866,8 @@ AssetLibrary SceneArchive::loadAssets(std::span<const std::byte> bytes,const Arc
     AssetLibrary result;codec.io(result);require(codec.offset==codec.input.size(),"Unexpected archive payload data");return result;
 }
 AssetLibrary SceneArchive::collectAssets(const Scene& scene) { return ArchiveCodec::collect(scene); }
-std::unique_ptr<Node> SceneArchive::cloneSubtree(const Node& node,const ArchiveLimits& limits) {return ArchiveCodec::copy(node,limits,false);}
-std::unique_ptr<Node> SceneArchive::duplicateSubtree(const Node& node,const ArchiveLimits& limits) { return ArchiveCodec::copy(node,limits,true); }
+std::unique_ptr<Node> SceneArchive::cloneSubtree(const Node& node,const ArchiveLimits& limits,const ComponentCodecs& codecs) {return ArchiveCodec::copy(node,limits,false,codecs);}
+std::unique_ptr<Node> SceneArchive::duplicateSubtree(const Node& node,const ArchiveLimits& limits,const ComponentCodecs& codecs) { return ArchiveCodec::copy(node,limits,true,codecs); }
 void ComponentCodecs::add(ComponentCodec codec) {
     require(Node::validSavedId(codec.key)&&codec.version>0&&codec.encode&&codec.decode,"Invalid custom component codec");
     const std::type_index builtins[]={typeid(Component),typeid(MeshComponent),typeid(SkeletalMeshComponent),typeid(TerrainComponent),

@@ -37,6 +37,9 @@ Recording/export and clock calls have overhead. Capture for diagnosis, then comp
 normal runs with capture off. No FPS improvement or sustained device-performance
 claim follows from a timing capture.
 
+Direct D3D12 also offers an independent [GPU pass trace](windows-gpu-profiling.md).
+Its hardware queue timestamps are not merged into this CPU clock domain.
+
 ## Instrumented work
 
 | Category | Current spans |
@@ -46,7 +49,7 @@ claim follows from a timing capture.
 | Animation | Per-character update, sampled/blended pose, layers and IK |
 | AI | Controllers, states, state-machine evaluation, task sequences/tasks, navigation and navmesh path search |
 | Loading | Asset-manager processing/loader start, FBX/GLB import, image decode, scene archive save/load, worker-result hydration and CPU resource upload work |
-| Render | WebGPU/WebGL2 render, scene collection and WebGPU queue submission |
+| Render | WebGPU/WebGL2/direct D3D12 render, scene collection and WebGPU queue submission |
 
 Names/subjects identify actors, states or asset IDs where the owning API has one.
 An instrumented Jolt call measures the blocking owner-thread duration, including

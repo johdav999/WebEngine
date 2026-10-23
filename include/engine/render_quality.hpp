@@ -15,7 +15,7 @@ struct PostProcessing {
     }
 };
 enum class QualityProfile { Low, Balanced, High };
-enum class RenderBackend { WebGpu, WebGl2 };
+enum class RenderBackend { WebGpu, WebGl2, Direct3D12 };
 enum class RenderBackendPreference { Automatic, WebGpu, WebGl2 };
 struct RenderCapabilities {
     std::uint32_t maxTextureDimension2D=4096, maxTextureArrayLayers=256;

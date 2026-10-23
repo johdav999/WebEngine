@@ -20,6 +20,7 @@ Authored transforms persist; editor selection, gizmos and undo history do not.
 | --- | --- |
 | Hierarchy | Scene, actor, component and plain node names, ordered children, local transforms, disabled state, tags and tick flags; required effect/skeletal children are restored once |
 | Geometry | Vertices, indices, tangents, material ranges, skin streams, morph targets/defaults, warnings and independent component morph weights |
+| Mesh LOD regeneration | Format-36 optional versioned recipe with explicit vertex locks; bounded derived static LOD caches regenerate once per shared mesh before document publication; older/unmarked meshes retain base geometry only |
 | Terrain | Shared source/material, chunk references and mesh instance settings; meshes regenerate on load; optional full-resolution collision uses existing physics archives |
 | Terrain detail and layers | Format-12 LOD generation thresholds/count, independent mesh camera/shadow policies, four-layer texture/color/roughness/UV definitions and linear RGBA weights; derived LOD meshes regenerate |
 | Terrain editing and streaming | Format-14 eager/source-only mode, edited height/weight source and resident chunk actors/collision; source-only loads rebuild saved chunks only; runtime streaming owners and undo history are application state |
@@ -62,10 +63,13 @@ nodes; all archive nodes remain loaded and saved.
 
 ## In-memory subtree duplication
 
-`SceneArchive::duplicateSubtree(node)` stages a built-in node hierarchy with shared
+`SceneArchive::duplicateSubtree(node, limits={}, codecs={})` stages a registered
+node hierarchy (built-ins plus supplied detached custom ComponentCodecs) with shared
 immutable CPU assets and fresh saved identities. It reuses validated node records
 with an in-memory resource table; no new on-disk format or asset-byte copy is
 introduced. Scene/protected roots and unregistered custom types are rejected.
+Used custom codecs with resolve callbacks also reject this partial-scene copy;
+complete-scene load/clone retains its existing saved-reference resolution support.
 The returned detached subtree has no copied executable callbacks or physics joints;
 the editor publishes it through ordinary hierarchy ownership and synchronization.
 See [editor duplication and history](scene-editor.md).

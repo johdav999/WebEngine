@@ -151,6 +151,7 @@ std::uint64_t EditorSession::fingerprint(const Node& root) const {
     auto pointer=[&](const void* value){const auto n=reinterpret_cast<std::uintptr_t>(value);bytes(&n,sizeof(n));};
     auto walk=[&](auto&& self,const Node& node)->void {
         if(const auto* link=dynamic_cast<const PrefabInstanceComponent*>(&node)){pointer(link->asset().get());for(const auto& b:link->bindings()){text(b.key);text(b.node);}}
+        if(const auto* c=dynamic_cast<const Component*>(&node))for(const auto& codec:components_.codecs.entries())if(codec.type==typeid(node)){const auto encoded=codec.encode(*c);bytes(encoded.data(),encoded.size());}
         text(node.savedId());text(node.name);text(typeid(node).name());bytes(&node.transform,sizeof(node.transform));bytes(&node.enabled,sizeof(node.enabled));
         if(auto* ai=dynamic_cast<const AiControllerComponent*>(&node))text(AiControllerArchive::save(ai->settings()));
         const auto count=node.children().size();bytes(&count,sizeof(count));
@@ -187,9 +188,9 @@ bool EditorSession::create(std::unique_ptr<Node> candidate,Node& parent) {
     Command command;command.change={id,parent.savedId(),parent.worldMatrix(),initial,initial};
     command.edit=CreationEdit{nullptr,selectionIds(),0};
     Node* published=nullptr;
-    try { published=&parent.adoptChild(std::move(candidate));scene_.synchronize(); }
+    try { published=&parent.adoptChild(std::move(candidate));scene_.synchronize();std::get<CreationEdit>(command.edit).fingerprint=fingerprint(*published); }
     catch(...) { if(published){auto removed=parent.detachChild(*published);scene_.synchronize();}throw; }
-    std::get<CreationEdit>(command.edit).fingerprint=fingerprint(*published);restoreSelection({id});push(std::move(command));return true;
+    restoreSelection({id});push(std::move(command));return true;
 }
 bool EditorSession::placeMesh(std::shared_ptr<const Mesh> mesh,std::string name,Vec3 anchor) {
     cancel();if(!mesh||!std::isfinite(anchor.x)||!std::isfinite(anchor.y)||!std::isfinite(anchor.z)||name.empty()||name.size()>512) return false;
@@ -214,7 +215,7 @@ bool EditorSession::duplicateSelected(Vec3 offset) {
     StructureEdit edit;edit.beforeSelection=selectionIds();
     for(auto* node:roots){
         if(node==&scene_||!node->parent()||!propertyReadOnlyReason(*node).empty())return false;
-        auto clone=SceneArchive::duplicateSubtree(*node);auto position=transformPoint(node->worldMatrix(),{})+offset;
+        auto clone=SceneArchive::duplicateSubtree(*node,{},components_.codecs);auto position=transformPoint(node->worldMatrix(),{})+offset;
         if(snap_.translation){position.x=std::round(position.x/snap_.grid)*snap_.grid;position.y=std::round(position.y/snap_.grid)*snap_.grid;position.z=std::round(position.z/snap_.grid)*snap_.grid;}
         clone->transform.position=transformPoint(inverseAffine(node->parent()->worldMatrix()),position);
         const auto base=node->name+" copy";auto name=base;int suffix=2;

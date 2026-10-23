@@ -2,11 +2,549 @@
 
 ## Purpose and scope
 
-WebEngine is a C++20 engine for games running in desktop and mobile browsers through WebAssembly with WebGPU and a WebGL 2 fallback. An optional native Windows x64 desktop host and vehicle example share the portable engine and WebGPU renderer through SDL3 and Dawn/D3D12. Its reusable systems should support multiple game types. A cat puzzle game is one application of the engine, not the model for its public API.
+WebEngine is a C++20 engine for games running in desktop and mobile browsers through WebAssembly with WebGPU and a WebGL 2 fallback. An optional native Windows x64 desktop host and vehicle example share the portable engine through SDL3, with selectable Dawn/WebGPU and direct D3D12 rendering. Direct D3D12 currently supports static and animated meshes, conventional and layered terrain materials, water/underwater, PBR/lighting/shadows, sky/fog/HDR post and the vehicle/native GUI; full feature parity remains future work. Its reusable systems should support multiple game types. A cat puzzle game is one application of the engine, not the model for its public API.
 
 This document describes the implementation inspected on 2026-10-10 and the architectural boundaries for future work. The current architecture sections describe existing code. The evolution table describes intended additions and extensions, not delivered functionality. Keep these sections current when implementations change; source code and focused validation establish actual capability.
 
 ## Current architecture
+
+### Optional planetary terrain, stages 1 and 2 (2026-10-23)
+
+`engine_planet` / `WebEngine::Planet` layers above `engine_core` without changing
+its heightfield or scene contracts. It owns a bounded six-face cube-sphere CPU
+quadtree and publishes immutable ordinary Mesh resources with parent-surface morph
+targets, source-derived normals/materials and visual boundary skirts. One global
+procedural height source is independent of presentation detail. Owner-driven
+updates prepare at most one four-child split; complete sibling merges and priority
+reclamation keep the tree bounded. No scene, renderer, physics, callback, worker or
+platform ownership enters this optional library.
+
+PlanetPosition retains double planet-centred coordinates and subtracts the chosen
+origin before narrowing to float. `examples/planet` owns Application input, guided
+and manual flight, a bounded ordinary actor/component pool, and camera-relative
+patch projection on browser and Windows hosts. It keeps the camera at local zero
+and uses adaptive clipping with existing rendering/morph paths. This does not add
+a generic scene/physics rebasing service or a planetary depth-buffer pipeline.
+The scene and renderer retain their existing ownership and frame boundaries.
+
+Stage 2 adds portable radial gravity, immutable tangent-chart collision preparation
+from the same source and an arbitrary-up spherical explorer motor using existing
+PhysicsWorld overlap/sweep queries. It borrows the world only during fixed steps
+and retains no scene/callback/solver types. The +Y character motor is unchanged.
+Collision sampling/residency never follows camera LOD, morphs or render origins.
+
+The demo publishes a bounded static source collider at the idle pre-simulation
+callback, then existing scene reconciliation precedes its normal fixed component.
+Global double motion survives infrequent translation-only solver-origin rebases;
+dynamic cargo retains pose/velocity and receives radial forces each fixed tick.
+Camera-relative interpolated presentation is separate from the stable solver frame.
+Input cancellation precedes queued button publication, preserving jump requests.
+There is no new Application phase, physics scheduler or scene ownership model.
+
+Stage 2 supports collision landing, stable surface movement, jump and takeoff.
+Planetary atmosphere, water, authored sources, persistence and full rigid-body ship
+flight remain future work. See [planet contracts](docs/planet-terrain.md),
+[planetary physics](docs/planet-physics.md) and [stage 2 evidence](docs/planet-stage2-validation.md).
+
+### Optional multiplayer foundation (2026-10-22)
+
+`engine_network` / `WebEngine::Network` is an optional standard-C++20-only module
+for versioned binary session/lobby messages, peer/entity identities, bounded commands
+and complete snapshots (plus M5 per-peer deltas below). It owns no scenes, clock, renderer or platform resources. Registries own validation
+callbacks; transport decorators explicitly own adapters, as detailed in M8–M10 below. Applications map network IDs to existing scene-scoped handles and own
+payload schemas, movement/interaction policy and entity lifetime. Server ownership,
+session/sequence checks and complete validation precede state publication.
+
+`engine_network_browser` privately adapts Emscripten WebSockets;
+`engine_network_windows` privately adapts WinHTTP with owned IO workers. Adapter
+queues are bounded; scene work stays on the owner thread and disposal cancels IO
+and callbacks. Browser/native clients use identical portable protocol code.
+
+`examples/multiplayer` provides an authoritative kinematic arena and headless C++
+Application host, with a loopback Node/ws socket gateway. Existing component fixed
+ticks own motion, server monotonic time owns simulation, and full snapshots feed
+client presentation. No core scheduler, archive format, renderer or physics
+determinism contract changes. Transport wakeups do not supply simulation time.
+
+Browser and Windows editors can launch this isolated test arena with a configured
+endpoint while retaining their source documents. DesktopEditor exposes an optional
+host-owned launch callback; executable process policy stays in the sample host.
+The fixed-arena launcher remains separate from authored-scene milestones below.
+M7 adds registered component state; general physics rollback and internet
+identity/deployment remain future work. See [multiplayer contracts](docs/multiplayer.md)
+and [runtime evidence](docs/multiplayer-validation.md).
+
+### Authored multiplayer scenes, milestone 2 (2026-10-22)
+
+Optional `engine_network_scene` / `WebEngine::NetworkScene` layers above network
+core and engine_core. It packages an existing self-contained scene archive with a
+saved player-template identity, validates a bounded static mesh/camera/light
+profile, and maps transform snapshots to ordinary Actor instances and existing
+generation-checked handles. Network core remains scene-independent. Its separate
+ContentReceiver stages ordered bootstrap chunks without knowing archive types.
+Invalid/incomplete content never replaces the server's accepted scene. No archive
+version, generic component codec, renderer or Application phase changes.
+
+The scene example freezes the first valid publication for the server process,
+requires byte-identical later publications, transfers content before admission,
+and runs kinematic player movement in the existing fixed traversal. Saved identity
+selects the template; transient peer/entity identity selects spawned instances.
+Clients send intent and project complete authoritative local transforms. Scene
+owns instances and assets; TransformReplicas owns its detached template and handle
+map. The idle owner validates complete snapshots before spawn/pose/despawn work.
+Client host scene replacement rebinds views before releasing previous scenes.
+
+Both editors expose Host selected actor and Join authored scene. Native workbench
+callbacks synchronously borrow source/views/assets, leaving serialization and
+process policy to the host. Browser publication uses the same portable validator,
+then a bounded expiring IndexedDB handoff to an isolated client tab. Native uses a
+temporary package consumed by its client process. The editor source, history and
+ordinary Play state remain retained. Runtime changes are never applied back.
+
+This milestone supports embedded static visuals and one mesh actor template,
+not arbitrary authored gameplay, component replication, physics or collaborative
+editing. Milestone 3 below adds kinematic prediction to these clients. Limits, ownership and runtime evidence are documented in
+[authored multiplayer scenes](docs/multiplayer-scenes.md) and its
+[validation](docs/multiplayer-scenes-validation.md).
+
+### Multiplayer prediction and reconciliation, milestone 3 (2026-10-23)
+
+Optional network core now provides header-only PredictionHistory for bounded opaque
+state/input replay with synchronous application-supplied deterministic callbacks.
+It stages corrections and replay before publishing state and owns no scene, clock,
+transport or retained callback. Sequence/acknowledgement validation and 128-input,
+256-byte payload/state bounds preserve the previous valid history on rejection.
+
+The authored-scene example upgrades its session schema to MP03. Each movement
+command represents one 60 Hz step; existing server fixed traversal consumes at most
+one per player per tick and acknowledges applied sequences in snapshots. Shared
+example moveStep policy drives client prediction and server simulation. Client
+presentation replays pending inputs from authoritative snapshots without modifying
+session records; remote replicas remain authoritative. Leave/reconnect cancel the
+entire prediction lifetime. Editor Host/Join automatically launch these clients.
+M1 keeps its separate MP01 arena. Saved scene packages/archives do not change.
+
+The loopback gateway has optional bounded development latency injection, disabled
+by default. M4 below adds remote interpolation and positional correction smoothing.
+General physics rollback and component prediction remain future work. See
+[contracts](docs/multiplayer-prediction.md) and
+[validation](docs/multiplayer-prediction-validation.md).
+
+### Multiplayer presentation, milestone 4 (2026-10-23)
+
+Optional engine_network_scene adds TransformTimeline and CorrectionSmoother over
+existing portable Transform/Vec3 values. Timelines retain at most 32 validated
+receipt-time poses and interpolate position/scale and shortest Euler paths with
+100 ms default delay, holding endpoints without extrapolation. Long gaps,
+teleports and scale-sign changes reset the buffer. Positional correction offsets
+decay with an 80 ms half-life, with bounded snap/reset behavior. Caller-owned clocks
+and ordinary host frame boundaries drive these presentation-only mechanisms.
+
+Authored-scene clients stage remote buffer updates alongside validated snapshots
+and M3 reconciliation. Local presentation receives a compensating offset only for
+corrections; prediction/session state remains authoritative and untouched by these
+visual mechanisms. Despawn/reconnect/scene replacement cancel presentation history.
+Editor Host/Join inherits these defaults on both runtimes. MP03 messages and saved
+archives remain compatible. There is no physics/scheduler/renderer boundary change.
+
+The development gateway can inject bounded, FIFO jitter independently in each
+direction. An explicit scene-server test flag issues one bounded authoritative
+position correction per player to verify visual decay. Both facilities default off.
+General physics rollback, extrapolation, adaptive clock synchronization and
+component/skeletal prediction remain future work. See
+[contracts](docs/multiplayer-presentation.md) and
+[validation](docs/multiplayer-presentation-validation.md).
+
+### Multiplayer replication, milestone 5 (2026-10-23)
+
+Optional engine_network now provides per-peer reliable-stream delta baselines.
+ServerSession::snapshot(all) still atomically replaces the complete authoritative
+ownership registry. snapshotFor(peer, relevantIds, forceFull) selects from it,
+always includes peer-owned records, and emits full keyframes or smaller deltas
+containing upserts, removals and sparse changed-byte patches. Baselines are bounded
+and discarded with the peer. First/forced/resync publications and at least every
+20 publications use full packets. ClientSession reconstructs and validates a
+complete candidate before publication. BaselineMismatch and requestSnapshot add
+bounded recovery control without consuming gameplay command sequence. The host
+must send generated packets in order or close the peer on failure.
+
+Selection policy remains application-owned. The scene example uses authoritative
+local XZ distance with 4-unit entry and 5-unit exit hysteresis; own entities always
+remain selected. This affects dynamic replication only, independently of global
+command ownership, simulation, presentation and full static-scene bootstrap.
+M3 replay and M4 smoothing consume reconstructed complete records; relevance
+removal/re-entry clears/recreates remote histories and ordinary actor replicas.
+
+Both editor Host/Join launch paths use scene schema MP05 and keep source/history
+isolated. MP03 scene binaries must be rebuilt together; WES2 packages, scene
+archives and M1 MP01 full-snapshot arena remain compatible. WEN1 envelope version
+1 adds Delta and Resync message types. No scheduler, renderer, platform adapter or
+module dependency changes were required for M5. M7 below adds registered component
+state. Bandwidth budgets, compression, unreliable transports and internet deployment remain future
+work. See [contracts](docs/multiplayer-replication.md) and
+[validation](docs/multiplayer-replication-validation.md).
+
+### Multiplayer authoring and diagnostics, milestone 6 (2026-10-23)
+
+Header-only network_authoring.hpp adds declarative ReplicationSettings over
+existing Actor/Component values. An inert ordinary Component stores one reserved,
+versioned tag, preserving existing archives, cloning, prefabs and editor history
+without a core/protocol dependency or archive-format change. EditorSession's
+NetworkReplication creation and the built-in property registry expose Player/
+Server ownership, Distance/Always/OwnerOnly relevance and validated entry/exit
+radii. Both editor frontends use these same contracts and undo/save/load paths.
+Unknown or invalid annotations remain inert in generic scenes and reject network
+publication; inspectors omit invalid typed fields while retaining component removal.
+
+NetworkScene now returns a validated replicated-actor catalogue. The chosen player
+template uses per-peer instances; at most 48 configured server actors retain
+server ownership and deterministic content-scoped IDs/kinds sorted by saved ID.
+TransformReplicas can snapshot multiple authored prototypes keyed by record kind,
+retaining ordinary generation-checked actor handles and staged validation. Client
+scenes hide source templates after preparing replicas. No arbitrary gameplay
+component codecs or behaviors enter this bounded static visual profile.
+
+Server relevance consumes each entity's configuration independently of the complete
+ownership registry and simulation. Clients validate kind/owner/entity against the
+catalogue before committing records, replay or presentation. Existing M3-M5
+prediction, smoothing, deltas and recovery continue unchanged. The isolated clients
+add read-only authority/prediction/correction/replication diagnostics. Editor source
+documents and history never receive runtime changes.
+
+Scene schema MP06 requires server/client rebuilds together; legacy WES2 packages
+without annotations retain player defaults. Archive and package envelope versions
+and the M1 MP01 arena are unchanged. Engine core, standard-only network core,
+platform adapters, renderers and Application phases gain no new dependencies.
+Only network_scene_tests additionally links engine_editor for authoring acceptance.
+See [contracts](docs/multiplayer-authoring.md) and
+[validation](docs/multiplayer-authoring-validation.md). M7 below adds registered
+gameplay fields; ownership transfer, physics rollback and internet services remain
+future work. MP06 and the static-only profile above describe the M6 stage.
+
+### Gameplay-component replication, milestone 7 (2026-10-23)
+
+Optional engine_network_scene now owns ComponentReplicationRegistry and bounded
+opaque per-component state encoding. A registration combines an existing custom
+ComponentCodec with a network version, declared maximum, capture/validation,
+allocation-owning prepared updates and detached passive-replica setup. Game classes,
+typed fields, simulation and action rules remain in application code. Standard-only
+engine_network has no scene/editor dependency; its new snapshotForRecords validates
+peer payload projections against the complete authority registry before the
+existing delta/keyframe/recovery pipeline. Per-component audience does not alter
+command ownership. Authored bootstrap values are public, even for OwnerOnly fields.
+
+NetworkScene packages explicitly registered, childless components directly on
+replicated root actors. Canonical content slots map to generation-checked local
+ComponentIds after adoption. Runtime component topology is fixed. Registries are
+owned values; callback captures must outlive their copies. At most 32 type
+registrations and 8 components per actor are allowed. The authored scene rejects
+declared worst-case state exceeding the existing 256-byte record budget, including
+the pose/ack/component headers. WES3 adds an exact sorted schema/version/bounds
+manifest before archive construction. Legacy unregistered WES2 still loads and the
+ordinary scene archive version does not change.
+
+TransformReplicas owns custom-codec prototype copies and offers a synchronous
+Stage hook. All records and component plans validate/allocate before any pose,
+spawn or component state publication. PreparedComponentUpdate commits are no-throw,
+callback-free and cannot change topology. Plans borrow targets only for that idle
+owner transaction. Scene retains actor/component ownership and deferred destruction.
+Detached replica setup suppresses game behavior/subscriptions and disables ticks;
+presentation interpolation/prediction remains independent of authoritative fields.
+
+EditorComponentSupport adds optional custom-codec/factory values to EditorSession.
+DesktopEditor and browser adapter retain this support across reopen and Play and
+display registered creation choices and shared property registries. Header-only
+network_component_editor.hpp extends a registry with component replication audience
+without making engine_editor depend on network implementations. Registered custom
+archive bytes participate in structural history fingerprints. Subtree duplication
+accepts detached custom codecs; used resolve callbacks reject this partial-scene
+operation, while complete-scene loading/clone retains its earlier resolve contract.
+
+Both opt-in example editors register application-owned Vitals and Progress and launch
+MP07 sessions. Server fixed traversal owns gameplay, clients submit action intent,
+and diagnostics read actual replica fields. Everyone and OwnerOnly state uses
+per-peer projection through full/delta/resync updates; hidden components remain
+passive authored defaults. Leave, interest re-entry and scene replacement clear
+bindings alongside existing prediction/presentation lifetimes. Server/client schema
+must match (MP07); WEN1 version 1, M1 MP01, transport adapters, renderers and frame
+phases remain unchanged. No client field authority, automatic reflection, runtime
+component composition, generic prefab spawning, RPC/event routing or physics
+rollback is introduced. See [contracts](docs/multiplayer-components.md) and
+[separate browser/Windows evidence](docs/multiplayer-components-validation.md).
+
+### Runtime multiplayer lifetimes and invocation streams, milestone 8 (2026-10-23)
+
+Optional standard-only engine_network adds owning InvocationRegistry values and
+independently sequenced bounded RPC/Event messages (WEN1 types 7/8). The protocol
+checks session/peer/target ownership before queuing client RPCs; game code checks
+the registered schema, authored permissions and policy before dispatch. Host-chosen
+event recipients implement private replies/multicast. Events are transient ordered
+messages, never snapshot state or replay history. Each queue remains bounded to 64.
+No remote function pointers, game handlers or scene dependencies enter network core.
+
+Optional engine_network_scene adds PrefabSpawner over existing prefab/archive
+representations. It owns detached prototypes, codecs and generation-checked instance
+maps; Scene owns adopted actors and must outlive all calls. Idle-owner spawn stages
+the detached instance and bookkeeping before adoption; despawn uses ordinary deferred
+destruction. IDs start at 16777216, increase monotonically and never reuse. Explicit
+clear destroys instances; spawner destruction only releases its own maps/prototypes.
+The application owns quotas, owner cleanup and allowed spawn choices.
+
+The shared ReplicationSettings annotation gains Prefab ownership. NetworkScene
+catalogues at most 32 authored runtime prefab kinds (1024+, sorted saved ID), hidden
+until spawned. The existing ordinary Component metadata/factory/property mechanism
+adds invocation bitmasks via network_gameplay_authoring.hpp/network_rpc_editor.hpp;
+default generic permissions deny all. Existing editor history, duplicate/save/load
+and PrefabAsset provenance are reused. NetworkScene WES4 validates exact component
+and invocation manifests before constructing the archive; compatible legacy WES2/3
+remain readable. Scene archive version does not change. MP08 was the M8 schema;
+the current physics-capable profile below uses MP09. Sample spawn/despawn/pulse
+handlers, per-owner quotas and effects live in examples/multiplayer. See
+[contracts](docs/multiplayer-runtime.md).
+
+### Authoritative replicated physics, milestone 9 (2026-10-23)
+
+engine_network_scene adds portable ReplicatedPhysics capture/encoding and detached
+passive-replica setup. NetworkScene accepts validated paired root body/collider
+components with unit world scale; moving bodies require Server or Prefab ownership.
+Static unconfigured ground remains bootstrap content. The selected sample player
+remains the earlier kinematic/predicted actor and rejects a rigid body. Existing
+physics components, shapes, archive settings and editor properties are reused.
+
+The native headless Application owns real Jolt simulation through its normal fixed
+traversal. Transport wakeups never supply solver time. MP09 records append a strict
+28-byte motion/enabled/linear/angular velocity projection for body templates, within
+the existing 256-byte record budget. Client hosts disable all bootstrap/replica
+bodies and colliders before simulation; snapshot poses and M4 smoothing drive their
+visuals, independently of the solver, relevance and culling. No client physics state
+can become authoritative. There is no solver checkpoint, contact-cache replication
+or deterministic rollback contract.
+
+Application Arena chains/restores the scene contact callback and bounds queued Begin
+notifications; it dispatches collision events after solver locks/fixed traversal.
+The sample validates owner/live dynamic body/finite bounded impulse before applying
+an impulse RPC. Physics state persists through the guest reconnect grace below.
+Core physics, renderer and frame phase boundaries do not change. See
+[contracts](docs/multiplayer-physics.md).
+
+### Guest lobbies and authenticated recovery, milestone 10 (2026-10-23)
+
+Optional standard-only engine_network adds bounded WEL1 guest authentication/roster
+codecs and LobbyConnection, an owning Connection decorator. It pumps handshake on
+the owner thread, filters service controls and retains capabilities in memory. The
+existing browser Emscripten and Windows WinHTTP adapters remain the transport boundary.
+Network core owns no credential generation, account provider, timers or processes.
+
+examples/multiplayer/lobby-server.cjs owns random invitation/session capabilities,
+hashed token lookup, host-only content publication, rosters, capacity/rate limits,
+grace timers and one authoritative native scene process per room. This is optional
+application/service policy above the portable mechanisms; the legacy direct gateway
+remains available. Credentials rotate on resume with confirmation of delivery. Active
+duplicate login, expired capabilities and stale epochs reject. Default 30-second
+disconnect grace reserves identity/slots and retains player/gameplay/owned objects
+while physics continues. Explicit leave or expiry removes them; empty rooms stop.
+
+ServerSession suspend/resume reserves peers independently of ready recipients;
+simulationPeers includes reservations. Resume rotates the per-peer epoch, resets
+queues/sequences/baselines and requires fresh Hello/content admission. The shared
+scene Client injects its transport factory, retains credentials, bounds retry/backoff,
+and rebuilds component/prediction/presentation lifetimes after fresh authoritative
+state. Source documents never receive runtime state. Events are not replayed.
+
+Both editors expose guest/room/invitation launch settings outside document history.
+The browser hands capabilities to the intended same-origin client through bounded
+expiring BroadcastChannels; only a random non-secret handle enters its URL. The
+native host restricts an inherited anonymous stdin pipe to its intended client.
+Capabilities never enter source archives, normal saves, diagnostic JSON, clipboard
+writes, launch arguments or credential files. Public content handoff retains the
+earlier IndexedDB/native temporary scene-package paths. Native process policy stays
+in examples; DesktopEditor only stores transient settings/calls host launchers.
+
+These current sections supersede earlier stage-only exclusions for runtime prefabs,
+RPCs, rigid bodies and guest session services. WEN1 version 1, M1 MP01, ordinary scene
+archive formats and module dependency direction remain. Accounts, durable recovery,
+public deployment, host migration, arbitrary component composition and physics
+rollback remain extensions. See [lobby contracts](docs/multiplayer-lobbies.md) and
+[separate browser/Windows evidence](docs/multiplayer-runtime-validation.md).
+
+### Hybrid terrain milestones 1–5 (2026-10-22)
+
+Portable TerrainData now has an optional immutable cell hole mask. Generation,
+source ground queries and full/chunk colliders omit the same triangles, including
+physical-surface remapping. Cut chunks partition mixed tiles and simplify only
+planar solid regions while retaining every tile, hole and chunk boundary segment;
+curved regions retain their source triangles. Uncut
+chunks preserve their existing LOD. Both use independent camera/shadow selection.
+Empty chunks retain source/component
+identity, return null collision, and ordinary scene collection skips zero-index
+meshes. Collision-enabled factories/streams retain disabled collider/body handles
+for empty geometry and re-enable source collision when filled. TerrainAsset::withHoles
+and Hole/Fill brushes publish immutable source revisions with validated dirty chunks;
+TerrainEdit::holesChanged rebuilds geometry/collision and restores LOD on filled chunks.
+Source-only editing remains lazy. Provider TerrainPage data has no hole channel and
+explicitly rejects Hole/Fill modes. Authoring-only terrainRaycast includeHoles picks
+the uncut source; ordinary terrain/physics queries continue to omit holes.
+EditorSession strokes retain collision resource/enablement snapshots for stable
+ordered undo/redo, and combine sorted dirty chunks across stamps.
+
+makeMeshTerrainActor composes an ordinary scene-root Actor, MeshComponent and
+optional static collider/body from a validated immutable authored Mesh. It adds no
+asset registry, custom component kind, scene graph or scheduler. Render LOD never
+changes source collision. Terrain queries remain heightfield-only; hybrid gameplay
+uses existing PhysicsWorld rays/sweeps and CharacterMotorComponent. Applications
+own source geometry, materials, placement, residency and traversal policy.
+
+`buildTerrainMeshHoleMask` / `cutTerrainHolesFromMesh` in `terrain_mesh.hpp`
+derive a bounded immutable heightfield edit from closed mesh boundaries contacting
+uncut source heights. Mesh-to-terrain transforms and separate ownership/union
+masks remain ordinary portable data. The operation precedes seam refinement and
+uses full base geometry; it owns no scene, renderer, collider or storage adapter.
+Applications retain painted masks and publish paired cave/mask resources through
+existing terrain-edit boundaries. This is conservative cell rasterization, not
+arbitrary closed-volume Boolean excavation. See [contracts](docs/terrain-mesh-holes.md).
+
+`buildTerrainMeshLake` composes the same local refinement mechanism into a
+connected basin, a separately clipped water mesh and a finite convex WaterRegion.
+The operation stages immutable ordinary resources with bounded work/geometry;
+callers publish terrain/collider/water together. Water region metadata lives on
+the surface MeshComponent through versioned ordinary tags, preserving existing
+archive/component contracts. No renderer or scene ownership enters the geometry
+API. UnderwaterView carries optional owned region planes; shared CPU segment
+clipping and WGSL/GLSL/HLSL uniforms enforce the polygon and finite bottom for fog
+and caustics. Unannotated water retains rectangular bottomless behavior. The demo
+owns pond placement/materials, clock input and snapshots of water/terrain resources.
+See [lake contracts](docs/terrain-mesh-lakes.md).
+
+
+`engine_core` also exposes `buildTerrainMeshFormations` in `terrain_mesh.hpp`.
+It synchronously prepares an immutable ordinary Mesh by locally refining and
+extruding an oriented connected surface patch. Geometric edge adjacency crosses
+attribute splits without adding disconnected geometry. Near-edge/vertex anchors
+use local retriangulation to avoid slivers. Materials and interpolated UVs stay
+in their existing representations; affected coincident normals are reconstructed.
+Inherited seam locks and new tip locks feed ordinary MeshLodRecipe regeneration.
+The operation has explicit placement, geometry and work bounds and rejects before
+publication. It owns no scene, renderer, storage adapter, collider, placement policy
+or update loop. Callers publish the result and full-base collider together; existing
+mesh/LOD/collider archives retain the baked formations without a format change.
+Procedural descriptors remain caller-owned. Both cave hosts compose this mechanism
+through application-owned formation placement after cave sculpting. See
+[formation contracts](docs/terrain-mesh-formations.md).
+
+
+Optional engine_core buildTerrainSeam prepares an immutable ordinary mesh from a
+full heightfield source and nearby authored mesh. It discovers hole/solid edges,
+welds nearby compatible vertices, inserts matching source samples, and derives
+normal/material transitions with existing two-layer triplanar materials. It is a
+bounded synchronous preparation operation, with no renderer types, background job,
+scene mutation or retained subscription. Callers explicitly rebuild after source
+edits and publish the prepared mesh/collider at an idle boundary. Unmatched edges
+are left open; this is not Boolean intersection. Opposing undersides are excluded.
+Output retains full source collision; optional constrained render LOD locks the
+entire blend band and open/material borders while simplifying interiors. Generic
+MeshLodConstraints belongs to MeshOptimizer, borrows a validated lock span during
+preparation and publishes derived levels atomically. Conventional UV maps and
+painted multilayer inputs reject. Source meshes, masks and material assets remain
+immutable. Existing mesh/material archive records preserve the generated base
+result. Mesh optionally owns a versioned MeshLodRecipe with explicit base-vertex
+locks. Seam preparation attaches it; MeshOptimizer validates and regenerates the
+bounded derived cache atomically without changing source geometry/collision.
+Archive v36 stores recipes and reconstructs each shared mesh cache during staged
+load, charging derived preparation against aggregate archive allocation limits.
+Unmarked/older meshes remain without automatic LOD; heightfield LOD regenerates
+from saved source. No renderer or simulation state owns preparation.
+
+Scene/asset/application archive v35 adds TerrainData holes; older records default
+to all solid. Mesh sections use existing resource/component codecs. Browser host
+and worker artifacts must be built together. examples/hybrid_terrain shares cave,
+overhang, pointer editing and explorer content between standalone browser and Windows
+hosts. The demo owns grid-aligned cave dimensions, paired mesh/mask publication,
+protected entrance footprint, automatic seam rebuilding, manual holes and bounded
+history; none is engine policy. Both hosts expose close-up and material-blend views.
+The demo stores entrance/manual-hole metadata alongside ordinary scene data;
+browser localStorage and native atomic files publish through staged scene/host
+rebinding. History, gestures and movement commands reset on load. Generic archives
+remain unaware of cave editing policy. The demo owns a continuous indexed cave loft: a terrain-rim collar, arched mouth,
+shared tunnel rings, three chambers offset horizontally and vertically, two curved descending passages,
+closed rear dome, bounded shared-edge refinement and rock
+sculpting. Floor, sides and ceiling belong to the same connected source surface.
+The example also owns deep-room lights, static mesh plateau extension, chamber
+view controls and a full motor traversal route. The same smooth centreline drives
+loft offsets, camera/light positions and bounded motor steering. HYBRID7 identifies
+curved layouts while retaining straight HYBRID6 and single-cave HYBRID5 readers;
+old base geometry retains its matching route. The generic archive
+format is unchanged. One limestone material and reconstructed smooth normals cover the cave; terrain
+blend normals and full-detail collision are preserved. These compose existing
+mesh/seam/LOD APIs without changing engine defaults or archive formats.
+The Lower Grotto scales its three nominal dimensions by cbrt(10), retaining the
+−8 m floor and narrower passage. An application-owned dry rock basin composes
+existing connected-floor lake preparation and publishes only its terrain mesh;
+no water surface/region is added for that bowl. Local refinement/shoreline locks,
+full-base collision, undo/redo and archive LOD regeneration preserve its shape.
+HYBRID10 identifies the enlarged grotto/basin and view 11. HYBRID11 adds the
+mesh-authored inset contact rim; history retains its ownership mode, and older envelopes remain
+readable and retain their baked cave dimensions until an entrance/hole rebuild.
+The example's free-flight camera consumes shared InputBindings/InputSystem actions
+on the Application input clock, with browser canvas focus/capture and DesktopHost
+device adapters. Its transient gestures reset on cancellation/load; ordinary
+camera transforms persist through the existing archive. It adds no engine camera
+API or independent frame scheduler and does not alter explorer collision.
+Arbitrary mesh partitioning, Boolean cuts, remote hole
+paging and nondestructive modifiers remain future work. See
+[contracts](docs/hybrid-terrain.md), [LOD validation](docs/hybrid-terrain-lod-validation.md)
+and [save/load validation](docs/hybrid-terrain-save-load-validation.md).
+
+
+### Open-path terrain cliffs (2026-10-23)
+
+Optional `engine_core` `buildTerrainMeshCliff` in `terrain_cliff.hpp` stages a
+bounded immutable heightfield hole edit and ordinary static replacement Mesh.
+An application-supplied open X/Z path, upper/lower elevations and steep face angle
+define a surface with shoulders and tapered ends. The rectangular grid-aligned
+collar preserves every source perimeter edge, height and normal. Shared interior
+edge cuts/refinement avoid T-junctions; continuous signed distance handles gentle
+bends. A private material-layer helper is shared with seam preparation, retaining
+existing renderer/material contracts. Triplanar ground/rock and normal transitions
+make the collar continuous with surrounding terrain. LOD recipes lock the blend
+band and lip/toe neighbourhoods; collision always uses full base triangles.
+
+The operation owns no scene, actor, renderer, storage adapter, retained callback
+or automatic rebuild policy. Callers stage collision and publish both resources
+together at an idle boundary, retaining footprint ownership independently of
+paint/other cuts. Existing holes inside the collar, incompatible materials,
+heterogeneous cell surfaces, invalid paths and exceeded budgets reject before
+publication. This bounded heightfield replacement does not perform arbitrary mesh
+Booleans, closed mesas or overhangs. Existing scene records save baked geometry and
+LOD locks; editable descriptors remain application metadata. Shared browser/native
+demo controls, protected brush ownership and checkpoint binding compose the same
+portable builder. See [contracts](docs/terrain-cliffs.md) and
+[validation](docs/terrain-cliffs-validation.md).
+
+### Accessibility and native contacts (2026-10-22)
+
+`engine_desktop` privately owns WindowsAccessibility alongside the SDL text and
+lifecycle adapters. Its HWND subclass returns UI Automation fragment providers.
+Providers retain synchronized copied GuiAccessibleNode snapshots and stable COM
+identities, never GUI/scene borrows. A bounded 128-action queue drains on the host
+owner before Application advancement, revalidating current IDs and eligibility.
+Cancellation invalidates pending batches. State publication converts clipped
+logical rectangles to screen coordinates and raises semantic change events.
+Removed elements and shutdown explicitly disconnect providers before GUI/window
+destruction. UIAutomationCore/COM remain private native dependencies. Browser
+semantic DOM remains owned by engine_gui_browser; both adapters use the existing
+focus, activation and value paths. Portable snapshots now include clipped bounds
+and keyboard focus eligibility without changing rendering or simulation.
+
+Private SdlPointerInput maps native 64-bit touch/pen identities to portable contact
+IDs, pressure and logical/backing coordinates, bounded to 32 tracked contacts.
+Each contact retains GUI/scene/ignored ownership; mouse and non-mouse input share
+one GUI capture. Synthetic SDL mouse/touch duplicates are filtered. Reentrant
+lifecycle cancellation is generation-guarded; pen proximity loss cancels contact.
+Applications own native gesture/action policy. BrowserInput retains its existing
+gestures and uses retained coordinates for positionless capture-loss cancellation.
+No platform types enter portable APIs, and no second input/frame clock is added.
+See [contracts](docs/accessibility-input.md) and
+[validation](docs/accessibility-input-validation.md).
 
 ### Formula circuit application demo (2026-10-19)
 
@@ -75,6 +613,7 @@ transport is introduced. See [replay contracts](docs/replay-recording.md).
 | `engine_gui` | Portable retained widget tree, constrained/content measurement, flow/grid alignment, scaling/scrolling, themes/state styles, input/accessibility and font/draw-list generation; publicly depends on `engine_core`. |
 | `engine_ai` | Optional portable waypoint/static-navmesh A* search, explicit versioned surface invalidation/publication, immutable state-machine definitions, typed actor controllers, bounded event queues and per-agent runtime, private Recast/Detour 1.6.0 dependencies, application-owned path follower/navigator with capsule clearance and bounded obstacle recovery, explicit-candidate sight queries and bounded-frequency decision clock; publicly depends on `engine_core`. No renderer/browser dependency or scene owner. |
 | `engine_editor` | Optional portable authoring: independent AI/animation/prefab/cinematic documents and history, typed properties, structural/component and grouped transform commands, imports/materials, selection, duplication, placement/snapping, bounded history and isolated Play/cinematic previews; publicly depends on `engine_core` and `engine_ai`. |
+| `engine_editor_gui` | Optional retained authoring frontend shared by browser and Windows. Borrows idle Scene/EditorSession/GuiSystem, owns bounded UI command queue and independent asset documents; publicly links engine_editor and engine_gui. Platform files stay in host adapters. |
 | `engine_gui_browser` | Emscripten-only GUI input/text and accessibility adapter; depends on `engine_gui`. |
 | `engine_assets_browser` | Optional Emscripten HTTP and bounded isolated decode-worker adapters; links `engine_core` and propagates Fetch linkage. |
 | `asset_decode_worker` | Isolated browser Wasm importer/decoder; returns validated resource transport, with no scene/GPU ownership. |
@@ -83,9 +622,15 @@ transport is introduced. See [replay contracts](docs/replay-recording.md).
 | `engine_audio_browser` | Emscripten-only Web Audio device adapter; publicly depends on `engine_core`. |
 | `webengine` | Browser executable: application/demo entry point, renderer facade, WebGPU and WebGL 2 backends, GUI rendering and demos; links the libraries above. |
 | Native test executables | Exercise portable systems without a renderer; still the default native configuration. |
-| `engine_desktop` / `WebEngine::Desktop` | Optional public Windows x64 host API (`engine/desktop.hpp`): owns Application, GUI, SDL window/input, scene view handles and renderer lifetime; publicly links `engine_platform_windows`, privately SDL3/Dawn and `engine_renderer_windows`. |
+| `engine_network` / `WebEngine::Network` | Optional standard-C++20 session/lobby protocols, bounded commands/RPCs/events, invocation registries, ownership registry, suspend/resume epochs, full/delta snapshots, per-peer relevance selection and owning authentication adapter; no core/scene/platform implementation dependencies. |
+| `engine_network_browser` / `engine_network_windows` | Optional WebSocket IO adapters over network core; Emscripten and WinHTTP implementation details stay private. Windows owns cancellable IO workers; neither adapter accesses scenes. |
+| `engine_network_scene` / `WebEngine::NetworkScene` | Optional core/network integration: bounded scene packages and component/invocation manifests, saved template selection, registered component state adapters, prefab lifetimes, physics state projection and staged ActorId/ComponentId-backed passive replicas. No platform or renderer dependency. |
+| `multiplayer_server` / multiplayer demo clients | Opt-in application examples: headless authoritative C++ arena with a loopback Node gateway, browser and Windows rendered consumers, and editor test launchers. Gameplay and deployment policy remain outside engine_network. |
+| `multiplayer_scene_server`, `multiplayer_scene_demo`, `multiplayer_scene_windows` | Opt-in authored-scene server/client hosts over the shared transport, scene package and transform APIs; editor publication/join, kinematic player movement, body simulation, game RPC/event policy and process policy remain application-owned. The optional Node lobby service owns guest capabilities, room processes and reconnect grace. |
+| `engine_desktop` / `WebEngine::Desktop` | Optional public Windows x64 host API (`engine/desktop.hpp`): owns Application, GUI, SDL window/input, scene view handles and renderer lifetime; publicly links `engine_platform_windows`, privately SDL3 and selected renderer libraries through DesktopGraphics. |
+| `engine_renderer_d3d12` | Optional private direct native D3D12/DXGI renderer, embedded HLSL, conventional/layered PBR/IBL materials, terrain LOD, GPU skinning and cached morph streams, water/refraction/reflection/underwater, point/spot lighting, directional/cascade/spot shadows, sky/fog, HDR bloom/grading, checked MSAA and native GUI. Owns GPU resources, swapchain and fences; no Dawn/WebGPU dependency. |
 | `engine_platform_windows` / `WebEngine::Platform` | Optional bounded directory/file adapters, explicitly owned background asset IO/decode executor and SDL AudioBackend over existing AssetManager, SoundAsset, AudioSystem and archives. Publicly depends on core; SDL3/Win32/Threads/Media Foundation stay private. No implicit scene, device or scheduler. |
-| `engine_editor_desktop` / `WebEngine::DesktopEditor` | Optional native scene workbench, retained GUI and idle command queue; publicly composes portable `engine_editor` and `engine_desktop`. Host Application owns source/Play scenes. |
+| `engine_editor_desktop` / `WebEngine::DesktopEditor` | Optional native scene workbench, retained GUI and idle command queue; publicly composes portable `engine_editor_gui` and `engine_desktop`. Host Application owns source/Play scenes. |
 | `engine_windows_runtime` / `WebEngine::WindowsRuntime` | Optional process-scoped Windows session logs, best-effort crash dumps, executable path discovery and distribution manifest verification. No core, GUI, SDL or renderer dependency; Windows/BCrypt/Shell types stay private. |
 | `engine_renderer_windows` / `webengine_windows` | Private shared WebGPU/WGSL implementation and public-API vehicle application. `webengine_windows_smoke`, `desktop_api_tests` and optional `windows_acceptance` exercise native integration. The portable gallery content lives in `examples/windows_acceptance_scene.hpp`. See [Windows API](docs/windows-desktop.md). |
 | `persistence_wasm_tests` | Optional Node/Wasm persistence regression runner, enabled with `WEBENGINE_BUILD_PERSISTENCE_WASM_TESTS`; exercises the portable contracts on the 32-bit Wasm ABI. |
@@ -96,7 +641,7 @@ transport is introduced. See [replay contracts](docs/replay-recording.md).
 
 Emscripten is pinned by [.emscripten-version](.emscripten-version), currently to 6.0.11. The browser executable links the Emdawnwebgpu port and Emscripten GLES3/WebGL 2 support. WGSL source in `shaders/` is embedded through generated headers during CMake configuration. The browser host and selected build outputs publish into `dist/`; generated site files copy first, then current `web/` adapters override any stale host files retained in reused build directories.
 
-The scene/application/render runtime is single-threaded. Optional asset workers use isolated Wasm heaps for source parsing and image decoding. JavaScript handles browser APIs and forwards data to Wasm; C++ updates the scene and submits rendering through the browser renderer facade. Its public header contains no WebGPU/GLES/Emscripten types; backend resource types are private in `src/webgpu_renderer.hpp` and `src/webgl_renderer.hpp`. The facade remains linked in the browser executable. Default native builds provide portable core/tests; `WEBENGINE_BUILD_WINDOWS=ON` additionally composes the same private WebGPU backend with the SDL3/Dawn host.
+The scene/application/render runtime is single-threaded. Optional asset workers use isolated Wasm heaps for source parsing and image decoding. JavaScript handles browser APIs and forwards data to Wasm; C++ updates the scene and submits rendering through the browser renderer facade. Its public header contains no WebGPU/GLES/Emscripten types; backend resource types are private in `src/webgpu_renderer.hpp` and `src/webgl_renderer.hpp`. The facade remains linked in the browser executable. Default native builds provide portable core/tests; `WEBENGINE_BUILD_WINDOWS=ON` additionally provides the SDL3 host with selectable private Dawn/WebGPU or direct D3D12 rendering.
 
 ```mermaid
 flowchart TD
@@ -119,6 +664,7 @@ flowchart TD
     WindowsApp[Windows vehicle example] --> Windows
     Windows --> Gui
     Windows --> GPU
+    Windows --> Direct[Private direct D3D12 / DXGI / HLSL]
     GPU --> Platform[Private WebGpuHost: browser canvas or Dawn HWND]
     Tests[Native tests] --> Core
     Tests --> Gui
@@ -126,7 +672,7 @@ flowchart TD
 
 This is a responsibility diagram, not a claim that these responsibilities already have fully independent build targets. In particular, physics/ship demos and the material showcase currently compile into `engine_core`; browser rendering compiles into `webengine`, and the optional Windows target compiles the shared WebGPU implementation into `engine_renderer_windows`. Future extraction should preserve behaviour while moving application examples away from reusable libraries.
 
-### Native Windows desktop host (2026-10-21)
+### Native Windows desktop host (2026-10-22)
 
 Optional `engine_desktop` (`WebEngine::Desktop`) exposes `engine/desktop.hpp` with
 no SDL/Windows/Dawn types or private include requirements. It owns one window,
@@ -136,8 +682,194 @@ The private `engine_renderer_windows` compiles the same `webgpu_renderer.cpp`,
 `webgpu_water.cpp`, `gui_renderer.cpp` and embedded WGSL as the browser.
 `WebGpuHost` keeps time/diagnostics/surface/event/presentation responsibilities
 private. Browser DOM/canvas behavior and the public Renderer facade's WebGL2
-fallback remain browser-owned. Native Dawn uses D3D12/HWND, explicit Present and
+fallback remain browser-owned. Native Dawn uses D3D12/Vulkan/D3D11 with an HWND surface, explicit Present and
 owner-thread AllowProcessEvents dispatch. SDL/Dawn dependencies are private.
+
+DesktopSettings::backend selects Automatic (default), strict Dawn/D3D12,
+Dawn/Vulkan, Dawn/D3D11 or direct Direct3D12. DesktopHost::backend reports the
+current candidate and diagnostics separately report readiness/attempts. The private DesktopGraphics boundary
+owns binding, presentation, quality/capabilities, diagnostics and capture operations.
+The Dawn implementation wraps existing WebGpuRenderer/SdlGpuHost. The direct
+implementation owns D3D12/DXGI device, queue, swapchain, resource caches, uploads,
+PSOs/descriptors and fence contexts; HLSL is compiled by DXC and embedded at build
+time. Both retain the same SDL window/input/audio, Application scheduler,
+RenderViews/RenderFrame, Scene resources and GuiSystem draw lists. Public APIs
+contain no renderer implementation types. No simulation depends on presentation.
+WEBENGINE_WINDOWS_DAWN/D3D12 independently gate native dependencies, default ON;
+direct-only configuration never looks up or links Dawn. Automatic selects a bounded D3D12/Vulkan/D3D11 Dawn chain; strict choices never
+switch. Direct-only builds have a single direct-D3D12 Automatic candidate. Browser
+preference/fallback stays unchanged.
+
+The delivered direct milestone renders the existing vehicle course/static meshes,
+conventional PBR/unlit materials and the retained
+GUI with clipping. It supports resize/resolution budgets, SDL borderless fullscreen
+and fenced framebuffer PPM captures. GPU cache identities weakly reference CPU
+assets; retired resources and upload/descriptor reuse wait for submission fences.
+Window/GUI outlive either backend. Scene/view borrows release before scene unload;
+shutdown cancels readback, including after graphics failure. Direct capabilities
+now support PBR/IBL maps, all three light types, directional/cascade/spot shadows
+and hardware-checked 4x MSAA, sky/fog and format-checked HDR post-processing.
+Direct mesh instancing and semantic BC7 uploads are supported. Particle/ribbon/
+mesh-particle rendering consumes shared FX outputs. Direct and Dawn each retain
+bounded device recovery. Full renderer feature/material parity,
+exclusive fullscreen and performance comparisons remain future work. See
+[direct D3D12 contracts](docs/windows-d3d12.md) and
+[milestone evidence](docs/windows-d3d12-validation.md).
+
+Direct milestone 2 uses existing immutable Material/Texture/Environment assets,
+semantic mip generation, per-camera RenderFrame LOD history, FxFrame transparent
+ordering and planShadows. HLSL follows conventional material/PBR/IBL and standard
+display math. Private d3d12_images.inc and d3d12_pipelines.inc divide resource/PSO
+implementation inside D3D12Graphics; no new portable interface or dependency is
+introduced. Each submission owns immutable material descriptor tables until its
+frame fence completes; descriptors are created in place. Float16 environment cube
+and LUT resources and replaced images retire behind fences. Shadow depth arrays
+transition between depth write and shader read for each ordered view; independent
+caster LOD includes off-camera geometry. Resolution/sample changes fence old
+attachments, recreate compatible scene color/depth, resolve MSAA before the GUI
+and retain capture ordering. Unsupported content and invalid texture/environment
+candidates reject before command recording. Optional examples/lighting_gallery.hpp
+owns portable acceptance content; webengine_lighting_windows adds native GUI
+policy without changing renderer or simulation ownership. Browser rendering stays
+on its existing WebGPU/WebGL2 implementations. See
+[milestone 2 evidence](docs/windows-d3d12-milestone2-validation.md).
+
+Direct milestone 3 reuses Scene-owned SkyBackground/FogSettings, prepareSky,
+prepareFog and skySphereMesh. Private d3d12_environment.inc owns environment PSOs
+and HDR targets; HLSL includes mirror the shared sky/fog/post math. No renderer
+advances sky/day-night/cloud clocks. Applications explicitly call advanceSky.
+Sky draws after each view clear and before Background geometry; fog affects World
+meshes and sky, respects view opt-outs and extinguishes additive emission without
+adding haze. Background/Overlay geometry and retained GUI remain outside fog.
+Optional post-processing draws the complete ordered scene into RGBA16F. HDR format,
+blend/sample/load support and 4x resolve support are queried independently.
+MSAA resolves into single-sample HDR before quarter-resolution bloom and full-frame
+exposure/Reinhard/saturation/contrast/sRGB composition, then the ordinary GUI.
+Zero bloom skips extraction. Post enable/sample/extent changes fence attachment
+replacement and preserve capture ordering. Requested quality stays unchanged when
+effective HDR/MSAA are unavailable. Bloom can cross view boundaries, as on WebGPU.
+This is SDR presentation of HDR scene rendering, not an HDR monitor swapchain.
+See [milestone 3 evidence](docs/windows-d3d12-milestone3-validation.md).
+
+Direct milestone 4 consumes existing SkinPose/BoneUniform, SkinVertex and MorphPose
+records without changing the animation scheduler or portable APIs. A private
+d3d12_deformation.inc owns weak pose caches and revision-based uploads. Shared
+immutable joint/weight vertex buffers accompany each mesh; HLSL skins morphed or
+base vertices with a structured palette of up to 1024 bones. Positions use bone
+transforms, normals their inverse transposes, and both tangent axes retain handedness.
+Color and shadow PSOs select skinning independently of alpha mode, winding, HDR
+and MSAA. The same CPU-produced bounds drive camera and shadow culling; deformed
+geometry retains full source detail under the existing RenderFrame contract.
+Changed palettes/morph vertices stage once per revision into bounded frame uploads
+and copy to reusable default-heap resources. Queue barriers order previous reads,
+copies and subsequent reads; frame fences protect staging and retired allocations.
+Unchanged poses upload nothing. Camera-list changes reset collected frames/LOD
+history so inactive view slots cannot retain old poses; unbinding releases collected
+CPU resources. Pose caches hold weak CPU identities and retire expired GPU buffers
+behind the next submission fence. Optional examples/deformation_gallery.hpp supplies
+portable imported-rig acceptance content; webengine_animation_windows adds native
+controls for playback/blending, morph weights and presentation. Browser WebGPU
+retains its GPU skinning and WebGL2 its existing CPU deformation fallback.
+See [animated rendering contracts](docs/windows-animation-rendering.md) and
+[milestone 4 evidence](docs/windows-d3d12-milestone4-validation.md).
+
+Direct milestone 5 reuses MaterialLayers, materialTextures/TextureSemantics,
+materialLayerParameters, TerrainComponent meshes and RenderFrame camera/shadow LOD.
+Private desktop_layers.hlsli implements four-layer color/alpha/roughness, packed
+normal/height relief, active-weight height blending and signed world triplanar
+projection. The 56-float shared layer payload extends ObjectConstants to 448 bytes
+in a 512-byte aligned per-draw upload slot. Nine material descriptors retain
+per-role color/data/normal mips and independent wrapping; tables key layered roles
+as well as texture identities. Existing weak resource identities and submission
+fences govern their lifetimes. Shadow vertices carry matching deformed world
+position/normal/tangent/UV attributes for layered cutouts. No terrain generation,
+simulation, collision, query, paging or authoring responsibility moves into the
+renderer. Per-view LOD counters expose shared collector decisions. Optional
+examples/terrain_gallery.hpp supplies portable acceptance content;
+webengine_terrain_windows owns native GUI and presentation choices. Browser
+WebGPU/WebGL2 keep their existing layer implementations. See [terrain contracts](docs/terrain.md)
+and [milestone 5 evidence](docs/windows-d3d12-milestone5-validation.md).
+
+Direct milestone 6 consumes existing WaterSettings/waterParameters,
+waterReflection, underwaterView, WaterInteractionParameters and prepareUnderwater
+without moving simulation/contact policy into a renderer. Private d3d12_water.inc
+owns optional color/depth snapshots, mirrored opaque World captures and underwater
+composition. HLSL includes mirror Gerstner displacement after deformation,
+normal ripples/Fresnel/IBL, refraction/foam, transformed footprint ray clipping,
+absorption/scattering/caustics and transient rings/wakes. Double-sided PSOs retain
+front-face orientation through mirrored transforms, independently of culling.
+
+Object constants now hold 560 bytes in 768-byte slots aligned to 256 bytes;
+private FrameConstants use 2352 bytes including bounded interaction data.
+Frame uploads retain their 64 MiB bound, reserving separate per-view headroom for
+shadow matrices, main/mirrored frame payloads and underwater uniforms. All draws
+share existing material semantic caches, deformed bounds and fenced lifetimes.
+Main depth has a typeless R32 resource with typed D32/R32 views. An opaque snapshot
+loads single-sample color/depth or averages 4x color/selects minimum depth; World
+continues into its existing scene attachments. Mirrored captures reverse winding,
+clip the selected plane, exclude water/transparency and retain off-camera geometry.
+Per-view scissors/clamps isolate ordered snapshots. Underwater composition occurs
+after completed World and before Overlay. HDR retains linear inputs; non-HDR 1x
+water copies offscreen accumulation to the swapchain before GUI. Size/sample/format
+and effect changes fence replacement; inactive scratch targets shrink to 1x1.
+
+DesktopHost::setWaterInteractions validates/copies existing portable values and
+forwards them to both native renderers, preserving view/recovery inputs and clearing
+them on successful scene handoff. DesktopHost supplies Application simulation
+seconds through the private setWaterTime boundary, independently of GUI presentation;
+pause/suspension freeze water on Dawn and direct D3D12. Browser clocks remain caller-owned.
+Optional examples/water_gallery.hpp supplies portable acceptance content;
+webengine_water_windows owns retained controls and moving-source emission policy.
+See [water contracts](docs/water.md) and [milestone 6 evidence](docs/windows-d3d12-milestone6-validation.md).
+
+Direct milestone 7 consumes FxFrame's 112-byte particle instances and six 48-byte
+ribbon vertices per segment, preserving mixed mesh/FX alpha ordering followed by
+additive effects. Private d3d12_fx.inc owns HLSL pipelines and per-view numeric/GPU
+streams; scene simulation, seeded emission, contact sampling and archive ownership
+stay portable. Byte comparisons skip unchanged uploads; ordered copies and resource
+retirement share existing frame fences. Identical resolved camera snapshots retain
+streams and RenderFrame LOD history; changed camera identities invalidate caches.
+Soft FX and water share the opaque World snapshot, including minimum 4x depth,
+per-view reconstruction and underwater-before-Overlay composition. Preflight bounds
+FX staging to 32 MiB inside the combined 64 MiB frame arena; FX and mesh submissions
+share 40960 draws. Milestone 8 adds mesh instancing and BC7 uploads to these paths.
+Optional examples/fx_gallery.hpp supplies portable cases; webengine_fx_windows owns
+retained preset/playback/presentation controls. No portable API or browser shader
+changes are introduced. See [native FX](docs/windows-fx-rendering.md) and
+[milestone 7 evidence](docs/windows-d3d12-milestone7-validation.md).
+
+Direct milestone 8 adds a private engine_desktop recovery owner around the
+renderer. Typed removed/reset/hung/driver device errors queue bounded same-backend
+reacquisition at idle service boundaries; ordinary content/user exceptions retain
+their failure paths. Old GPU/swapchain/readback resources release before replacement.
+Scene-scoped camera handles, GUI, quality/shadows, clocks and water inputs survive;
+new resources upload lazily. Three attempts/backoff and 120 stable presentations
+bound recovery; explicit retry resets exhaustion. Pending direct captures cancel.
+Host graphics unavailability cancels inputs and freezes advancement without catch-up.
+The diagnostic loss API can remove the actual D3D12 device when opted in.
+
+Direct camera/shadow/reflection rendering now consumes shared RenderFrame batches
+and 256-byte object slots. Private d3d12_instancing.inc uploads dirty ranges to
+per-view streams; HLSL reads per-instance transforms/tint/receive flags while
+preserving complete bindings, winding, independent LOD and transparency order.
+Instance staging has a 32 MiB bound within the combined 64 MiB frame arena. Private
+image uploads choose supported semantic BC7 variants, use device block footprints,
+and retain RGBA/GUI fallback. Compression changes fence invalidated caches; recovery
+rechecks capabilities and recreates all derived resources. No portable API, resource
+codec or simulation responsibility moves into either implementation. See
+[recovery/performance contracts](docs/windows-d3d12-recovery-performance.md) and
+[milestone 8 evidence](docs/windows-d3d12-milestone8-validation.md).
+
+Direct GPU profiling lives in private d3d12_profiling.inc. Three independently
+fenced timestamp/readback slots sample nested command-list/view/pass spans at
+10 Hz without adding waits. Shared PerformanceMonitor GPU summaries accompany
+bounded inclusive/self durations and sampled submission metadata. Scene/view,
+quality and attachment edits invalidate measurement epochs; pending old epochs
+cannot publish. Recovery destroys old queries/readbacks/history. Idle owner-thread
+DesktopHost::gpuProfileTrace exports the current device's GPU-clock trace on demand,
+without scene borrows or CPU clock correlation. Native Dawn retains summaries and
+an empty detailed trace; browser timing/fallback contracts remain unchanged. See
+[GPU profiling](docs/windows-gpu-profiling.md).
 
 DesktopHost reserves its owned Application's scene-binding slot. DesktopView
 stores scene-scoped camera handles with portable composition data. Full candidates
@@ -161,7 +893,8 @@ and bridges clipboard and IME preedit/commit events through GuiSystem::editText.
 Composition retains widget identity and revision, rolls back on cancellation and
 cannot overwrite later application edits or a different focused widget. Queued
 text from previous focus is discarded. Destruction stops OS services without
-invoking widget callbacks. Native accessibility remains future work; text editing
+invoking widget callbacks. Native accessibility uses the private UI Automation
+bridge described below; text editing
 is single-line/codepoint based, without shaping, bidi or grapheme navigation.
 
 The private WindowsLifecycle subclass observes sent/queued WM_POWERBROADCAST
@@ -843,8 +1576,9 @@ publication; the fleet demo opts into that policy. `mesh_detail` provides portab
 projected-bounds selection, and `RenderFrame` owns per-camera/per-light hysteresis,
 light-volume culling and selected material ranges. These decisions never mutate
 component meshes or authoritative simulation/collision state. The WebGPU renderer
-owns all depth-array recreation, filtering and resource uploads. Derived LOD caches
-are currently excluded from archives and can be regenerated by applications on
+owns all depth-array recreation, filtering and resource uploads. Derived LOD buffers
+are excluded from archives; optional v36 MeshLodRecipe resources regenerate on
+staged load. Unmarked mesh caches can be regenerated by applications on
 restored assets. See [mesh detail and shadow validation](docs/mesh-detail-validation.md).
 
 Portable `UploadBudget` supplies opt-in per-frame asset admission to both browser
@@ -980,8 +1714,9 @@ mutating published source assets. Configuration edits are not solver checkpoints
 `SceneArchive::duplicateSubtree` reuses built-in node encoding with an in-memory
 table of shared resource references, stages a detached subtree, and regenerates
 all saved identities. It performs no source IO or resource-byte serialization and
-adds no archive version. Unregistered/custom executable behavior, protected roots
-and scene roots are rejected; callbacks and physics joints are not cloned. Mesh
+adds no archive version. Optional ComponentCodecs support registered detached
+custom components; used resolve callbacks, unregistered types, protected roots
+and scene roots reject. Executable callbacks and physics joints are not cloned. Mesh
 placement creates one root actor at a world-Y=0 ground anchor, retaining asset scale
 and applying source minimum-Y grounding. Optional world-grid and relative-angle
 snapping composes with placement, duplication and existing world-axis gizmos.
@@ -1078,7 +1813,7 @@ These are design directions. Confirm the current implementation before schedulin
 | Selection and interaction | Bounds/proxy and optional CPU triangle picking, visible-mesh occlusion, available/eligible actions, guarded execution, ordered notifications and optional plane/axis drag/pivot rotation with commit/cancel are implemented. GPU picking and accelerated geometry queries remain extensions; physics grabs compose the separate joint API. | Active view/input/cancellation routing, snapping, legality, action meaning, range policy and feedback. |
 | Camera extensions | Build on the delivered composable stack with application-specific behaviours or additional presentation policies when needed. | Targets, framing constraints and mode changes. |
 | Animation extensions | Typed parameters, states/transitions, two-clip blends, clip markers, consumable root-motion/event output, same-rig animation libraries and visual controller authoring with isolated preview are implemented. Masked override/additive layers and phase-synchronized 1D/2D trees are implemented. Ordered two-bone/look-at IK and explicit physics grounding helpers are implemented. Explicit named-profile retarget baking for compatible hierarchies is implemented; semantic mapping, full-body retarget optimization and recursive trees remain extensions. | State definitions, transition conditions, mapping/profile choices, marker responses and movement/collision policy. |
-| Prefabs and factories | Configured hierarchy instantiation, shared assets, stable-key instance overrides and versioned registered component factories are implemented in `Prefab`. `PrefabAsset` adds saved built-in definitions, variant ancestry and inert instance links; optional editor authoring performs explicit grouped updates preserving supported local overrides. Executable factory serialization, nested linked-prefab composition and automatic live updates remain extensions. | Object definitions, behaviour registration and content loading policy. |
+| Prefabs and factories | Configured hierarchy instantiation, shared assets, stable-key instance overrides and versioned registered component factories are implemented in `Prefab`. `PrefabAsset` adds saved built-in definitions, variant ancestry and inert instance links; optional editor authoring performs explicit grouped updates preserving supported local overrides. Nested linked-prefab composition, explicit dependency refresh and atomic asset reimport are implemented; executable factory serialization and automatic scene rebinding remain extensions. | Object definitions, behaviour registration and content loading policy. |
 | Persistence services | Versioned application snapshots, custom component codecs, stable saved identities and browser byte adapters are implemented over scene archives. Further extensions can add other adapters or application-specific conflict policies. | Saved game state, migration, publication and checkpoint/autosave policy. |
 | Audio extensions | Shared sounds, simultaneous/looping voices, buses, volume/mute, fades, positional emitters/listeners, bounded physics-ray occlusion, explicit room reverb, streamed encoded tracks and browser activation are implemented. Further adapters, automatic acoustic volumes/material transmission and audio persistence remain extensions. | Music, sound assignments, room selection, timing and playback restoration. |
 | UI/input extensions | Portable action bindings/context stacks, disposable browser virtual controls, constrained/content sizing, flow/wrap/grid alignment, themes/state styling, UI scaling, vertical scrolling and browser accessibility semantics are implemented. Further text shaping, additional scroll axes and device acceptance remain extensions. | HUD, menus, prompts, semantic labels and control schemes. |
@@ -1086,7 +1821,7 @@ These are design directions. Confirm the current implementation before schedulin
 | Water rendering | Animated reflective water, depth-aware World refraction/absorption, shoreline foam, one-plane-per-view opaque planar reflections and depth-based underwater fog/absorption with animated receiver caustics, interaction ripples and directed wakes are implemented on both backends with caller-owned time. Additional planes, transparent reflections, arbitrary water volumes and fluid simulation remain extensions. | Surface geometry, appearance, clock policy and independent buoyancy/collision. |
 | Quality/platform services | Profiles, canvas/shadow budgets, optional interval-driven adaptive quality, 4x MSAA, device capabilities, bounded GPU recovery, composed browser lifecycle and optional authored compressed textures are implemented. Texture transcoders and further backends remain extensions; the WebGL 2 fallback is implemented. | Device support, visual targets, adaptive sampling eligibility and quality defaults. |
 
-A small example game should exercise these APIs end to end while keeping its rules outside the engine systems. General event/subscription or timer/tween utilities may be extracted when concrete consumers justify them. Navigation is an optional `engine_ai` addition; networking and other genre services should likewise remain independent of applications that do not need them.
+A small example game should exercise these APIs end to end while keeping its rules outside the engine systems. General event/subscription or timer/tween utilities may be extracted when concrete consumers justify them. Navigation and networking are optional `engine_ai` and `engine_network` additions; other genre services should likewise remain independent of applications that do not need them.
 
 ## Repository map and validation
 
@@ -1922,3 +2657,103 @@ workspace viewport is restored to authored composition during serialization.
 Specialized graphical tool panels, docking and terrain brushes remain browser-only.
 The developer executable examples/windows_editor.cpp owns entry-point policy;
 player packaging remains separate. See [workbench contract](docs/windows-editor.md).
+
+
+### Shared authoring frontend (2026-10-22)
+
+Optional engine_editor_gui / EditorAuthoringPanel adds six retained GUI tool pages:
+terrain commands and independent animation, AI, prefab, FX and cinematic documents.
+It composes existing editor commands, immutable resources and archives; no serializer,
+renderer, scheduler or platform fork is added. Widget callbacks queue up to 32
+commands. The host drains them on the idle owner; disabling drops pending commands
+and prevents publication across Play/file transitions. Scene assignments/placement
+use EditorSession history. Private document history remains distinct. Prefab source
+publication explicitly advances revisions while preserving ordinary instance overrides.
+
+DesktopEditor owns the panel and destroys it before its borrowed session/scene,
+protects unsaved documents and supplies synchronous native dialogs/atomic file IO.
+The browser main adapter borrows the same editor session, owns a GUI only when the
+host has none, and releases renderer/GUI borrows before teardown. Async uploads
+check generation, area and Play state; download requests retain dirty state.
+No browser/SDL/Win32/Dawn types cross the portable frontend. GUI subtrees remain
+host-owned, hidden and callback-free after panel destruction. The initial frontend
+uses forms, state overviews and a selectable timeline; advanced browser graph/curve
+and cinematic playback interfaces remain separate. See docs/editor-authoring.md.
+
+
+### Native graphics API fallback (2026-10-22)
+
+The private FallbackGraphics composition owns a bounded candidate list, diagnostics
+and one DesktopGraphics implementation at a time. It advances after construction
+or terminal service failure, outside GPU callbacks. Retired surfaces/devices and
+readbacks release before replacement. Camera references are retained as scoped
+handles and resolved against the Application-owned scene; no source scene, GUI,
+window or scheduler is recreated. Quality/shadow/water inputs survive recovery;
+water inputs clear on scene changes. Clock baselines/input/fixed remainder reset
+at graphics handoff and after blocked frames, preserving elapsed totals and pause.
+Native Dawn's adapter selects D3D12/Vulkan/D3D11 through private request options
+and supplies a trusted normalized System32 runtime search directory where needed.
+No Vulkan/Dawn/Win32 types enter portable interfaces. API/adapter diagnostics stay
+in native host reports; all three APIs use the same WebGpuRenderer/WGSL as browser
+WebGPU. The optional direct renderer remains a strict independent implementation.
+See docs/windows-graphics-fallback.md and its separate validation evidence.
+
+### Optional compiled code modules (M1)
+
+`engine_modules` / `WebEngine::Modules` is an optional standard-C++20-only target,
+also consumable through `modules/` without configuring the rest of the engine.
+It validates namespaced descriptors, API/dependency versions, capabilities and
+provided schemas, then provides typed owner-thread staged composition with
+deterministic dependency ordering. Immutable registry snapshots retain provider
+captures; sessions keep snapshots alive. Failed preparation keeps the previous
+composition; registry teardown precedes reverse provider release. No scheduler,
+scene ownership, global registry, dynamic loader or executable unload is added.
+
+`cmake/WebEngineModule.cmake` supplies the public static-module target helper.
+`examples/modules` is an external non-quest plugin template with independent
+counter sessions, optional browser/Windows rendered hosts and disabled-module
+coverage. Browser hosting supplies Application/renderer callbacks; Windows uses
+the existing DesktopHost. The portable quest kernel is delivered separately in M2; Paws migration remains future work.
+See [contracts](docs/modules.md) and [evidence](docs/modules-validation.md).
+
+### Optional quest kernel (M2)
+
+`engine_quests` / `WebEngine::Quests` depends only on Modules and standard C++20.
+Explicit `webengine.quests` registration supplies pure typed handlers; additional
+compiled modules extend the staging Bindings registry. Immutable catalogues own
+module snapshots/provider captures. Application-owned Runtime instances retain
+catalogues and independently own facts, staged progress, earned receipts and
+scoped input; no scene, global registry, platform IO or second clock is added.
+
+Owner-thread preparation computes an immutable candidate with bounded work and
+typed effect requests. Failed validation, callback/reentry, budget exhaustion or
+host effect rejection preserves live state and queued input. No-allocation commit
+checks exact owner/state/queue revisions. Hosts stage and publish their game
+economy/journal alongside it. Restore validates canonical versioned snapshots,
+rebases generations and drops transient input; it emits no effects. Stable earned
+completion survives retry, and receipts are independent of attempt/content IDs.
+Callbacks are deterministic/pure; native and Wasm use identical kernel sources.
+
+`examples/quests` contains a custom compiled delivery handler and small real
+browser/Windows consumers. The M2 tests prove cross-runtime state/effect/trace
+and save equivalence. M3 now supplies shared host pause/scene-travel/persistent-IO integration;
+Paws migration/pin publication remains M4 onward. See [quest contracts](docs/quests.md)
+and [platform evidence](docs/quests-validation.md).
+
+### Quest host vertical slice (M3)
+
+The optional quest example now owns a shared application-level Session and
+Controller, composed from the M1 registry/M2 kernel and the existing Application.
+The session owns wallet, location, explicit pause and fractional simulation time;
+its bounded versioned envelope joins these with the kernel snapshot/receipts.
+Browser localStorage/file transfer and native DesktopFiles atomic IO are adapters.
+No game/save policy or platform dependency moves into the portable quest module.
+
+Controller simulation uses Application delta only. Scene travel stages a new
+presentation, registers its view, commits an idle transition and unloads the old
+scene while session progress survives. Scene projections use component IDs;
+renderer borrows release/rebind before destruction. Input/import epochs cancel
+old work on lifecycle/scene/session replacement. Staged loads validate all game
+and quest state before publication; restore emits no rewards and rebases clocks.
+See [host contracts](docs/quests-host.md) and [cross-platform evidence](docs/quests-host-validation.md).
+Paws host extraction, pin publication and migration remain M4 onward.

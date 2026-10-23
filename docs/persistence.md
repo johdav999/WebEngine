@@ -129,7 +129,7 @@ Migration outputs count against allocation budgets. Existing archive accounting
 excludes object/allocator overhead, callback allocations and GPU/Jolt internals.
 CRC32 detects accidental corruption; it does not authenticate data.
 
-Application envelopes write `WESCENE\0` format version 34 (readers also accept versions 4-33), content kind 3, and the same
+Application envelopes write `WESCENE\0` format version 35 (readers also accept versions 4-34), content kind 3, and the same
 length/CRC header as scenes/assets. Application schema version is separate from
 engine format version. Scene and asset readers reject application content and vice
 versa. Store the returned bytes through any host byte adapter; native applications

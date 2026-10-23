@@ -118,3 +118,7 @@ normals. It reuses bounded trail storage/rendering with camera-independent surfa
 orientation, an isolated sloped preview and v28 live-normal persistence. The Ribbon
 alignment and sampling contract above remains unchanged. See
 [surface-following trails](surface-trails.md).
+
+
+Native Dawn and direct D3D12 support this presentation contract; see
+[native FX scope and validation](windows-fx-rendering.md).

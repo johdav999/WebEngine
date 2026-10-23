@@ -2,11 +2,25 @@
 
 Optional `engine_desktop` (`WebEngine::Desktop`) supplies `engine/desktop.hpp`.
 It owns an SDL3 window/event dispatcher, input adapters, retained GUI, Application
-and the same WebGPU renderer/WGSL used by the browser. Public headers contain no
-SDL, HWND or Dawn types. Link the public target; consumers need no private source
+and a selected private graphics backend. Dawn shares browser WebGPU/WGSL; direct
+D3D12 provides [vehicle, GUI, conventional/layered terrain PBR/lighting, skin/morph, water/underwater, FX and sky/fog/HDR rendering](windows-d3d12.md).
+`DesktopSettings::backend` defaults to `DesktopBackend::Automatic`, trying Dawn
+D3D12, Vulkan and D3D11 in order. Explicit selections remain strict; direct D3D12
+is independently selectable. `backend()` reports the current candidate, while
+diagnostics expose readiness and all attempts. See [fallback and recovery](windows-graphics-fallback.md). Public headers contain no
+SDL, HWND, Dawn or D3D12 types. Link the public target; consumers need no private source
 or SDK include directories. Windows x64 MSVC Release is currently supported.
 
 ## Minimal application
+
+Water materials use the shared `MaterialShader::Water`/`WaterSettings` contract
+on Dawn and direct D3D12. Call `setWaterInteractions(span)` after scene activation
+or from a frame callback to publish up to 16 copied contacts/wakes. Use
+`application().clocks().simulation.seconds` for their `startTime`; the host supplies
+that same simulation clock to water while GUI presentation continues independently.
+Invalid input retains the previous snapshot. View edits/recovery retain contacts;
+successful scene handoff clears them. Applications own contact detection/emission.
+See [water](water.md) and [native scope](windows-d3d12.md).
 
 ```cpp
 #include "engine/desktop.hpp"
@@ -51,7 +65,7 @@ smoke command takes `-BuildDir build/windows-desktop` too.
   outgoing scene destruction; shutdown releases the renderer before scenes.
   A camera removed during simulation is omitted on the next presentation instead
   of dereferencing an expired pointer. Register views before entering a scene.
-- `step(callbacks, optionalTimestamp)` polls SDL events, services Dawn callbacks,
+- `step(callbacks, optionalTimestamp)` polls SDL events, services graphics work,
   calls Application::advance once and renders after `callbacks.present`. Callers
   supply gameplay input/simulation/camera policy through the existing
   ApplicationFrameCallbacks. Optional timestamps are monotonic seconds for tools
@@ -60,7 +74,7 @@ smoke command takes `-BuildDir build/windows-desktop` too.
 - Step is non-reentrant. Exceptions from user callbacks unwind host guards and
   propagate to the caller. Changing scene view configuration requires an idle
   Application boundary; rendering settings can change before rendering a frame.
-  Initial graphics acquisition is asynchronous; diagnostics().ready reports it.
+  Dawn graphics acquisition is asynchronous; diagnostics().ready reports it.
   Initialization failures throw from step with the graphics diagnostic.
 - `requestClose()` is safe inside GUI/frame callbacks. The host completes the
   current safe boundary, cancels input and calls Application::shutdown before
@@ -129,7 +143,8 @@ textbox/caret in logical window coordinates. OS services stop before window/GUI
 destruction, without calling application widget hooks during teardown.
 
 This is single-line editing, without undo/redo, grapheme segmentation, shaping,
-bidi, multiline editing or native Windows accessibility. Automated SDL preedit
+bidi or multiline editing. Native Windows accessibility is provided through
+[UI Automation](accessibility-input.md). Automated SDL preedit
 tests establish adapter behavior, not acceptance of a physical keyboard layout,
 installed IME candidate UI or every Windows input method.
 
@@ -200,3 +215,8 @@ Distribution is available through a separate [packaging workflow](windows-distri
 Publisher signing, clean-VM sign-off and broad driver acceptance remain separate
 release gates. Broader
 rendering/window acceptance is tracked separately in [Windows acceptance](windows-acceptance.md).
+
+
+Direct D3D12 now supports bounded device recovery, ordinary mesh instancing and
+semantic BC7 uploads with RGBA fallback. See [recovery/performance contracts](windows-d3d12-recovery-performance.md)
+and [milestone 8 evidence](windows-d3d12-milestone8-validation.md).

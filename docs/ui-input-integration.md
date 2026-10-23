@@ -1,5 +1,10 @@
 # UI and input integration
 
+Windows now supplies a private UI Automation bridge and explicit SDL touch/pen
+contact routing using these portable GUI/input contracts. See
+[accessibility and input](accessibility-input.md) for patterns, ownership,
+coordinate conversion, cancellation, device scope and validation.
+
 The optional native Windows [DesktopHost](windows-desktop.md) uses these same
 InputBindings/Application snapshots and GuiSystem widgets. Stable DesktopControl
 IDs keep SDL details private. GUI input takes precedence over gameplay; menu,

@@ -74,6 +74,7 @@ void WebGlRenderer::drawUnderwater(const UnderwaterView& water,const CameraCompo
     const std::array<const char*,8> names={"viewport","eye","minimum","maximum","absorptionStrength","colorDensity","options","caustics"};
     const std::array values={uniforms.viewport,uniforms.eye,uniforms.minimum,uniforms.maximum,uniforms.absorptionStrength,uniforms.colorDensity,uniforms.options,uniforms.caustics};
     for(std::size_t i=0;i<names.size();++i) glUniform4fv(glGetUniformLocation(underwaterProgram_,names[i]),1,values[i].data());
+    glUniform4fv(glGetUniformLocation(underwaterProgram_,"regionPlanes[0]"),16,uniforms.regionPlanes[0].data());
     glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,waterColor_);glUniform1i(glGetUniformLocation(underwaterProgram_,"sourceColor"),0);
     glActiveTexture(GL_TEXTURE1);glBindTexture(GL_TEXTURE_2D,waterDepth_);glUniform1i(glGetUniformLocation(underwaterProgram_,"sourceDepth"),1);glActiveTexture(GL_TEXTURE0);
     // Fullscreen triangle respects the current view's scissor and leaves World depth intact.

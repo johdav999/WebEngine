@@ -64,11 +64,12 @@ public:
     static AssetLibrary loadAssets(std::span<const std::byte> bytes,const ArchiveLimits& limits={});
     static AssetLibrary collectAssets(const Scene& scene);
     static SceneDocument clone(const Scene& scene,std::span<const RenderView> views={},const AssetLibrary& assets={},const ArchiveLimits& limits={},const ComponentCodecs& codecs={});
-    // Clone built-in subtrees, share immutable assets, regenerate all saved identities.
-    // No callbacks/custom behavior, scene roots or independently protected children.
-    static std::unique_ptr<Node> duplicateSubtree(const Node& node,const ArchiveLimits& limits={});
+    // Clone built-ins/registered detached components, sharing immutable assets
+    // and regenerating saved identities. Used custom resolve callbacks, scene
+    // roots and independently protected children reject. No callback copying.
+    static std::unique_ptr<Node> duplicateSubtree(const Node& node,const ArchiveLimits& limits={},const ComponentCodecs& codecs={});
     // Detached copy retaining saved IDs and shared immutable resources; adopt only into a different root.
-    static std::unique_ptr<Node> cloneSubtree(const Node& node,const ArchiveLimits& limits={});
+    static std::unique_ptr<Node> cloneSubtree(const Node& node,const ArchiveLimits& limits={},const ComponentCodecs& codecs={});
 #ifndef __EMSCRIPTEN__
     // Write a sibling temporary file and atomically replace the destination.
     static void saveFile(const std::filesystem::path& path,const Scene& scene,std::span<const RenderView> views={},

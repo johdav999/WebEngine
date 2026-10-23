@@ -6,6 +6,10 @@ it. Invalid modes, nonfinite or out-of-range data, zero sun direction and malfor
 panorama pixels throw before replacing valid settings. Published textures and mesh
 assets remain immutable. Browser/GPU types stay private to the renderer backends.
 
+These settings also render on native Dawn and direct D3D12 (milestone 3), using
+the same prepared sky payload, panorama color semantics and explicit clocks.
+See [native backend scope](windows-d3d12.md) and its environment acceptance runner.
+
 ```cpp
 engine::SkyBackground sky;
 sky.geometry=engine::SkyGeometry::Sphere; // Or Fullscreen.

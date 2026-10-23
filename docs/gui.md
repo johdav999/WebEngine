@@ -6,7 +6,8 @@ activation. See [desktop API and GUI ownership](windows-desktop.md) and the vehi
 pause/settings example. This adapter supports buttons, checkboxes, sliders,
 scroll panels and single-line TextInput editing, clipboard shortcuts and SDL IME
 preedit/commit. OS services are private to the desktop host; browser text/semantic
-adapters remain separate. Native Windows accessibility is not delivered.
+adapters remain separate. Native Windows exposes the same semantic controls through
+[UI Automation](accessibility-input.md).
 
 The GUI is a retained C++ widget tree rendered into the same WebGPU canvas as the
 scene. `Panel`, `ScrollPanel`, `TextLabel`, `TextInput`, `Image`, `Button`,

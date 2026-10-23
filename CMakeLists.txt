@@ -67,7 +67,12 @@ add_library(engine_core
   src/fog.cpp
   src/sky.cpp
   src/water.cpp
+  src/water_region.cpp
   src/terrain.cpp
+  src/terrain_seam.cpp
+  src/terrain_mesh.cpp
+  src/terrain_cliff.cpp
+  src/terrain_mesh_holes.cpp
   src/terrain_paging.cpp
   src/node.cpp
   src/actor.cpp
@@ -112,6 +117,9 @@ add_library(engine_editor src/editor.cpp src/editor_properties.cpp src/editor_co
 target_link_libraries(engine_editor PUBLIC engine_core engine_ai)
 target_sources(engine_editor PRIVATE src/editor_animation.cpp src/editor_prefab.cpp)
 target_sources(engine_editor PRIVATE src/editor_cinematic.cpp)
+add_library(engine_editor_gui src/editor_authoring.cpp)
+target_link_libraries(engine_editor_gui PUBLIC engine_editor engine_gui)
+target_include_directories(engine_editor_gui PUBLIC include)
 if(MSVC)
   target_compile_options(engine_core PRIVATE /W4)
 else()
@@ -160,6 +168,12 @@ if(EMSCRIPTEN)
   target_link_options(crowd_navigation_wasm_tests PRIVATE -fexceptions -sENVIRONMENT=node -sALLOW_MEMORY_GROWTH=1 -sSTACK_SIZE=1048576 -sEXIT_RUNTIME=1)
   set_target_properties(crowd_navigation_wasm_tests PROPERTIES SUFFIX ".js")
   add_executable(prefab_asset_wasm_tests EXCLUDE_FROM_ALL tests/prefab_asset_tests.cpp)
+  add_executable(editor_authoring_wasm_tests EXCLUDE_FROM_ALL tests/editor_authoring_tests.cpp)
+  target_link_libraries(editor_authoring_wasm_tests PRIVATE engine_editor_gui)
+  target_compile_options(engine_editor_gui PRIVATE -fexceptions)
+  target_compile_options(editor_authoring_wasm_tests PRIVATE -fexceptions)
+  target_link_options(editor_authoring_wasm_tests PRIVATE -fexceptions -sENVIRONMENT=node -sALLOW_MEMORY_GROWTH=1 -sSTACK_SIZE=1048576 -sEXIT_RUNTIME=1)
+  set_target_properties(editor_authoring_wasm_tests PROPERTIES SUFFIX ".js")
   add_executable(content_iteration_wasm_tests EXCLUDE_FROM_ALL tests/content_iteration_tests.cpp)
   target_link_libraries(content_iteration_wasm_tests PRIVATE engine_editor)
   target_compile_options(content_iteration_wasm_tests PRIVATE -fexceptions)
@@ -211,7 +225,7 @@ if(EMSCRIPTEN)
   target_sources(webengine PRIVATE src/ai_demo.cpp src/editor_ai_browser.cpp src/editor_ai_controller_browser.cpp src/editor_animation_browser.cpp src/editor_prefab_browser.cpp)
   target_sources(webengine PRIVATE src/crowd_demo.cpp)
   target_sources(webengine PRIVATE src/fx_contact_fixture.cpp)
-  target_link_libraries(webengine PRIVATE engine_ai engine_editor engine_core engine_gui engine_gui_browser engine_audio_browser engine_assets_browser)
+  target_link_libraries(webengine PRIVATE engine_ai engine_editor engine_editor_gui engine_core engine_gui engine_gui_browser engine_audio_browser engine_assets_browser)
   target_include_directories(webengine PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
   target_compile_options(webengine PRIVATE --use-port=emdawnwebgpu -fexceptions -Wall -Wextra -Wpedantic)
   target_link_options(webengine PRIVATE
@@ -323,6 +337,9 @@ else()
   target_link_libraries(editor_structure_tests PRIVATE engine_editor)
   target_compile_definitions(editor_structure_tests PRIVATE FBX_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures")
   add_test(NAME editor_structure COMMAND editor_structure_tests)
+    add_executable(editor_authoring_tests tests/editor_authoring_tests.cpp)
+    target_link_libraries(editor_authoring_tests PRIVATE engine_editor_gui)
+    add_test(NAME editor_authoring COMMAND editor_authoring_tests)
     add_executable(editor_tests tests/editor_tests.cpp)
     add_executable(content_iteration_tests tests/content_iteration_tests.cpp)
     target_link_libraries(content_iteration_tests PRIVATE engine_editor)
@@ -704,3 +721,10 @@ if(EMSCRIPTEN)
  target_link_options(audio_dsp_wasm_tests PRIVATE -fexceptions -sALLOW_MEMORY_GROWTH=1 -sENVIRONMENT=node -sEXIT_RUNTIME=1)
  set_target_properties(audio_dsp_wasm_tests PROPERTIES SUFFIX ".js")
 endif()
+
+# Optional portable compiled modules and host examples.
+include(cmake/modules.cmake)
+include(cmake/quests.cmake)
+include(cmake/hybrid_terrain.cmake)
+include(cmake/network.cmake)
+include(cmake/planet.cmake)

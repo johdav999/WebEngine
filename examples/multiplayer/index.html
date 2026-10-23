@@ -1,0 +1,18 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>WebEngine | Multiplayer test</title>
+<style>body{margin:0;background:#101a26;color:#eef4fa;font:16px system-ui}main{max-width:1000px;margin:auto;padding:20px}h1{font-size:26px}input,button{font:inherit;padding:9px;border:1px solid #677e96;border-radius:5px;background:#213449;color:#fff;margin:3px}input{width:300px}button{cursor:pointer}canvas{width:100%;height:480px;display:block;background:#14202e}#status{padding:12px 0}#stats{font-variant-numeric:tabular-nums}.controls{display:flex;flex-wrap:wrap;gap:5px}p{color:#bdcddd}button:disabled{opacity:.45}</style>
+<main><h1>Multiplayer test arena</h1><p>Join the same server from a browser or Windows. Move with WASD or arrow keys. Use the gold beacon while nearby to increase the shared count.</p>
+<label>Server <input id="endpoint" aria-label="Server endpoint" value="ws://127.0.0.1:8177"></label><button id="join" disabled>Join / Reconnect</button><button id="leave" disabled>Leave</button>
+<div id="status" role="status">Loading engine…</div><div id="stats"></div><canvas id="viewport" width="960" height="480"></canvas>
+<div class="controls"><button data-x="-1000" data-z="0">Left</button><button data-x="0" data-z="-1000">Forward</button><button data-x="0" data-z="1000">Back</button><button data-x="1000" data-z="0">Right</button><button id="interact">Use beacon</button></div>
+<p>This isolated arena leaves the editor document unchanged. Stop the server to test disconnects; reconnect starts a new player.</p></main>
+<script>
+window.engineStatus=(text,error)=>{if(error)document.getElementById('status').textContent=text;};window.engineStats=()=>{};window.enginePerformance=()=>{};
+var Module={canvas:document.getElementById('viewport'),onRuntimeInitialized(){document.querySelectorAll('#join,#leave').forEach(b=>b.disabled=false);}};
+const endpoint=document.getElementById('endpoint');endpoint.value=new URLSearchParams(location.search).get('server')||endpoint.value;
+document.getElementById('join').onclick=()=>Module.ccall('multiplayer_join','number',['string'],[endpoint.value]);document.getElementById('leave').onclick=()=>Module._multiplayer_leave();
+const keys=new Set();function input(){if(!Module._multiplayer_input)return;Module._multiplayer_input((keys.has('d')||keys.has('arrowright')?1000:0)-(keys.has('a')||keys.has('arrowleft')?1000:0),(keys.has('s')||keys.has('arrowdown')?1000:0)-(keys.has('w')||keys.has('arrowup')?1000:0),0);}
+addEventListener('keydown',e=>{if(e.target instanceof HTMLInputElement)return;const k=e.key.toLowerCase();if(['w','a','s','d','arrowleft','arrowright','arrowup','arrowdown',' '].includes(k)){e.preventDefault();keys.add(k);input();if(k===' '&&!e.repeat)Module._multiplayer_input(0,0,1);}});addEventListener('keyup',e=>{keys.delete(e.key.toLowerCase());input();});
+function neutral(){keys.clear();input();}addEventListener('blur',neutral);document.addEventListener('visibilitychange',()=>{neutral();if(document.hidden)Module._multiplayer_leave?.();});addEventListener('pagehide',()=>Module._multiplayer_leave?.());
+document.querySelectorAll('[data-x]').forEach(b=>{b.onpointerdown=e=>{b.setPointerCapture(e.pointerId);Module._multiplayer_input(+b.dataset.x,+b.dataset.z,0);};b.onpointerup=b.onpointercancel=neutral;});document.getElementById('interact').onclick=()=>Module._multiplayer_input(0,0,1);
+window.refreshMultiplayer=s=>{document.getElementById('status').textContent=s.status;document.getElementById('stats').textContent=`Players: ${s.entities.filter(e=>e.owner).length} · Shared beacon: ${s.entities.find(e=>!e.owner)?.score||0} · Snapshot: ${s.snapshot}`;};
+</script><script src="multiplayer_demo.js"></script></html>

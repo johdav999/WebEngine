@@ -2,7 +2,9 @@
 
 The existing `AnimationComponent` supports optional multi-clip blend trees and
 ordered pose layers in its immutable `AnimationControllerDefinition`. The same
-portable evaluation feeds WebGPU and WebGL2 skinning. No renderer, input binding,
+portable evaluation feeds browser WebGPU/WebGL2 and native Dawn/direct D3D12
+deformation. See [native animated rendering](windows-animation-rendering.md).
+No input binding,
 physics writer, or second animation scheduler is introduced.
 
 ## Speed and direction

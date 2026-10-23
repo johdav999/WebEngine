@@ -274,7 +274,7 @@ void Scene::collect(SceneFrame& frame,std::uint32_t visibilityMask,const Frustum
             frame.meshes.push_back(std::move(draw));frame.layerDraws[layer].push_back(index);
             frame.storageGrowths+=(meshCapacity!=frame.meshes.capacity())+(layerCapacity!=frame.layerDraws[layer].capacity());
         };
-        if(const auto* mesh=dynamic_cast<const MeshComponent*>(&node); mesh && mesh->mesh && (mesh->visibilityMask&visibilityMask)) {
+        if(const auto* mesh=dynamic_cast<const MeshComponent*>(&node); mesh && mesh->mesh && !mesh->mesh->indices.empty() && (mesh->visibilityMask&visibilityMask)) {
             mesh->lodPolicy.validate();
             if(!std::isfinite(mesh->opacity)||mesh->opacity<0||mesh->opacity>1
                 ||(mesh->blend!=BlendMode::Opaque&&mesh->blend!=BlendMode::Alpha&&mesh->blend!=BlendMode::Additive))

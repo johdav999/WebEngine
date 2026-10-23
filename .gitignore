@@ -6,3 +6,4 @@
 /.idea/
 *.user
 __pycache__/
+/examples/multiplayer/node_modules/

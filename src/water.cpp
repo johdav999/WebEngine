@@ -1,4 +1,5 @@
 #include "engine/water.hpp"
+#include "engine/water_region.hpp"
 #include "engine/mesh_component.hpp"
 #include "engine/scene.hpp"
 #include <stdexcept>
@@ -108,7 +109,9 @@ std::optional<UnderwaterView> underwaterView(const Scene& scene,Vec3 eye,std::ui
             const auto inverse=inverseAffine(world);const auto local=transformPoint(inverse,eye);
             const auto n=normalized(transformDirection(transpose(inverse),{0,1,0}));
             if(dot(n,eye-transformPoint(world,{}))>=-.01f||local.x<bounds.minimum.x||local.x>bounds.maximum.x||local.z<bounds.minimum.z||local.z>bounds.maximum.z) return;
-            result=UnderwaterView{inverse,bounds.minimum,bounds.maximum,material.water};break;
+            auto region=waterRegion(*mesh);
+            if(region&&!region->contains(local))return;
+            result=UnderwaterView{inverse,bounds.minimum,bounds.maximum,material.water,std::move(region)};break;
         }
     });return result;
 }
@@ -120,6 +123,11 @@ float underwaterDistance(const UnderwaterView& water,Vec3 start,Vec3 end) {
         const auto a=(low-p)/d,b=(high-p)/d;enter=std::max(enter,std::min(a,b));exit=std::min(exit,std::max(a,b));
     };
     slab(origin.x,delta.x,water.minimum.x,water.maximum.x);slab(origin.z,delta.z,water.minimum.z,water.maximum.z);
+    if(water.region){
+        slab(origin.y,delta.y,water.region->bottom,0);
+        for(unsigned i=0;i<water.region->outline.size();++i){const auto p=water.region->plane(i);const float a=p[0]*origin.x+p[1]*origin.z+p[2],d=p[0]*delta.x+p[1]*delta.z;
+            if(std::abs(d)<1e-7f){if(a<0)exit=-1;}else if(d>0)enter=std::max(enter,-a/d);else exit=std::min(exit,-a/d);}
+    }
     if(std::abs(delta.y)<1e-7f) {if(origin.y>0) exit=-1;}
     else if(delta.y>0) exit=std::min(exit,-origin.y/delta.y);else enter=std::max(enter,-origin.y/delta.y);
     return std::min(water.settings.underwaterMaxDistance,std::max(0.0f,exit-enter)*std::sqrt(dot(end-start,end-start)));

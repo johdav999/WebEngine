@@ -98,7 +98,10 @@ the resource is ready. Bytes describe source IO, not decoded/GPU memory. Prepara
 reports ready/total dependency counts, aggregate bytes and `totalBytesKnown`; use
 dependency counts when a source length is unknown. A downloaded asset may still be
 loading while decoding. Applications choose eviction policy; automatic LRU/budgets,
-priorities, persistent caches and hot reload remain future work.
+priorities and persistent caches remain future work. Explicit dependency tracking,
+atomic reimport and opt-in source polling are described in
+[content iteration](content-iteration.md). Ready requests observe a new resource
+and revision only after a complete successful reload; earlier shared pointers stay valid.
 
 ## Prepare before activation
 

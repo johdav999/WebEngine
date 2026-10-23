@@ -1,3 +1,4 @@
+#include "underwater_render.hpp"
 #include "engine/performance_timeline.hpp"
 #include "webgpu_renderer.hpp"
 #include "engine/mesh_optimizer.hpp"
@@ -1194,7 +1195,7 @@ void WebGpuRenderer::render(double updateMs,double intervalMs) {
         counters_.cpuAssetBytes+=(environment_->diffuse.pixels.size()+environment_->brdf.size())*sizeof(std::array<float,4>);
         for(const auto& resource:viewResources_) {
             if(resource->skyBuffer) counters_.gpuBufferBytes+=sizeof(SkyUniform);
-            if(resource->underwaterBuffer) counters_.gpuBufferBytes+=256;
+            if(resource->underwaterBuffer) counters_.gpuBufferBytes+=sizeof(UnderwaterUniform);
             if(resource->frameBuffer) counters_.gpuBufferBytes+=(2+maxShadowLights)*sizeof(FrameUniform)+sizeof(ParticleCamera)+16+resource->particleCapacity*sizeof(ParticleInstance)+resource->ribbonCapacity*sizeof(RibbonVertex)+resource->objectCapacity*objectStride;
             counters_.frameStorageBytes+=resource->frame.storageBytes()+resource->fxFrame.storageBytes()+resource->particleShadow.capacity()*sizeof(ParticleInstance)+resource->ribbonShadow.capacity()*sizeof(RibbonVertex);
         }

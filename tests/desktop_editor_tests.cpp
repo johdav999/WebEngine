@@ -1,5 +1,7 @@
 #include "engine/editor_desktop.hpp"
 #include "engine/mesh_component.hpp"
+#include "engine/animation_library.hpp"
+#include "engine/prefab_asset.hpp"
 #include <SDL3/SDL.h>
 #include <chrono>
 #include <fstream>
@@ -9,7 +11,7 @@ using namespace engine;
 namespace {
 void require(bool value,const char* message){if(!value)throw std::runtime_error(message);}
 template<class F>void rejects(F action){bool rejected=false;try{action();}catch(...){rejected=true;}require(rejected,"Rejected action changed valid state");}
-std::uint64_t widget(GuiSystem& gui,const std::string& name){for(const auto& n:gui.accessibilityNodes())if(n.name==name)return n.id;throw std::runtime_error("Missing GUI control: "+name);}
+std::uint64_t widget(GuiSystem& gui,const std::string& name){for(const auto& n:gui.accessibilityNodes())if(n.name==name&&n.keyboardFocusable)return n.id;throw std::runtime_error("Missing GUI control: "+name);}
 }
 int main(int argc,char** argv){try{
     const auto evidence=argc>1?std::filesystem::path(argv[1]):std::filesystem::path(DESKTOP_EDITOR_TEST_DIR);std::filesystem::create_directories(evidence);
@@ -44,7 +46,18 @@ int main(int argc,char** argv){try{
     const auto d=host.diagnostics();
     editor.save(evidence/"native-after-mouse.wescene");
     if(argc>2){editor.open(std::filesystem::path(argv[2]));frame();std::string exchanged;editor.source().visit([&](const Node& n,const Mat4&){if(n.name=="Cube"&&n.transform.position.x==4)exchanged=n.savedId();});require(!exchanged.empty(),"Browser-edited scene did not load in native editor");require(editor.session().select(exchanged),"Browser scene cannot select in native editor");frame();host.captureFrame(evidence/"browser-exchange.ppm");wait([&]{return !host.capturePending();});}
+    // Exercise the actual shared tool frontend inside the native SDL/Dawn host.
+    activate("Authoring tools");activate("Create terrain");require(editor.session().terrainActor(),"Native terrain creation failed");activate("Stamp terrain");
+    auto toolCapture=[&](const std::string& name){host.captureFrame(evidence/(name+".ppm"));wait([&]{return !host.capturePending();});require(host.captureError().empty(),"Tool framebuffer capture failed");};
+    toolCapture("terrain-tools");activate("AI");activate("Add AI state");toolCapture("ai-tools");
+    const auto aiBytes=editor.authoring().saveDocument();writeDesktopFileAtomic(evidence/"native.weai",aiBytes);
+    activate("Animation");auto rig=std::make_shared<Skeleton>();rig->joints={{"Root",-1,{}}};rig->bindings={{},{0,Mat4::identity()}};rig->clips={{"Idle",1,2,{{},{}}}};editor.authoring().openDocument(AnimationLibraryArchive::save(*AnimationLibrary::fromSkeleton(rig)),true);frame();toolCapture("animation-tools");writeDesktopFileAtomic(evidence/"native.weanim",editor.authoring().saveDocument());
+    activate("Prefab");Actor prop("Prop");prop.addComponent<MeshComponent>("Mesh",Mesh::cube());editor.authoring().openDocument(PrefabAssetArchive::save(PrefabAsset::capture(prop,"Prop")),true);frame();activate("Place linked prefab");toolCapture("prefab-tools");writeDesktopFileAtomic(evidence/"native.weprefab",editor.authoring().saveDocument());
+    activate("FX");activate("Explosion preset");activate("Place FX");toolCapture("fx-tools");writeDesktopFileAtomic(evidence/"native.wefx",editor.authoring().saveDocument());
+    activate("Cinematic");editor.session().select(savedId);activate("Add cinematic track for selection");toolCapture("cinematic-tools");writeDesktopFileAtomic(evidence/"native.wecin",editor.authoring().saveDocument());
+    const auto cinematicButton=widget(host.gui(),"Add cinematic track for selection");editor.play();frame();require(!host.gui().activateWidget(cinematicButton),"Tool edits active during Play");editor.stop();frame();
+    activate("Close tools");editor.open(path,true);frame();editor.session().select(savedId);
     require(editor.session().beginTransform(),"Cannot prepare close cancellation");auto preview=editor.session().selected()->transform;preview.position.x+=1;require(editor.session().previewTransform(preview),"Cannot preview close cancellation");host.requestClose();require(!editor.step(time+=1./60),"Native editor did not close");
-    std::ofstream report(evidence/"report.json");report<<"{\"passed\":true,\"nativeDawn\":true,\"guiTransform\":true,\"invalidPreserved\":true,\"history\":true,\"archiveRoundTrip\":true,\"isolatedPlay\":true,\"nativeMouse\":true,\"frames\":"<<d.presentedFrames<<",\"renderState\":"<<d.renderState<<"}\n";
+    std::ofstream report(evidence/"report.json");report<<"{\"passed\":true,\"nativeDawn\":true,\"guiTransform\":true,\"invalidPreserved\":true,\"history\":true,\"archiveRoundTrip\":true,\"isolatedPlay\":true,\"nativeMouse\":true,\"specializedTools\":true,\"frames\":"<<d.presentedFrames<<",\"renderState\":"<<d.renderState<<"}\n";
     std::cout<<"Native editor: GUI edits, history, invalid input, duplicate, files, isolated Play, replacement, resize, SDL mouse and Dawn framebuffer passed\n";
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

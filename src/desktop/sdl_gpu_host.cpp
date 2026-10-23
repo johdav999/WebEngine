@@ -6,6 +6,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <cstring>
+#include <dawn/native/DawnNative.h>
 
 namespace engine {
 struct SdlGpuHost::Capture {
@@ -16,6 +17,7 @@ struct SdlGpuHost::Capture {
     std::string error;
 };
 double SdlGpuHost::nowMs() const { return double(SDL_GetTicksNS())/1e6; }
+bool SdlGpuHost::timingRequested() const {const auto* value=SDL_getenv("WEBENGINE_GPU_TIMING");return !value||std::string_view(value)!="0";}
 GpuHostSize SdlGpuHost::logicalSize() const {
     int w=0,h=0,pw=0,ph=0;SDL_GetWindowSize(&window_,&w,&h);SDL_GetWindowSizeInPixels(&window_,&pw,&ph);
     const auto scale=desktopCoordinateScale(window_);
@@ -26,7 +28,19 @@ void SdlGpuHost::drawableSize(int& w,int& h) const {
     w=int(width_);h=int(height_);
 }
 void SdlGpuHost::resizeDrawable(std::uint32_t w,std::uint32_t h) { width_=w;height_=h; }
-void SdlGpuHost::adapterOptions(wgpu::RequestAdapterOptions& options) { options.backendType=wgpu::BackendType::D3D12; }
+wgpu::Instance SdlGpuHost::createInstance() {
+    if(backend_==wgpu::BackendType::D3D12)return wgpu::CreateInstance();
+    // Dawn's restricted DLL loader requires an absolute search directory. Use
+    // the OS runtime, never a Vulkan DLL discovered through the working directory.
+    wchar_t directory[1024]{};const auto count=GetSystemDirectoryW(directory,1024);
+    if(!count||count>=1024)throw std::runtime_error("Cannot locate the Windows graphics runtime directory");
+    const auto utf8=std::filesystem::path(directory).u8string();
+    std::string path(utf8.begin(),utf8.end());path+="/";std::string_view paths[]{path};
+    dawn::native::DawnInstanceDescriptor native;native.additionalRuntimeSearchPaths=paths;
+    wgpu::InstanceDescriptor descriptor;descriptor.nextInChain=&native;
+    return wgpu::CreateInstance(&descriptor);
+}
+void SdlGpuHost::adapterOptions(wgpu::RequestAdapterOptions& options) { options.backendType=backend_; }
 void SdlGpuHost::adapterSelected(const wgpu::Adapter& adapter) {
     wgpu::AdapterInfo info{};if(adapter.GetInfo(&info)!=wgpu::Status::Success){adapterJson_="null";return;}
     auto quoted=[](wgpu::StringView value){
@@ -34,7 +48,7 @@ void SdlGpuHost::adapterSelected(const wgpu::Adapter& adapter) {
         std::string result="\"";for(unsigned char c:source){if(c=='"'||c=='\\'){result+='\\';result+=c;}else if(c<32)result+=' ';else result+=c;}return result+'"';
     };
     adapterJson_="{\"vendor\":"+quoted(info.vendor)+",\"architecture\":"+quoted(info.architecture)+",\"device\":"+quoted(info.device)+",\"description\":"+quoted(info.description)+
-        ",\"vendorId\":"+std::to_string(info.vendorID)+",\"deviceId\":"+std::to_string(info.deviceID)+",\"backend\":\"D3D12\",\"software\":"+(info.adapterType==wgpu::AdapterType::CPU?"true":"false")+"}";
+        ",\"vendorId\":"+std::to_string(info.vendorID)+",\"deviceId\":"+std::to_string(info.deviceID)+",\"backend\":\""+(info.backendType==wgpu::BackendType::Vulkan?"Vulkan":info.backendType==wgpu::BackendType::D3D11?"D3D11":"D3D12")+"\",\"software\":"+(info.adapterType==wgpu::AdapterType::CPU?"true":"false")+"}";
 }
 void SdlGpuHost::renderState(const char* json){stateJson=json;if(!stateJson.empty()&&stateJson.back()=='}'){stateJson.pop_back();stateJson+=",\"adapter\":"+adapterJson_+"}";}}
 wgpu::Surface SdlGpuHost::createSurface(const wgpu::Instance& instance) {

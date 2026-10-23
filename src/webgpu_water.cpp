@@ -104,9 +104,10 @@ void WebGpuRenderer::drawUnderwater(wgpu::CommandEncoder& encoder,wgpu::TextureV
         wgpu::BindGroupDescriptor d{};d.layout=underwaterLayout_;d.entryCount=entries.size();d.entries=entries.data();view.underwaterBinding=device_.CreateBindGroup(&d);view.underwaterRevision=waterTargetRevision_;
     }
     const auto& resolved=resolvedViews_[ordinal];const auto uniforms=prepareUnderwater(water,*activeCamera_,resolved.viewport,waterTime_);
-    if(!view.underwaterValid||std::memcmp(view.underwaterShadow.data(),&uniforms,sizeof(uniforms))) {
+    static_assert(sizeof(view.underwaterShadow)==sizeof(UnderwaterUniform));
+    if(!view.underwaterValid||std::memcmp(&view.underwaterShadow,&uniforms,sizeof(uniforms))) {
         device_.GetQueue().WriteBuffer(view.underwaterBuffer,0,&uniforms,sizeof(uniforms));
-        std::memcpy(view.underwaterShadow.data(),&uniforms,sizeof(uniforms));view.underwaterValid=true;
+        view.underwaterShadow=uniforms;view.underwaterValid=true;
         ++counters_.uploadCalls;counters_.uploadBytes+=sizeof(uniforms);++counters_.frameUploadCalls;counters_.frameUploadBytes+=sizeof(uniforms);
     }
     wgpu::RenderPassColorAttachment color{};color.view=target;color.loadOp=wgpu::LoadOp::Load;color.storeOp=wgpu::StoreOp::Store;

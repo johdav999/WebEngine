@@ -5,6 +5,7 @@ const fs=require('node:fs/promises');
 const assert=require('node:assert/strict');
 const base=process.env.DEMO_URL||'http://localhost:8080';
 const evidence=process.env.EVIDENCE_DIR||'build/evidence/morphs';
+const backend=process.env.BACKEND||'webgpu';assert(['webgpu','webgl2'].includes(backend));
 function difference(a,b,leftOnly=false) {
   a=PNG.sync.read(a);b=PNG.sync.read(b);assert.equal(a.width,b.width);assert.equal(a.height,b.height);
   let changed=0;
@@ -18,13 +19,14 @@ function difference(a,b,leftOnly=false) {
 (async()=>{
   await fs.mkdir(evidence,{recursive:true});
   const browser=await chromium.launch({headless:true,executablePath:process.env.BROWSER_EXECUTABLE});
-  const result={checks:[],errors:[],url:base,browser:await browser.version()};
+  const result={checks:[],errors:[],url:base,backend,browser:await browser.version()};
   try {
     const page=await browser.newPage({viewport:{width:1440,height:1040},deviceScaleFactor:1});
     page.on('pageerror',e=>result.errors.push(String(e)));
     page.on('console',m=>{if(m.type()==='error')result.errors.push(m.text());});
-    await page.goto(`${base}/?scene=morph&morphTest=1`);
+    await page.goto(`${base}/?scene=morph&morphTest=1&renderer=${backend}`);
     await page.waitForFunction(()=>document.body.dataset.defaultModel==='ready'&&document.body.dataset.morphTargets==='2'&&Number(document.body.dataset.frames)>10);
+    assert.equal(await page.evaluate(()=>EngineQuality.snapshot().backend),backend);
     await page.evaluate(()=>Module._engine_pause(1));
     const canvas=page.locator('#viewport');
     const snap=()=>page.evaluate(()=>window.EnginePerformance.snapshot().latest);
@@ -56,10 +58,13 @@ function difference(a,b,leftOnly=false) {
     result.checks.push('Transparent rendering, independent instances, and deformation-aware frustum bounds');
     await fixture(1,'fixture-shadow-on');await page.evaluate(()=>Module._engine_shadows(0));await page.waitForTimeout(300);
     const noShadow=await picture('fixture-shadow-off');assert(difference(noShadow,morphed)>100,'Morphed geometry casts a visible shadow');
-    await page.waitForFunction(()=>window.EnginePerformance.snapshot().latest.current.uploadCalls===0);
+    if(backend==='webgpu')await page.waitForFunction(()=>window.EnginePerformance.snapshot().latest.current.uploadCalls===0);
     const warm=await snap();await page.waitForTimeout(600);const steady=await snap();
-    assert.equal(steady.totalUploadBytes,warm.totalUploadBytes);assert.equal(steady.current.frameStorageGrowths,0);
-    result.checks.push('Changed morphs upload once; unchanged weights reuse GPU vertex buffers');
+    assert.equal(steady.current.frameStorageGrowths,0);
+    if(backend==='webgpu'){
+      assert.equal(steady.totalUploadBytes,warm.totalUploadBytes);
+      result.checks.push('Changed morphs upload once; unchanged weights reuse GPU vertex buffers');
+    }else result.checks.push('WebGL2 CPU deformation retains geometry behavior; dynamic vertex uploads remain per draw');
     await page.evaluate(()=>Module._engine_restore_demo());await page.waitForTimeout(350);
     assert.equal(await page.locator('#morph-fields').evaluate(el=>el.disabled),true);
     assert.equal(await page.locator('#morph-reset').isDisabled(),true);

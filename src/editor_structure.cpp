@@ -1,4 +1,5 @@
 #include "engine/editor.hpp"
+#include "engine/network_authoring.hpp"
 #include "engine/vehicle_component.hpp"
 #include "engine/mesh_component.hpp"
 #include "engine/skeletal_mesh_component.hpp"
@@ -49,7 +50,12 @@ bool EditorSession::addComponent(std::string_view type,std::shared_ptr<const Mes
     cancel();if(selectionIds().size()!=1)return false;auto* node=selected();if(!node||!propertyReadOnlyReason(*node).empty())return false;
     auto* actor=dynamic_cast<Actor*>(node);if(!actor)if(auto* c=dynamic_cast<Component*>(node))actor=c->owner();
     if(!actor)return false;std::unique_ptr<Component> candidate;
-    if(type=="Component")candidate=std::make_unique<Component>("Component");
+    if(type=="NetworkReplication") {
+        if(actor->parent()!=&scene_||!actor->isActiveInHierarchy()||!actor->hasComponent<MeshComponent>())throw std::invalid_argument("Select an enabled root mesh actor");
+        if(net::replicationSettings(*actor))throw std::invalid_argument("Actor already has replication settings");
+        candidate=net::makeReplicationMetadata();
+    }
+    else if(type=="Component")candidate=std::make_unique<Component>("Component");
     else if(type=="MeshComponent"||type=="SkeletalMeshComponent"){
         if(!mesh)throw std::invalid_argument("Choose a mesh asset first");
         if(type=="MeshComponent")candidate=std::make_unique<MeshComponent>("Mesh",mesh);else candidate=std::make_unique<SkeletalMeshComponent>("Skeletal mesh",mesh);
@@ -68,7 +74,13 @@ bool EditorSession::addComponent(std::string_view type,std::shared_ptr<const Mes
         if((type=="ColliderComponent"&&actor->hasComponent<ColliderComponent>())||(type=="RigidBodyComponent"&&actor->hasComponent<RigidBodyComponent>())||(type=="CharacterMotorComponent"&&actor->hasComponent<CharacterMotorComponent>()))throw std::invalid_argument("This actor already has that physics component");
         if(type=="ColliderComponent")candidate=std::make_unique<ColliderComponent>("Box collider",CollisionShape::box({.5f,.5f,.5f}));
         else if(type=="RigidBodyComponent")candidate=std::make_unique<RigidBodyComponent>();else candidate=std::make_unique<CharacterMotorComponent>();
-    } else throw std::invalid_argument("Unsupported editor component type");
+    } else {
+        auto found=std::find_if(components_.factories.begin(),components_.factories.end(),[&](const auto& f){return f.key==type;});
+        if(found==components_.factories.end())throw std::invalid_argument("Unsupported editor component type");
+        candidate=found->create();
+        if(!candidate||candidate->parent()||!candidate->children().empty())throw std::invalid_argument("Editor factory must return a detached childless component");
+        if(typeid(*candidate)!=typeid(Component)&&std::none_of(components_.codecs.entries().begin(),components_.codecs.entries().end(),[&](const auto& c){return c.type==typeid(*candidate);}))throw std::invalid_argument("Editor factory needs a matching component codec");
+    }
     candidate->validate();return create(std::move(candidate),*actor);
 }
 bool EditorSession::removeSelectedComponents(){

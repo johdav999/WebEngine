@@ -625,6 +625,7 @@ std::vector<GuiAccessibleNode> GuiSystem::accessibilityNodes() const {
         w.describeAccessibility(n);
         // Hook semantics cannot replace identity, layout or system-owned state.
         n.id=w.id_;n.bounds=w.bounds_;n.disabled=!enabled;n.focused=&w==focused();n.live=w.liveRegion_;
+        n.clippedBounds=intersect(w.bounds_,w.clip_);n.keyboardFocusable=w.focusable()&&enabled&&reachable(w);
         if(n.name.empty()&&n.role!=GuiRole::Textbox) n.name=w.displayedText();
         if((n.role!=GuiRole::Group||!n.name.empty())&&(!w.clip_.empty()||reachable(w))) nodes.push_back(std::move(n));
         for(const auto& child:w.children_) self(self,*child,enabled);

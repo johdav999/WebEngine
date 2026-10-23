@@ -1,0 +1,11 @@
+(() => {'use strict';
+ let fileContext=null;
+ const button=document.createElement('button');button.id='editor-authoring-toggle';button.textContent='Shared authoring tools';button.disabled=true;button.style.cssText='position:fixed;right:16px;top:8px;z-index:1000';document.body.append(button);
+ const input=document.createElement('input');input.type='file';input.id='editor-authoring-file';input.hidden=true;document.body.append(input);
+ button.onclick=()=>{window.EngineEditor?.cancel();window.EngineEditorCamera?.cancel();window.EngineInput?.instance.cancelAll();Module._engine_authoring_toggle?.();};
+ window.EngineAuthoringFiles={request(save){if(save)Module._engine_authoring_save();else{fileContext={...window.authoringState};input.value='';input.accept=['','.weanim','.weai','.weprefab','.wefx','.wecin'][window.authoringState?.area||0]||'';input.click();}}};
+ input.onchange=async()=>{try{const file=input.files[0],context=fileContext;if(!file||!context)return;if(file.size>64*1024*1024)throw Error('Authoring document exceeds 64 MiB');const data=new Uint8Array(await file.arrayBuffer());const p=Module._malloc(data.length||1);if(!p)throw Error('Not enough memory for document');try{Module.HEAPU8.set(data,p);Module._engine_authoring_open(p,data.length,context.generation,context.area);}finally{Module._free(p);}}catch(e){window.EngineEditor?.message(String(e),true);}};
+ const style=document.createElement('style');style.textContent='body.shared-authoring-visible #editor-gizmos{display:none!important}';document.head.append(style);
+ window.addEventListener('beforeunload',e=>{if(window.authoringState?.dirty){e.preventDefault();e.returnValue='';}});
+ setInterval(()=>{button.disabled=!window.EngineEditor?.active()||!!window.EngineEditor?.playing?.();},200);
+})();

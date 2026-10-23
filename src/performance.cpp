@@ -84,7 +84,13 @@ std::string PerformanceMonitor::json(double nowMs,const char* gpuState) const {
        <<",\"shadowLodParts\":"<<latest_.shadowLodParts<<",\"shadowCulledParts\":"<<latest_.shadowCulledParts
        <<",\"shadowMapResolution\":"<<latest_.shadowMapResolution<<",\"shadowFilterTaps\":"<<latest_.shadowFilterTaps;
     out<<",\"width\":"<<latest_.width<<",\"height\":"<<latest_.height<<",\"gpuPayloadBytes\":"<<(latest_.gpuMeshBytes+latest_.gpuTextureBytes+latest_.gpuBufferBytes+latest_.gpuDepthBytes);
-    out<<"},\"gpu\":{\"state\":\""<<gpuState<<"\",\"windowSamples\":"<<gpuCount_<<",\"totalSamples\":"<<totalGpuSamples_<<",\"ageMs\":";
+    out<<"},\"gpu\":"<<gpuJson(nowMs,gpuState)<<'}';return out.str();
+}
+std::string PerformanceMonitor::gpuJson(double nowMs,const char* gpuState) const {
+    std::ostringstream out;out.imbue(std::locale::classic());out<<std::fixed<<std::setprecision(6);
+    std::array<double,capacity> values{};
+    auto metric=[&](std::span<const double> data){const auto s=summarize(data);out<<"{\"mean\":"<<s.mean<<",\"p95\":"<<s.p95<<",\"max\":"<<s.max<<'}';};
+    out<<"{\"state\":\""<<gpuState<<"\",\"windowSamples\":"<<gpuCount_<<",\"totalSamples\":"<<totalGpuSamples_<<",\"ageMs\":";
     if(gpuCount_) out<<std::max(0.0,nowMs-lastGpuAt_); else out<<"null";
     out<<",\"totalMs\":";
     if(gpuCount_) { for(std::size_t i=0;i<gpuCount_;++i) values[i]=gpu_[i][0]+gpu_[i][1]+gpu_[i][2]+shadowGpu_[i];metric(std::span(values).first(gpuCount_)); } else out<<"null";
@@ -92,6 +98,6 @@ std::string PerformanceMonitor::json(double nowMs,const char* gpuState) const {
     if(gpuCount_) metric(std::span(shadowGpu_).first(gpuCount_)); else out<<"null";
     out<<",\"layersMs\":[";
     for(std::size_t layer=0;layer<3;++layer) { if(layer) out<<',';if(gpuCount_) { for(std::size_t i=0;i<gpuCount_;++i) values[i]=gpu_[i][layer];metric(std::span(values).first(gpuCount_)); } else out<<"null"; }
-    out<<"]}}"; return out.str();
+    out<<"]}"; return out.str();
 }
 } // namespace engine

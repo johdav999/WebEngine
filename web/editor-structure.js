@@ -10,6 +10,7 @@
   let content={components:[]};
   const text=(value,action)=>{const bytes=new TextEncoder().encode(value+'\0'),p=Module._malloc(bytes.length);if(!p)throw Error('Out of memory');try{Module.HEAPU8.set(bytes,p);return action(p);}finally{Module._free(p);}};
   function refresh(){
+    for(const type of content.componentTypes||[])if(![...$('editor-add-type').options].some(o=>o.value===type.key))$('editor-add-type').add(new Option(type.label,type.key));
     const active=editor()?.active(),playing=editor()?.playing(),busy=editor()?.isBusy(),snap=editor()?.snapshot(),ids=snap?.ids||[],ready=active&&editor().ready()&&!busy&&!playing&&!snap?.dragging;
     $('editor-play').disabled=!ready;$('editor-stop').disabled=!playing||busy;
     for(const control of structure.querySelectorAll('button,input,select'))control.disabled=!ready;

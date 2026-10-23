@@ -5,6 +5,7 @@
 #include "engine/animation.hpp"
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace engine {
@@ -35,8 +36,16 @@ struct MorphPose {
     std::vector<Vertex> vertices;
     std::uint64_t revision=0;
 };
+// Versioned, bounded preparation recipe. Caches remain transient; archives rebuild
+// them before publishing a resource. Locks refer to the exact saved base vertices.
+struct MeshLodRecipe {
+    std::uint32_t version=1,levels=3;
+    bool lockBorders=true;
+    std::vector<std::uint8_t> lockedVertices;
+};
 struct Mesh {
     std::vector<MeshLod> lods; // Shared derived static geometry; level zero is this mesh.
+    std::optional<MeshLodRecipe> lodRecipe;
     std::vector<Vertex> vertices;
     std::vector<MorphTarget> morphTargets;
     std::vector<SkinVertex> skin; // Empty for static meshes; one entry per vertex otherwise.

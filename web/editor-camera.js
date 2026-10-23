@@ -2,7 +2,7 @@
 (() => {
   const canvas=document.getElementById('viewport'),editor=window.EngineEditor;
   let gesture=null,dispose=[];
-  const available=()=>editor.active()&&editor.ready()&&!editor.isBusy();
+  const available=()=>!window.authoringState?.visible&&editor.active()&&editor.ready()&&!editor.isBusy();
   function cancel() {
     const previous=gesture;gesture=null;
     for(const release of dispose.splice(0))release();

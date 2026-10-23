@@ -1,5 +1,9 @@
 # Rendering quality and browser resilience
 
+Direct milestone 7 FX uses the selected HDR/MSAA targets and shares water's opaque
+depth snapshots for soft fading. Milestone 8 adds general mesh instancing,
+semantic BC7 uploads and bounded native device recovery. See [native FX](windows-fx-rendering.md).
+
 `RenderQuality`, `ResolutionBudget`, `RenderCapabilities` and `resolveResolution`
 in [render_quality.hpp](../include/engine/render_quality.hpp) are portable value
 contracts. They contain no browser or WebGPU types. Applications choose a
@@ -7,6 +11,31 @@ profile or supply a validated custom budget. Optional
 [adaptive quality](adaptive-quality.md) treats those settings as a ceiling and
 adjusts resolution, shadows and available LOD from sustained frame intervals.
 Profiles themselves remain explicit settings, without device classification.
+
+Optional native Windows startup selection also exposes `RenderBackend::Direct3D12`.
+Its conventional mesh rendering uses the same resolution budget, camera/caster
+LOD and shadow planner, with PBR/IBL, point/spot lighting, cascaded/spot shadows
+and hardware-checked 4x MSAA, sky/fog and format-checked HDR bloom/color grading.
+HDR 4x MSAA is checked independently and falls back to one effective sample when
+unavailable. Direct mesh instancing is enabled; BC7 support is queried per device. The retained vehicle GUI disables unsupported controls; quality never enables an
+unimplemented effect. Browser backend preferences remain unchanged. See
+[native backend scope](windows-d3d12.md) and [recovery/performance](windows-d3d12-recovery-performance.md).
+
+Direct milestone 4 adds skinning/morphing before the existing material, shadow,
+fog and post passes. Animated bounds remain independent of quality. Skin/morph
+draws retain full source geometry rather than applying static mesh LODs, matching
+the shared RenderFrame policy. See [animated rendering](windows-animation-rendering.md).
+
+Direct milestone 5 adds layered terrain materials with normal/height blending and
+triplanar projection. Terrain chunks use shared automatic or explicit camera/shadow
+LOD independently. Presentation detail never changes terrain queries or collision.
+See [terrain](terrain.md) and [milestone 5 evidence](windows-d3d12-milestone5-validation.md).
+
+Direct milestone 6 water snapshots/reflections/underwater passes follow the selected
+render extent and effective 1x/4x MSAA. HDR scene inputs remain linear FP16;
+non-HDR snapshots use display color without a second tone map. Disabling all scene
+effects shrinks scratch targets and removes their passes. Water clocks and contact
+ages use simulation time independently of quality. See [water](water.md).
 
 | Profile | Scale / maximum DPR | Maximum dimension / pixels | Shadow resolution / samples / maps |
 | --- | --- | --- | --- |

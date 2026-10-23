@@ -6,6 +6,7 @@ vec3 hdrEncode(vec3 c){return hdrOutput?c:pow(c,vec3(1.0/2.2));}
 uniform highp sampler2D sourceColor,sourceDepth;
 uniform mat4 inverseViewProjection,worldToLocal;
 uniform vec4 viewport,eye,minimum,maximum,absorptionStrength,colorDensity,options,caustics;
+uniform vec4 regionPlanes[16];
 out vec4 outputColor;
 vec3 point(vec2 pixel,float depth) {
     vec2 ndc=(pixel-viewport.xy)/viewport.zw*2.0-1.0;
@@ -19,11 +20,18 @@ float distanceInWater(vec3 start,vec3 end) {
     vec3 origin=(worldToLocal*vec4(start,1)).xyz,delta=(worldToLocal*vec4(end-start,0)).xyz;
     vec2 interval=slab(origin.x,delta.x,minimum.x,maximum.x,vec2(0,1));
     interval=slab(origin.z,delta.z,minimum.z,maximum.z,interval);
+    if(options.z>0.0){
+        interval=slab(origin.y,delta.y,minimum.y,0.0,interval);
+        for(int i=0;i<16;i++){if(i>=int(options.z))break;vec4 e=regionPlanes[i];float p=dot(e.xy,origin.xz)+e.z,d=dot(e.xy,delta.xz);
+            if(abs(d)<1e-7){if(p<0.0)return 0.0;}else if(d>0.0)interval.x=max(interval.x,-p/d);else interval.y=min(interval.y,-p/d);}
+    }
     if(abs(delta.y)<1e-7) {if(origin.y>0.0) return 0.0;}
     else if(delta.y>0.0) interval.y=min(interval.y,-origin.y/delta.y);
     else interval.x=max(interval.x,-origin.y/delta.y);
     return min(options.x,max(0.0,interval.y-interval.x)*length(end-start));
 }
+bool inRegion(vec3 p){if(options.z<=0.0)return true;if(p.y<minimum.y)return false;
+    for(int i=0;i<16;i++){if(i>=int(options.z))break;vec4 e=regionPlanes[i];if(dot(e.xy,p.xz)+e.z<0.0)return false;}return true;}
 float causticPattern(vec2 p,float t) {
     vec2 cell=floor(p),f=fract(p),nearest=vec2(8);
     for(int y=-1;y<=1;y++) {for(int x=-1;x<=1;x++) {
@@ -41,7 +49,7 @@ void main() {
     vec3 planeNormal=vec3(worldToLocal[0].y,worldToLocal[1].y,worldToLocal[2].y);
     float planeLength=length(planeNormal),below=-local.y/planeLength;
     float facing=abs(dot(surface,planeNormal))/(max(length(surface),1e-8)*planeLength),light=0.0;
-    if(caustics.x>0.0 && depth<.999999 && local.y < -options.w &&
+    if(inRegion(local) && caustics.x>0.0 && depth<.999999 && local.y < -options.w &&
         local.x>=minimum.x && local.x<=maximum.x && local.z>=minimum.z && local.z<=maximum.z) {
         vec2 units=vec2(length(vec3(worldToLocal[0].x,worldToLocal[1].x,worldToLocal[2].x)),
                         length(vec3(worldToLocal[0].z,worldToLocal[1].z,worldToLocal[2].z)));

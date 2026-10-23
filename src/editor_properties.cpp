@@ -1,4 +1,5 @@
 #include "engine/editor_properties.hpp"
+#include "engine/network_authoring.hpp"
 #include "engine/decal.hpp"
 #include "engine/scene.hpp"
 #include "engine/vehicle_component.hpp"
@@ -60,6 +61,17 @@ template<class T> void vectorFields(EditorPropertyRegistry& r,const std::string&
 std::shared_ptr<const EditorPropertyRegistry> EditorPropertyRegistry::builtins() {
     static const auto built=[] {
         auto r=std::make_shared<EditorPropertyRegistry>();
+        auto replication=[&](std::string key,std::string label,auto get,auto set,double lo,double hi,std::vector<std::string> choices={}) {
+            EditorPropertyInfo info{std::move(key),std::move(label),"Multiplayer",choices.empty()?EditorPropertyType::Number:EditorPropertyType::Choice,lo,hi,.1,std::move(choices),0.0};
+            r->add({std::move(info),[](const Node& n){if(!net::isReplicationMetadata(n))return false;try{(void)net::replicationSettings(static_cast<const Component&>(n));return true;}catch(const std::invalid_argument&){return false;}},
+                [get](const Node& n)->EditorValue{return double(get(net::replicationSettings(static_cast<const Component&>(n))));},
+                [set](Node& n,const EditorValue& v){auto next=net::replicationSettings(static_cast<const Component&>(n));set(next,number(v));net::setReplicationSettings(static_cast<Component&>(n),next);}});
+        };
+        replication("network.ownership","Ownership",[](auto s){return int(s.ownership);},[](auto& s,double v){s.ownership=net::ReplicaOwnership(int(v));},0,2,{"Player template","Server actor","Runtime prefab"});
+        replication("network.relevance","Relevance",[](auto s){return int(s.relevance);},[](auto& s,double v){s.relevance=net::ReplicaRelevance(int(v));},0,2,{"Distance","Always visible","Owner only"});
+        replication("network.enter","Enter radius",[](auto s){return s.enterRadius;},[](auto& s,double v){s.enterRadius=float(v);},.1,10000);
+        replication("network.exit","Exit radius",[](auto s){return s.exitRadius;},[](auto& s,double v){s.exitRadius=float(v);},.1,10000);
+
         field<Node>(*r,"node.name","Name","Node",EditorPropertyType::Text,[](const Node& n){return n.name;},[](Node& n,const EditorValue& v){n.name=std::get<std::string>(v);});
         field<Node>(*r,"node.enabled","Enabled","Node",EditorPropertyType::Boolean,[](const Node& n){return n.enabled;},[](Node& n,const EditorValue& v){n.setEnabled(boolean(v));});
         field<Component>(*r,"component.tick","Variable tick","Component",EditorPropertyType::Boolean,[](const Component& n){return n.tickEnabled();},[](Component& n,const EditorValue& v){n.setTickEnabled(boolean(v));});

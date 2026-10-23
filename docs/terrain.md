@@ -1,5 +1,19 @@
 # Terrain
 
+For spherical planetary terrain and continuous space-to-surface visual travel,
+see the separate optional [planet module](planet-terrain.md). The heightfield
+contracts below keep their existing local X/Z grid and +Y-up representation.
+
+For authored caves/overhangs alongside heightfields, see
+[hybrid terrain milestones 1–5](hybrid-terrain.md). `TerrainData::holes` removes
+cell triangles from rendering, collision and terrain queries. Cut chunk LOD keeps
+hole boundaries at source detail; empty chunks submit no draws and retain disabled collision handles. Archives now
+write version 36; versions before 35 default to solid cells. Version 36 also
+preserves explicit mesh LOD recipes for automatic reconstruction on load. TerrainPage provider
+hole data remains unsupported. `withHoles` and Hole/Fill brushes support reversible
+full-source and resident derived-chunk edits; the browser/native authoring tools
+and shared cave example expose interactive editing.
+
 `engine/terrain.hpp` provides optional portable heightfield terrain. An immutable
 `TerrainAsset` owns float samples, one shared material and optional immutable chunk LOD chains.
 `makeTerrainActor` prepares a detached actor with one `TerrainComponent` per chunk
@@ -115,9 +129,10 @@ while layering is enabled; scalar metallic/emissive still apply. Water materials
 `MaterialInstance::layers` replaces the whole layer definition for an instance.
 Validation completes before `setMaterial` replaces a valid override.
 
-Both backends blend color/alpha. WebGPU uses weighted roughness with existing PBR,
-IBL and shadows; WebGL 2 retains its basic lighting and does not implement PBR maps,
-roughness lighting or shadow maps. Backend caches include layer textures, semantic
+All renderers blend color/alpha. WebGPU (browser/native Dawn) and native direct
+D3D12 use weighted roughness with existing PBR, IBL and shadows; WebGL 2 retains
+basic lighting and shadow maps without PBR maps or roughness lighting.
+Backend caches include layer textures, semantic
 roles and all blend parameters. Upload admission and device/context recovery use
 the existing immutable-resource paths.
 
@@ -156,8 +171,9 @@ normal. World projection remains continuous across chunk/page boundaries and LOD
 and stays fixed in world space when an actor moves. It costs three color and three
 relief samples per layer rather than one each; applications choose where to enable it.
 
-Both backends apply layered normals to their existing lighting. WebGPU retains PBR,
-IBL and independent shadow detail; WebGL2 retains basic lighting without shadows.
+All renderers apply layered normals to their existing lighting. WebGPU and direct
+D3D12 retain PBR/IBL and independent shadow detail; WebGL2 retains basic lighting
+and independent shadow detail.
 Nine material textures plus seven existing frame textures fit the WebGPU minimum
 16 sampled textures per stage; no extra passes or render targets are introduced.
 Materials, instance overrides and collected assets retain packed maps and settings
@@ -167,6 +183,15 @@ normal maps. Match host and worker codec artifacts when deploying paged terrain.
 The demo Surface selector compares linear mesh UVs, normals, height blending,
 triplanar and the combined default. See [surface validation](terrain-surface-validation.md)
 and `scripts/terrain-surface-smoke.cjs`.
+
+Native direct D3D12 milestone 5 supports this same layer contract on terrain and
+other static/animated meshes, with matching cutout shadows, fog/HDR/MSAA and shared
+camera/shadow LOD selection. No new terrain or archive API is introduced. Try
+`webengine_terrain_windows --backend dawn|d3d12`; its retained GUI edits relief,
+projection and presentation detail. Run `scripts/windows-terrain-smoke.ps1` for
+paired pixels and independent submission counters. See [native backend contracts](windows-d3d12.md)
+and [milestone 5 evidence](windows-d3d12-milestone5-validation.md). Direct device
+recovery remains unsupported; browser and native Dawn keep their recovery paths.
 
 ## Replace layer definitions
 
@@ -184,6 +209,13 @@ New `TerrainData` defaults to three derived candidates with interior grid steps
 2, 4 and 8. `lodPixels={240,120,60}` gives descending projected-diameter thresholds;
 generation retains only candidates that reduce triangles. Set `lodLevels=0` to
 keep full detail. Partial/small edge chunks can have shorter chains.
+
+Chunks with holes subdivide mixed tiles and coarsen only entirely solid, planar
+regions (source heights within 0.00001 m of a common plane). Curved regions retain
+source triangles, preserving receiver geometry near cuts.
+Every tile perimeter and hole boundary keeps all source edge samples, so coarse
+fans cannot bridge missing cells or crack against finer neighbours. Dense cut
+patterns may admit no reduction. See [hybrid terrain LOD](hybrid-terrain.md).
 
 Every level preserves **every full-resolution perimeter vertex and edge segment**.
 Coarse interior cells connect to those edges through triangle fans. Neighboring
@@ -243,17 +275,20 @@ if(edit.changed()) {
 }
 ```
 
-`terrainActor` denotes the complete actor from `makeTerrainActor`. Each stamp uses
+`terrainActor` denotes the complete actor from `makeTerrainActor`. Height/color stamps use
 smooth radial falloff, zero at the brush edge and one at its center. `Flatten`
 blends toward `targetHeight`; `Smooth` blends toward the frozen source's 3×3 sample
 mean, with edge neighbors clipped. These and `Paint` require strength in `[0,1]`.
+`Hole` and `Fill` also require strength in `[0,1]`, but any positive value cuts or
+restores cells whose centres fall within the radius, without falloff. `withHoles`
+replaces the complete mask with the same validation and dirty-chunk preparation.
 Raise accepts a finite signed delta; results outside the existing ±1,000,000 m
 height limit are rejected before publication. Radius is finite, 0.0001–1,000,000 m;
 center and target must be finite. Zero-strength and outside stamps return unchanged
 source pointers. Brush creation/copying scans bounded source data synchronously;
 there is no worker or time-budget guarantee.
 
-`TerrainEdit` holds before/after assets, `affectedChunks`, and height/paint flags.
+`TerrainEdit` holds before/after assets, `affectedChunks`, and height/paint/surface/hole flags.
 Height changes rebuild only intersecting base/LOD chains plus a conservative
 two-sample halo for cross-chunk normals and coarse interpolation. Unaffected chunk
 pointers remain identical. `applyTerrainEdit` rejects stale source versions and
@@ -680,7 +715,7 @@ pinning/budgets, generation-aware acknowledgements, atomic compare-and-replace,
 failure/retry/discard, persistent reload, real gestures, archives and recovery.
 See [stage-five validation](terrain-page-edit-validation.md).
 
-Geomorphing, holes, overhangs, remote page storage adapters
+Geomorphing, remote page storage adapters
 and dedicated heightfield physics shapes remain extensions.
 Physical Android/iOS and sustained device performance need separate evidence.
 

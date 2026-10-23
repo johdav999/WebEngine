@@ -1,7 +1,7 @@
 # Reflective animated water
 
 `MaterialShader::Water` renders an optional presentation surface on ordinary mesh
-components on WebGPU and WebGL 2. It combines three bounded Gerstner waves,
+components on browser WebGPU/WebGL 2 and native Dawn/direct D3D12. It combines three bounded Gerstner waves,
 analytic geometric normals, two moving normal-map samples and procedural fine
 ripples, dielectric Fresnel reflections and directional/point highlights.
 Existing alpha modes, winding, double-sided state, layers, masks and material
@@ -9,6 +9,21 @@ instances apply. Opt-in refraction and shoreline foam capture opaque World color
 and depth before drawing water on either backend. Optional planar reflections
 capture nearby opaque objects with a mirrored camera. With all scene effects
 disabled, water retains the original rendering path.
+
+Native direct D3D12 milestone 6 implements the same surface, depth/refraction/foam,
+planar reflection, underwater and contact/wake contracts. Use the shared material
+API and `DesktopHost::setWaterInteractions(span)` for native contacts. The host
+feeds **Application simulation seconds** to water, so pause/suspension freezes waves,
+caustics and contact ages while GUI presentation continues. Use that same clock
+for native interaction `startTime`; successful scene handoff clears contacts,
+view edits retain them, and invalid snapshots preserve the previous values.
+Browser callers continue to supply their own `Renderer::setWaterTime` clock.
+
+Try `webengine_water_windows --backend dawn|d3d12`; retained controls edit wave
+height, refraction, foam, reflection, underwater settings, contacts, fog/HDR/MSAA
+and pause. Run `scripts/windows-water-smoke.ps1`; see [native backend details](windows-d3d12.md)
+and [milestone 6 evidence](windows-d3d12-milestone6-validation.md). Direct recovery
+still requires host restart. No new simulation, buoyancy or water volume API is added.
 
 ## Usage
 
@@ -130,6 +145,12 @@ do not govern these mandatory resize-dependent render targets. Mobile bandwidth
 and memory costs must be measured on target devices.
 
 ## Underwater fog and absorption
+
+Water surfaces can opt into a finite convex footprint and bottom cap with
+`WaterRegion` and `setWaterRegion` on the water MeshComponent. The CPU queries and
+all four rendering backends clip the same region, preserving old behavior when
+the annotation is absent. See [terrain mesh lakes and finite regions](terrain-mesh-lakes.md).
+
 
 Set `underwaterStrength` to [0,1] (default 0) for depth-based underwater rendering
 on both backends. Other defaults are `underwaterFogDensity=0.12` per world unit,

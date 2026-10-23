@@ -40,6 +40,7 @@ public:
     void recordGpu(const std::array<double,3>& layerMs,double completedAtMs,double shadowMs=0);
     void reset();
     std::string json(double nowMs,const char* gpuState) const;
+    std::string gpuJson(double nowMs,const char* gpuState) const;
 private:
     std::array<FrameTiming,capacity> frames_{};
     std::array<std::array<double,3>,capacity> gpu_{};

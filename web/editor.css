@@ -9,6 +9,13 @@ body.editor-active #viewport{cursor:default}
 .editor-filebar button{flex:1}.editor-toolbar button{flex:1;white-space:nowrap;padding:9px 7px}
 .editor-toolbar button[aria-pressed=true]{border-color:var(--accent);background:#26434b;color:#d8fff6}
 .editor-toolbar kbd{opacity:.6;font:9px monospace;margin-left:3px}
+.editor-multiplayer-tools{flex:none;border-bottom:1px solid var(--line);padding:5px 12px;background:var(--panel);min-width:0}
+.editor-multiplayer-tools .editor-filebar{padding:3px 0;align-items:center;flex-wrap:wrap}
+.editor-multiplayer-tools .editor-filebar button{flex:none;white-space:nowrap}
+.editor-multiplayer-tools .editor-filebar input{width:210px;max-width:100%;min-width:0;box-sizing:border-box;padding:7px;border:1px solid var(--line);border-radius:4px;background:var(--bg);color:var(--text)}
+.editor-multiplayer-tools #editor-multiplayer-endpoint{width:260px!important}
+.editor-multiplayer-tools label{display:flex;align-items:center;gap:5px;white-space:nowrap}
+.editor-multiplayer-tools small{display:block;color:var(--muted);font-size:10px;padding:3px 0}
 .editor-document{display:flex;justify-content:space-between;gap:8px;padding:12px 20px;color:var(--muted);font-size:10px;overflow-wrap:anywhere}
 #editor-dirty[data-dirty=true]{color:#f3cd8a}
 .editor-hierarchy,.editor-inspector{padding:16px 0;border-top:1px solid var(--line)}

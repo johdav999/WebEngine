@@ -1,5 +1,10 @@
 # Animation control, markers and movement output
 
+Native Dawn and direct D3D12 milestone 4 consume the same final palettes from this
+player. Browser WebGPU uses GPU skinning; WebGL2 retains CPU deformation. See
+[native animated rendering](windows-animation-rendering.md) for rendering and
+upload lifetime contracts. No additional animation scheduler is introduced.
+
 The [animation library and visual state machine editor](animation-authoring.md)
 authors these existing runtime contracts, including gameplay-driven parameters,
 clip organization, same-rig imports, isolated preview and `.weanim` files.

@@ -22,6 +22,9 @@ const metrics = page => page.evaluate(() => window.EnginePerformance.snapshot().
       });
       await page.goto(`${base}/?shadows=off&culling=off&gpuTiming=off${enabled?'':'&instancing=off'}`);
       await page.waitForFunction(()=>document.body.dataset.defaultModel==='ready' && window.EnginePerformance.snapshot().latest?.windowSamples===120);
+      // Sky now defaults on and has its own geometry/draw counters. Keep this
+      // focused mesh-instancing comparison independent of that presentation pass.
+      assert.equal(await page.evaluate(()=>Module._engine_sky(0,0,1)),1);
       pages.push(page);
     }
     async function compare(name,draws,instances,triangles,maxBatch,batched) {
@@ -55,7 +58,7 @@ const metrics = page => page.evaluate(() => window.EnginePerformance.snapshot().
       assert.equal(before.width,after.width);assert.equal(before.height,after.height);assert.deepEqual(before.data,after.data);
       result.checks.push('Instanced Knarr exactly matches the renderer captured before instancing');
     }
-    for(const page of pages) await page.locator('#restore-demo').click();
+    for(const page of pages) {await page.locator('#restore-demo').click();assert.equal(await page.evaluate(()=>Module._engine_sky(0,0,1)),1);}
     await compare('cubes',3,45,530,41,2);
     for(const page of pages) await page.evaluate(()=>{window.__instanceTime=1600;});
     const rotated=await compare('rotated-cubes',3,45,530,41,2);

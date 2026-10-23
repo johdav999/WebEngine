@@ -33,6 +33,7 @@ void validate(const Mesh& mesh) {
 }
 MeshOptimizationResult MeshOptimizer::optimize(Mesh& mesh) {
     validate(mesh);
+    if(mesh.lodRecipe) throw std::invalid_argument("Optimize before constructing a vertex-indexed LOD recipe");
     std::size_t end=0;
     for(const auto& part:mesh.parts) {
         if(part.firstIndex!=end || !part.indexCount || part.indexCount%3
@@ -88,8 +89,11 @@ MeshOptimizationResult MeshOptimizer::optimize(Mesh& mesh) {
     mesh.morphTargets.swap(morphs);mesh.invalidateBounds();
     return result;
 }
-void MeshOptimizer::generateLods(Mesh& mesh) {
+void MeshOptimizer::generateLods(Mesh& mesh,MeshLodConstraints constraints) {
     validate(mesh);
+    if(!constraints.lockedVertices.empty()&&constraints.lockedVertices.size()!=mesh.vertices.size())
+        throw std::invalid_argument("LOD lock count must match source vertices");
+    for(auto value:constraints.lockedVertices)if(value>1)throw std::invalid_argument("LOD locks must be zero or one");
     for(const auto& v:mesh.vertices) {
         for(float value:{v.position.x,v.position.y,v.position.z,v.normal.x,v.normal.y,v.normal.z,v.uv.x,v.uv.y})
             if(!std::isfinite(value)) throw std::invalid_argument("LOD vertices must be finite");
@@ -114,7 +118,18 @@ void MeshOptimizer::generateLods(Mesh& mesh) {
             const auto target=std::max<std::size_t>(3,std::size_t(count*ratios[level])/3*3);
             auto size=meshopt_simplifyWithAttributes(indices.data(),mesh.indices.data()+first,count,
                 &mesh.vertices[0].position.x,mesh.vertices.size(),sizeof(Vertex),&mesh.vertices[0].normal.x,
-                sizeof(Vertex),weights,5,nullptr,target,errors[level],0,nullptr);
+                sizeof(Vertex),weights,5,constraints.lockedVertices.empty()?nullptr:constraints.lockedVertices.data(),target,errors[level],
+                constraints.lockBorders?meshopt_SimplifyLockBorder:0,nullptr);
+            if(constraints.lockBorders||!constraints.lockedVertices.empty()){
+                // Collapses can leave zero-area faces along collinear locked
+                // samples. They contribute no surface and violate static mesh
+                // validation; keep the part if no valid faces remain.
+                std::size_t kept=0;
+                for(std::size_t i=0;i<size;i+=3){const auto a=mesh.vertices[indices[i]].position,b=mesh.vertices[indices[i+1]].position,c=mesh.vertices[indices[i+2]].position;
+                    const auto n=cross(b-a,c-a);if(dot(n,n)<1e-12f)continue;
+                    indices[kept++]=indices[i];indices[kept++]=indices[i+1];indices[kept++]=indices[i+2];}
+                size=kept;
+            }
             if(!size) { indices.assign(mesh.indices.begin()+first,mesh.indices.begin()+first+count);size=count; }
             next->parts.push_back({std::uint32_t(next->indices.size()),std::uint32_t(size),material});
             next->indices.insert(next->indices.end(),indices.begin(),indices.begin()+size);
@@ -126,6 +141,36 @@ void MeshOptimizer::generateLods(Mesh& mesh) {
         levels.push_back({std::move(next),pixels[level]});
     }
     mesh.lods.swap(levels);
+    mesh.lodRecipe.reset(); // Explicit new constraints supersede any previous recipe.
+}
+void MeshOptimizer::validateLodRecipe(const Mesh& mesh) {
+    if(!mesh.lodRecipe)return;
+    const auto& r=*mesh.lodRecipe;
+    if(r.version!=1||r.levels<1||r.levels>3||mesh.vertices.size()>90000||mesh.indices.size()>90000||mesh.parts.size()>64)
+        throw std::invalid_argument("Unsupported or oversized LOD regeneration recipe");
+    validate(mesh);
+    if(mesh.skeleton||!mesh.skin.empty()||!mesh.morphTargets.empty())throw std::invalid_argument("LOD recipes require static meshes");
+    if(!r.lockedVertices.empty()&&r.lockedVertices.size()!=mesh.vertices.size())throw std::invalid_argument("Recipe lock count must match base vertices");
+    for(auto lock:r.lockedVertices)if(lock>1)throw std::invalid_argument("Invalid recipe vertex lock");
+    for(const auto& v:mesh.vertices)for(float f:{v.position.x,v.position.y,v.position.z,v.normal.x,v.normal.y,v.normal.z,v.uv.x,v.uv.y})
+        if(!std::isfinite(f))throw std::invalid_argument("Non-finite LOD recipe vertex");
+    std::size_t end=0;
+    for(const auto& part:mesh.parts){
+        if(part.firstIndex!=end||!part.indexCount||part.indexCount%3||part.indexCount>mesh.indices.size()-end||part.materialIndex>=mesh.materials.size())
+            throw std::invalid_argument("Invalid LOD recipe partition");
+        end+=part.indexCount;
+    }
+    if(!mesh.parts.empty()&&end!=mesh.indices.size())throw std::invalid_argument("Incomplete LOD recipe partition");
+}
+void MeshOptimizer::regenerateLods(Mesh& mesh) {
+    if(!mesh.lodRecipe)return;
+    validateLodRecipe(mesh);
+    const auto& r=*mesh.lodRecipe;
+    Mesh staged=mesh;staged.lods.clear();staged.lodRecipe.reset();
+    generateLods(staged,{r.lockBorders,r.lockedVertices});staged.lods.resize(r.levels);
+    std::size_t previous=mesh.indices.size();
+    std::erase_if(staged.lods,[&](const MeshLod& lod){if(lod.mesh->indices.size()>=previous)return true;previous=lod.mesh->indices.size();return false;});
+    mesh.lods.swap(staged.lods);
 }
 PackedMeshIndices packMeshIndices(const Mesh& mesh) {
     validate(mesh);

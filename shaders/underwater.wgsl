@@ -2,6 +2,7 @@ struct WaterFog {
     inverseViewProjection: mat4x4f, worldToLocal: mat4x4f,
     viewport: vec4f, eye: vec4f, minimum: vec4f, maximum: vec4f,
     absorptionStrength: vec4f, colorDensity: vec4f, options: vec4f, caustics: vec4f,
+    regionPlanes: array<vec4f,16>,
 };
 @group(0) @binding(0) var sourceColor: texture_2d<f32>;
 @group(0) @binding(1) var sourceDepth: texture_2d<f32>;
@@ -22,10 +23,21 @@ fn distanceInWater(start: vec3f,end: vec3f) -> f32 {
     let delta=(fog.worldToLocal*vec4f(end-start,0)).xyz;
     var interval=slab(origin.x,delta.x,fog.minimum.x,fog.maximum.x,vec2f(0,1));
     interval=slab(origin.z,delta.z,fog.minimum.z,fog.maximum.z,interval);
+    if(fog.options.z>0) {
+        interval=slab(origin.y,delta.y,fog.minimum.y,0,interval);
+        for(var i=0u;i<16u;i++) {if(i>=u32(fog.options.z)){break;}
+            let e=fog.regionPlanes[i];let p=dot(e.xy,origin.xz)+e.z;let d=dot(e.xy,delta.xz);
+            if(abs(d)<1e-7){if(p<0){return 0;}}else if(d>0){interval.x=max(interval.x,-p/d);}else{interval.y=min(interval.y,-p/d);}
+        }
+    }
     if(abs(delta.y)<1e-7) {if(origin.y>0) {return 0;}}
     else if(delta.y>0) {interval.y=min(interval.y,-origin.y/delta.y);}
     else {interval.x=max(interval.x,-origin.y/delta.y);}
     return min(fog.options.x,max(0.0,interval.y-interval.x)*length(end-start));
+}
+fn inRegion(p: vec3f) -> bool {
+    if(fog.options.z<=0){return true;}if(p.y<fog.minimum.y){return false;}
+    for(var i=0u;i<16u;i++){if(i>=u32(fog.options.z)){break;}let e=fog.regionPlanes[i];if(dot(e.xy,p.xz)+e.z<0){return false;}}return true;
 }
 fn decode(c: vec3f) -> vec3f {if(hdrOutput){return c;}return select(c/12.92,pow((c+0.055)/1.055,vec3f(2.4)),c>vec3f(0.04045));}
 fn encode(c: vec3f) -> vec3f {if(hdrOutput){return c;}return select(c*12.92,1.055*pow(max(c,vec3f(0)),vec3f(1.0/2.4))-0.055,c>vec3f(0.0031308));}
@@ -51,7 +63,7 @@ fn causticPattern(p: vec2f,t: f32) -> f32 {
     let planeLength=length(planeNormal);let below=-local.y/planeLength;
     let facing=abs(dot(surface,planeNormal))/(max(length(surface),1e-8)*planeLength);
     var light=0.0;
-    if(fog.caustics.x>0 && depth<.999999 && local.y < -fog.options.w &&
+    if(inRegion(local) && fog.caustics.x>0 && depth<.999999 && local.y < -fog.options.w &&
         local.x>=fog.minimum.x && local.x<=fog.maximum.x && local.z>=fog.minimum.z && local.z<=fog.maximum.z) {
         let units=vec2f(length(vec3f(fog.worldToLocal[0].x,fog.worldToLocal[1].x,fog.worldToLocal[2].x)),
                         length(vec3f(fog.worldToLocal[0].z,fog.worldToLocal[1].z,fog.worldToLocal[2].z)));

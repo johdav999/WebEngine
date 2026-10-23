@@ -16,14 +16,18 @@ struct TerrainData {
     std::shared_ptr<const PhysicalSurface> physicalSurface;
     std::vector<std::shared_ptr<const PhysicalSurface>> cellSurfaces; // Optional (samplesX-1)*(samplesZ-1), null inherits.
     std::vector<float> heights;
+    // Optional row-major cell mask: 0 = solid, 1 = hole. Edit with withHoles/Hole/Fill.
+    // Removes both triangles from rendering, ground queries and collision.
+    std::vector<std::uint8_t> holes;
     std::shared_ptr<const Material> material=Material::standard();
+    bool hole(std::uint32_t x,std::uint32_t z) const { return !holes.empty()&&holes[std::size_t(z)*(samplesX-1)+x]!=0; }
     void validate() const;
     std::size_t derivedBytes() const; // Conservative generated chunk CPU payload estimate.
     std::size_t chunkDerivedBytes() const; // Conservative upper bound for one chunk.
 };
 struct TerrainGround { Vec3 position,normal; };
 struct TerrainHit { Vec3 position,normal;float distance=0;ComponentId component; };
-enum class TerrainBrushMode { Raise, Flatten, Smooth, Paint };
+enum class TerrainBrushMode { Raise, Flatten, Smooth, Paint, Hole, Fill };
 struct TerrainBrush {
     TerrainBrushMode mode=TerrainBrushMode::Raise;
     Vec2 center{}; // Source-local metres (X/Z).
@@ -55,9 +59,13 @@ public:
     // Source-only assets retain no generated meshes. The caller owns each result.
     std::shared_ptr<const Mesh> buildChunk(std::uint32_t chunk) const;
     TerrainEdit edit(const TerrainBrush&) const;
+    // Empty means all solid. Cell-centre Hole/Fill brushes are binary when strength > 0.
+    // Full eager or source-only assets only; provider patches reject hole editing.
+    TerrainEdit withHoles(std::vector<std::uint8_t> holes) const;
     TerrainEdit withPhysicalSurfaces(std::shared_ptr<const PhysicalSurface>,std::vector<std::shared_ptr<const PhysicalSurface>> cells={}) const;
     TerrainEdit withLayers(const MaterialLayers& layers) const; // Immutable appearance edit; shares all geometry.
     std::optional<TerrainGround> ground(float localX,float localZ) const;
+    // Empty terrain/chunks have no collision and return nullptr.
     std::shared_ptr<const CollisionShape> collisionShape() const;
     std::shared_ptr<const CollisionShape> chunkCollision(std::uint32_t chunk) const;
 private:
@@ -70,7 +78,7 @@ private:
 struct TerrainEdit {
     std::shared_ptr<const TerrainAsset> before,after;
     std::vector<std::uint32_t> affectedChunks; // Includes the normal-sampling halo.
-    bool heightsChanged=false,paintChanged=false,surfacesChanged=false;
+    bool heightsChanged=false,paintChanged=false,surfacesChanged=false,holesChanged=false;
     bool changed() const { return before!=after; }
 };
 // One ordinary mesh draw per chunk; all chunks in an instance share one TerrainAsset.
@@ -92,10 +100,18 @@ private:
     std::uint32_t chunk_;
 };
 // Builds a detached actor before publication. Collision is opt-in and uses full-resolution
-// source triangles, independently of rendering. Adopt directly under Scene for physics.
+// source triangles, independently of rendering. Empty collision-enabled terrain retains
+// a disabled placeholder collider/body, re-enabled by filling. Adopt under Scene for physics.
 std::unique_ptr<Actor> makeTerrainActor(std::string name,std::shared_ptr<const TerrainAsset> asset,bool collision=false);
+// One authored static mesh section alongside heightfield terrain. Uses ordinary
+// MeshComponent/ColliderComponent archives; published resources must stay immutable.
+// Authored mesh LOD affects rendering only. Adopt at the scene root for physics.
+std::unique_ptr<Actor> makeMeshTerrainActor(std::string name,std::shared_ptr<const Mesh> mesh,bool collision=false,
+    std::shared_ptr<const PhysicalSurface> surface={});
 // Call at an idle scene boundary; prepares geometry/collision before publication.
-// A legacy whole-instance collider is rebuilt for height edits, never for painting.
+// Whole-instance collision is rebuilt for height/hole/surface edits, never color painting.
+// The terrain owns collider enablement at empty/nonempty transitions; disable the actor
+// to suspend terrain collision independently of topology editing.
 void applyTerrainEdit(Actor&,const TerrainEdit&);
 class Scene;
 struct TerrainStreamSettings {
@@ -132,7 +148,8 @@ private:
 };
 // Closest two-sided triangle hit among active terrain chunks under root. Direction is
 // normalized internally; distance is in world units. Queries never create physics.
-std::optional<TerrainHit> terrainRaycast(const Node& root,Vec3 origin,Vec3 direction,float maxDistance);
+// includeHoles is authoring-only picking of the uncut source, never collision.
+std::optional<TerrainHit> terrainRaycast(const Node& root,Vec3 origin,Vec3 direction,float maxDistance,bool includeHoles=false);
 // Highest world-space ground surface at X/Z, including rotated/scaled visual instances.
 // Physics instances retain the existing rigid-body unit-scale/root-actor restrictions.
 std::optional<TerrainHit> terrainGround(const Node& root,float worldX,float worldZ);
