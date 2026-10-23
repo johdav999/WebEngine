@@ -35,5 +35,8 @@ The browser Renderer already has the matching explicit phase setter.
 M4 adds native and Wasm GUI reset regressions. The module/quest suites and rendered
 examples remain independent consumers; Paws consumes the same targets using its
 own unchanged quest rules and version-12 save codec. Native acceptance for this
-published revision uses SDL/Dawn. Direct D3D12 remains a separate development
+published revision uses SDL/Dawn. Paws M6 subsequently routes all 29 quests
+through these public targets and writes version-14 saves, retaining versions
+1–13 and exact pre-migration originals. See the [M7 SDK handoff](module-sdk.md)
+for independent consumer and release checks. Direct D3D12 remains a separate development
 branch and is not pulled into this publication.

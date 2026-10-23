@@ -8,6 +8,17 @@ This document describes the implementation inspected on 2026-10-10 and the archi
 
 ## Current architecture
 
+### Compiled module SDK release handoff (2026-10-23)
+
+The standalone `examples/modules` and `examples/quests` consumers configure only
+the optional portable module/quest libraries. The quest consumer's separate
+`Example::QuestBindings` target installs pure typed inventory-fact evaluation;
+the executable owns independent runtimes, a staged game wallet and snapshot IO.
+Enabled and omitted targets register CTest on native and Node/Wasm. The SDK
+workflow validates this matrix independently of renderer/physics dependencies.
+There is no new runtime scheduler, scene owner or binary plugin ABI. See
+[module SDK handoff](docs/module-sdk.md).
+
 ### Formula circuit application demo (2026-10-19)
 
 `src/formula_demo.hpp` composes existing immutable closed spline/route resources,

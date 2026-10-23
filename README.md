@@ -1742,3 +1742,7 @@ joins the sample wallet and quest receipts. See [ownership/storage](docs/quests-
 and [actual host verification](docs/quests-host-validation.md).
 
 Shared game hosts can consume [WebEngine::Browser and the desktop integration seams](docs/consumer-hosts.md).
+
+The [compiled module SDK handoff](docs/module-sdk.md) covers reusable non-quest
+plugins, an independent custom quest-binding consumer, native/Wasm CTest and
+feature-omission builds. These consumers configure without renderer downloads.

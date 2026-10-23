@@ -1,0 +1,45 @@
+name: Portable module SDK
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  native:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -S examples/modules -B build/sdk-modules -DWEBENGINE_SOURCE_DIR="${{ github.workspace }}" -DWEBENGINE_BUILD_MODULE_TESTS=ON
+      - run: cmake --build build/sdk-modules --config Release
+      - run: ctest --test-dir build/sdk-modules -C Release --output-on-failure
+      - run: cmake -S examples/quests -B build/sdk-quests -DWEBENGINE_SOURCE_DIR="${{ github.workspace }}"
+      - run: cmake --build build/sdk-quests --config Release
+      - run: ctest --test-dir build/sdk-quests -C Release --output-on-failure
+      - run: cmake -S examples/modules -B build/sdk-disabled -DWEBENGINE_SOURCE_DIR="${{ github.workspace }}" -DWEBENGINE_BUILD_MODULES=OFF
+      - run: cmake --build build/sdk-disabled --config Release
+      - run: ctest --test-dir build/sdk-disabled -C Release --output-on-failure
+      - run: cmake -S examples/quests -B build/sdk-no-quests -DWEBENGINE_SOURCE_DIR="${{ github.workspace }}" -DWEBENGINE_BUILD_QUESTS=OFF
+      - run: cmake --build build/sdk-no-quests --config Release
+      - run: ctest --test-dir build/sdk-no-quests -C Release --output-on-failure
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Emscripten
+        run: |
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git .tools/emsdk
+          .tools/emsdk/emsdk install "$(cat .emscripten-version)"
+          .tools/emsdk/emsdk activate "$(cat .emscripten-version)"
+      - name: Build enabled and omitted consumers on Wasm
+        run: |
+          source .tools/emsdk/emsdk_env.sh
+          for sample in modules quests; do
+            emcmake cmake -S examples/$sample -B build/sdk-$sample -G Ninja -DCMAKE_BUILD_TYPE=Release -DWEBENGINE_SOURCE_DIR="$PWD" -DWEBENGINE_BUILD_MODULE_TESTS=ON
+            cmake --build build/sdk-$sample
+            ctest --test-dir build/sdk-$sample --output-on-failure
+          done
+          emcmake cmake -S examples/modules -B build/sdk-disabled -G Ninja -DWEBENGINE_SOURCE_DIR="$PWD" -DWEBENGINE_BUILD_MODULES=OFF
+          emcmake cmake -S examples/quests -B build/sdk-no-quests -G Ninja -DWEBENGINE_SOURCE_DIR="$PWD" -DWEBENGINE_BUILD_QUESTS=OFF
+          for sample in disabled no-quests; do
+            cmake --build build/sdk-$sample
+            ctest --test-dir build/sdk-$sample --output-on-failure
+          done
