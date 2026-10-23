@@ -33,6 +33,12 @@ This document describes the implementation inspected on 2026-10-10 and the archi
 
 Emscripten is pinned by [.emscripten-version](.emscripten-version), currently to 6.0.11. The browser executable links the Emdawnwebgpu port and Emscripten GLES3/WebGL 2 support. WGSL source in `shaders/` is embedded through generated headers during CMake configuration. The browser host and selected build outputs publish into `dist/`; generated site files copy first, then current `web/` adapters override any stale host files retained in reused build directories.
 
+The WebGL2 backend owns general and simple-material mesh programs. It selects
+the specialized program only for unmasked non-water/non-layered draws outside
+reflection passes, preserving shading expressions while compiling unused features
+and discard paths out. Both programs share asset caches and per-view state and
+are recreated on context recovery. See [fallback rendering](docs/rendering-fallback.md).
+
 The scene/application/render runtime is single-threaded. Optional asset workers use isolated Wasm heaps for source parsing and image decoding. JavaScript handles browser APIs and forwards data to Wasm; C++ updates the scene and submits rendering through the browser renderer facade. Its public header contains no WebGPU/GLES/Emscripten types; backend resource types are private in `src/webgpu_renderer.hpp` and `src/webgl_renderer.hpp`. The facade remains linked in the browser executable; native builds provide portable core/tests, not native rendering.
 
 ```mermaid

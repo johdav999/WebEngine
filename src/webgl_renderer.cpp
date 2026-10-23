@@ -35,7 +35,11 @@ layout(location=3) in vec4 ribbonColor;
 layout(location=4) in vec4 tangent;
 out vec4 vertexColor;
 uniform mat4 model,normalMatrix,vp;
+#ifdef ENGINE_GL_SIMPLE_MATERIAL
+const bool water=false;
+#else
 uniform bool water;
+#endif
 uniform vec4 reflectionPlane;
 flat out float planarSurface;
 uniform vec4 wave,detail;
@@ -80,17 +84,30 @@ in vec2 texcoord;
 uniform sampler2D baseTexture;
 uniform sampler2D waterNormalTexture;
 uniform sampler2D layerOne,layerTwo,layerThree,layerWeights;
+#ifdef ENGINE_GL_SIMPLE_MATERIAL
+const bool layered=false;
+#else
 uniform bool layered;
+#endif
 uniform vec4 layerColor[4],layerUv[4],weightUv,layerOptions,layerDetail[4];
 uniform sampler2D layerDetail0,layerDetail1,layerDetail2,layerDetail3;
 uniform sampler2D planarReflection;
 uniform mat4 reflectionVp;
 uniform vec4 reflectionPlane;
-uniform bool reflectionPass,planarActive,worldWater;
+uniform bool planarActive,worldWater;
+#ifdef ENGINE_GL_SIMPLE_MATERIAL
+const bool reflectionPass=false;
+#else
+uniform bool reflectionPass;
+#endif
 flat in float planarSurface;
 uniform int interactionCount;
 uniform vec4 interactionData[64];
+#ifdef ENGINE_GL_SIMPLE_MATERIAL
+const bool water=false;
+#else
 uniform bool water;
+#endif
 uniform vec4 wave,detail,reflectionHorizon,reflectionZenith;
 uniform float waterTime,roughness,normalScale;
 uniform vec3 cameraPosition;
@@ -98,7 +115,11 @@ in vec3 worldTangent,worldBitangent,planeNormal;
 uniform sampler2D sceneColor,sceneDepth;
 uniform bool sceneWater;
 uniform float particleSoftDistance;
+#ifdef ENGINE_GL_SIMPLE_MATERIAL
+const bool ribbon=false;
+#else
 uniform bool ribbon;
+#endif
 in vec4 vertexColor;
 uniform mat4 inverseVp,vp;
 uniform vec4 waterViewport,transmission,absorptionFoam,foamColor;
@@ -108,7 +129,12 @@ uniform vec4 tint,uvTransform;
 uniform vec3 ambient,emissive;
 uniform vec4 lightPosition[8],lightDirection[8],lightColor[8];
 uniform int lightCount;
-uniform bool unlit,masked,toneMapped;
+uniform bool unlit,toneMapped;
+#ifdef ENGINE_GL_SIMPLE_MATERIAL
+const bool masked=false;
+#else
+uniform bool masked;
+#endif
 uniform float cutoff;
 out vec4 outputColor;
 vec3 surfaceFog(vec3 color) {
@@ -314,17 +340,19 @@ in vec4 tint;
 out vec4 outputColor;
 void main() { outputColor=texture(baseTexture,texcoord)*tint; }
 )";
-GLuint shader(GLenum type,const char* text) {
-    std::string source=text;const auto marker=source.find("// FOG_FUNCTIONS");if(marker!=std::string::npos) source.replace(marker,16,fog_glsl);text=source.c_str();
+GLuint shader(GLenum type,const char* text,bool simpleMaterial=false) {
+    std::string source=text;
+    if(simpleMaterial) source.insert(source.find('\n')+1,"#define ENGINE_GL_SIMPLE_MATERIAL 1\n");
+    const auto marker=source.find("// FOG_FUNCTIONS");if(marker!=std::string::npos) source.replace(marker,16,fog_glsl);text=source.c_str();
     const auto id=glCreateShader(type);glShaderSource(id,1,&text,nullptr);glCompileShader(id);
     GLint ok=0;glGetShaderiv(id,GL_COMPILE_STATUS,&ok);
     if(!ok) { char log[2048]{};glGetShaderInfoLog(id,sizeof(log),nullptr,log);glDeleteShader(id);throw std::runtime_error(log); }
     return id;
 }
-GLuint program(const char* vertex,const char* fragment) {
-    const auto v=shader(GL_VERTEX_SHADER,vertex);GLuint f=0,p=0;
+GLuint program(const char* vertex,const char* fragment,bool simpleMaterial=false) {
+    const auto v=shader(GL_VERTEX_SHADER,vertex,simpleMaterial);GLuint f=0,p=0;
     try {
-        f=shader(GL_FRAGMENT_SHADER,fragment);p=glCreateProgram();glAttachShader(p,v);glAttachShader(p,f);glLinkProgram(p);
+        f=shader(GL_FRAGMENT_SHADER,fragment,simpleMaterial);p=glCreateProgram();glAttachShader(p,v);glAttachShader(p,f);glLinkProgram(p);
         GLint ok=0;glGetProgramiv(p,GL_LINK_STATUS,&ok);
         if(!ok) { char log[2048]{};glGetProgramInfoLog(p,sizeof(log),nullptr,log);throw std::runtime_error(log); }
     } catch(...) { glDeleteShader(v);if(f) glDeleteShader(f);if(p) glDeleteProgram(p);throw; }
@@ -410,7 +438,7 @@ void WebGlRenderer::createResources() {
     glSamplerParameteri(skySampler_,GL_TEXTURE_WRAP_S,GL_REPEAT);glSamplerParameteri(skySampler_,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
     glSamplerParameteri(skySampler_,GL_TEXTURE_MIN_FILTER,GL_LINEAR);glSamplerParameteri(skySampler_,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
     underwaterProgram_=program(underwater_vertex_glsl,underwater_fragment_glsl);glGenVertexArrays(1,&underwaterVao_);
-    meshProgram_=program(meshVertex,meshFragment);guiProgram_=program(guiVertex,guiFragment);
+    meshProgram_=program(meshVertex,meshFragment);simpleMeshProgram_=program(meshVertex,meshFragment,true);guiProgram_=program(guiVertex,guiFragment);
     glGenVertexArrays(1,&guiVao_);glGenBuffers(1,&guiVertices_);glGenBuffers(1,&guiIndices_);
     glBindVertexArray(guiVao_);glBindBuffer(GL_ARRAY_BUFFER,guiVertices_);glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,guiIndices_);
     glEnableVertexAttribArray(0);glVertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,sizeof(GuiVertex),reinterpret_cast<void*>(offsetof(GuiVertex,position)));
@@ -438,10 +466,10 @@ void WebGlRenderer::releaseResources(bool lost) {
         glDeleteProgram(skyProgram_);glDeleteVertexArrays(1,&skyVao_);glDeleteSamplers(1,&skySampler_);
         for(auto& [key,value]:meshes_) eraseMesh(value);
         for(auto& [key,value]:textures_) glDeleteTextures(1,&value.image);
-        glDeleteProgram(meshProgram_);glDeleteProgram(guiProgram_);glDeleteVertexArrays(1,&guiVao_);glDeleteVertexArrays(1,&particleVao_);
+        glDeleteProgram(meshProgram_);glDeleteProgram(simpleMeshProgram_);glDeleteProgram(guiProgram_);glDeleteVertexArrays(1,&guiVao_);glDeleteVertexArrays(1,&particleVao_);
         glDeleteBuffers(1,&guiVertices_);glDeleteBuffers(1,&guiIndices_);glDeleteBuffers(1,&particleBuffer_);glDeleteVertexArrays(1,&ribbonVao_);glDeleteBuffers(1,&ribbonBuffer_);
     }
-    meshes_.clear();textures_.clear();meshProgram_=guiProgram_=guiVao_=guiVertices_=guiIndices_=particleVao_=particleBuffer_=ribbonVao_=ribbonBuffer_=0;
+    meshes_.clear();textures_.clear();meshProgram_=simpleMeshProgram_=guiProgram_=guiVao_=guiVertices_=guiIndices_=particleVao_=particleBuffer_=ribbonVao_=ribbonBuffer_=0;
     skyProgram_=skyVao_=skySampler_=0;underwaterProgram_=underwaterVao_=0;underwaterViews_.clear();
     msaaFramebuffer_=msaaColor_=msaaDepth_=0;targetWidth_=targetHeight_=0;sampleCount_=1;capabilities_.msaa4x=false;
 }
@@ -555,60 +583,63 @@ GLuint WebGlRenderer::texture(const std::shared_ptr<const Texture>& source) {
     glBindTexture(GL_TEXTURE_2D,gpu.image);return gpu.image;
 }
 void WebGlRenderer::drawMesh(const MeshDraw& draw,const Mat4& vp,const SceneFrame& frame) {
-    try { mesh(draw);glUseProgram(meshProgram_);glUniform1i(glGetUniformLocation(meshProgram_,"ribbon"),0);glUniform1f(glGetUniformLocation(meshProgram_,"particleSoftDistance"),0);glActiveTexture(GL_TEXTURE0);texture(draw.texture); }
-    catch(const UploadDeferred&) { ++counters_.deferredAssetUploads;++counters_.deferredAssetDraws;return; }
-    matrix(meshProgram_,"model",draw.model);matrix(meshProgram_,"normalMatrix",draw.normal);matrix(meshProgram_,"vp",vp);
-    glUniform4f(glGetUniformLocation(meshProgram_,"tint"),draw.color.x,draw.color.y,draw.color.z,draw.opacity);
     const auto& m=draw.material;
-    glUniform1i(glGetUniformLocation(meshProgram_,"layered"),m.layers.enabled);
+    const bool simple=m.shader!=MaterialShader::Water&&!m.layers.enabled
+        &&m.alphaMode!=AlphaMode::Mask&&!reflectionPass_;
+    const auto activeProgram=simple ? simpleMeshProgram_ : meshProgram_;
+    try { mesh(draw);glUseProgram(activeProgram);glUniform1i(glGetUniformLocation(activeProgram,"ribbon"),0);glUniform1f(glGetUniformLocation(activeProgram,"particleSoftDistance"),0);glActiveTexture(GL_TEXTURE0);texture(draw.texture); }
+    catch(const UploadDeferred&) { ++counters_.deferredAssetUploads;++counters_.deferredAssetDraws;return; }
+    matrix(activeProgram,"model",draw.model);matrix(activeProgram,"normalMatrix",draw.normal);matrix(activeProgram,"vp",vp);
+    glUniform4f(glGetUniformLocation(activeProgram,"tint"),draw.color.x,draw.color.y,draw.color.z,draw.opacity);
+    glUniform1i(glGetUniformLocation(activeProgram,"layered"),m.layers.enabled);
     if(m.layers.enabled) {
         const auto sources=materialTextures(m);const auto parameters=materialLayerParameters(m.layers);
-        glUniform4fv(glGetUniformLocation(meshProgram_,"layerColor"),4,parameters.data());
-        glUniform4fv(glGetUniformLocation(meshProgram_,"layerUv"),4,parameters.data()+16);
-        glUniform4fv(glGetUniformLocation(meshProgram_,"weightUv"),1,parameters.data()+32);
-        glUniform4fv(glGetUniformLocation(meshProgram_,"layerOptions"),1,parameters.data()+36);
-        glUniform4fv(glGetUniformLocation(meshProgram_,"layerDetail"),4,parameters.data()+40);
+        glUniform4fv(glGetUniformLocation(activeProgram,"layerColor"),4,parameters.data());
+        glUniform4fv(glGetUniformLocation(activeProgram,"layerUv"),4,parameters.data()+16);
+        glUniform4fv(glGetUniformLocation(activeProgram,"weightUv"),1,parameters.data()+32);
+        glUniform4fv(glGetUniformLocation(activeProgram,"layerOptions"),1,parameters.data()+36);
+        glUniform4fv(glGetUniformLocation(activeProgram,"layerDetail"),4,parameters.data()+40);
         constexpr std::array units={0,5,6,7,8,9,10,11,12};
         try {for(std::size_t i=0;i<9;++i) {glActiveTexture(GL_TEXTURE0+units[i]);texture(sources[i]);}}
         catch(const UploadDeferred&) {++counters_.deferredAssetUploads;++counters_.deferredAssetDraws;glActiveTexture(GL_TEXTURE0);return;}
-        for(int i=0;i<4;++i) {const auto name=std::string("layerDetail")+std::to_string(i);glUniform1i(glGetUniformLocation(meshProgram_,name.c_str()),9+i);}
-        glUniform1i(glGetUniformLocation(meshProgram_,"layerOne"),5);glUniform1i(glGetUniformLocation(meshProgram_,"layerTwo"),6);
-        glUniform1i(glGetUniformLocation(meshProgram_,"layerThree"),7);glUniform1i(glGetUniformLocation(meshProgram_,"layerWeights"),8);glActiveTexture(GL_TEXTURE0);
+        for(int i=0;i<4;++i) {const auto name=std::string("layerDetail")+std::to_string(i);glUniform1i(glGetUniformLocation(activeProgram,name.c_str()),9+i);}
+        glUniform1i(glGetUniformLocation(activeProgram,"layerOne"),5);glUniform1i(glGetUniformLocation(activeProgram,"layerTwo"),6);
+        glUniform1i(glGetUniformLocation(activeProgram,"layerThree"),7);glUniform1i(glGetUniformLocation(activeProgram,"layerWeights"),8);glActiveTexture(GL_TEXTURE0);
     }
     const auto w=waterParameters(m.water);
-    glUniform1i(glGetUniformLocation(meshProgram_,"worldWater"),draw.layer==RenderLayer::World);
-    glUniform1i(glGetUniformLocation(meshProgram_,"sceneWater"),waterCapture_&&draw.layer==RenderLayer::World&&m.shader==MaterialShader::Water&&m.water.usesSceneInputs());
-    glUniform4fv(glGetUniformLocation(meshProgram_,"transmission"),1,w.data()+16);
-    glUniform4fv(glGetUniformLocation(meshProgram_,"absorptionFoam"),1,w.data()+20);
-    glUniform4fv(glGetUniformLocation(meshProgram_,"foamColor"),1,w.data()+24);
+    glUniform1i(glGetUniformLocation(activeProgram,"worldWater"),draw.layer==RenderLayer::World);
+    glUniform1i(glGetUniformLocation(activeProgram,"sceneWater"),waterCapture_&&draw.layer==RenderLayer::World&&m.shader==MaterialShader::Water&&m.water.usesSceneInputs());
+    glUniform4fv(glGetUniformLocation(activeProgram,"transmission"),1,w.data()+16);
+    glUniform4fv(glGetUniformLocation(activeProgram,"absorptionFoam"),1,w.data()+20);
+    glUniform4fv(glGetUniformLocation(activeProgram,"foamColor"),1,w.data()+24);
     // Bind scratch textures only after opaque capture. Never bind an active attachment.
-    glActiveTexture(GL_TEXTURE2);glBindTexture(GL_TEXTURE_2D,waterColor_);glUniform1i(glGetUniformLocation(meshProgram_,"sceneColor"),2);
-    glActiveTexture(GL_TEXTURE3);glBindTexture(GL_TEXTURE_2D,waterDepth_);glUniform1i(glGetUniformLocation(meshProgram_,"sceneDepth"),3);glActiveTexture(GL_TEXTURE0);
-    glActiveTexture(GL_TEXTURE4);glBindTexture(GL_TEXTURE_2D,reflectionPass_ ? waterColor_ : reflectionColor_);glUniform1i(glGetUniformLocation(meshProgram_,"planarReflection"),4);glActiveTexture(GL_TEXTURE0);
-    glUniform1i(glGetUniformLocation(meshProgram_,"water"),m.shader==MaterialShader::Water);
-    glUniform1f(glGetUniformLocation(meshProgram_,"waterTime"),float(waterTime_));
+    glActiveTexture(GL_TEXTURE2);glBindTexture(GL_TEXTURE_2D,waterColor_);glUniform1i(glGetUniformLocation(activeProgram,"sceneColor"),2);
+    glActiveTexture(GL_TEXTURE3);glBindTexture(GL_TEXTURE_2D,waterDepth_);glUniform1i(glGetUniformLocation(activeProgram,"sceneDepth"),3);glActiveTexture(GL_TEXTURE0);
+    glActiveTexture(GL_TEXTURE4);glBindTexture(GL_TEXTURE_2D,reflectionPass_ ? waterColor_ : reflectionColor_);glUniform1i(glGetUniformLocation(activeProgram,"planarReflection"),4);glActiveTexture(GL_TEXTURE0);
+    glUniform1i(glGetUniformLocation(activeProgram,"water"),m.shader==MaterialShader::Water);
+    glUniform1f(glGetUniformLocation(activeProgram,"waterTime"),float(waterTime_));
     if(m.shader==MaterialShader::Water) {
         const auto& interactions=interactionParameters_;
-        glUniform1i(glGetUniformLocation(meshProgram_,"interactionCount"),int(interactions.options[0]));
-        if(interactions.options[0]>0) glUniform4fv(glGetUniformLocation(meshProgram_,"interactionData"),int(interactions.options[0])*4,interactions.data[0].data());
+        glUniform1i(glGetUniformLocation(activeProgram,"interactionCount"),int(interactions.options[0]));
+        if(interactions.options[0]>0) glUniform4fv(glGetUniformLocation(activeProgram,"interactionData"),int(interactions.options[0])*4,interactions.data[0].data());
     }
-    glUniform4fv(glGetUniformLocation(meshProgram_,"wave"),1,w.data());
-    glUniform4fv(glGetUniformLocation(meshProgram_,"detail"),1,w.data()+4);
-    glUniform4fv(glGetUniformLocation(meshProgram_,"reflectionHorizon"),1,w.data()+8);
-    glUniform4fv(glGetUniformLocation(meshProgram_,"reflectionZenith"),1,w.data()+12);
-    glUniform1f(glGetUniformLocation(meshProgram_,"roughness"),m.roughness);
-    glUniform1f(glGetUniformLocation(meshProgram_,"normalScale"),m.normalScale);
+    glUniform4fv(glGetUniformLocation(activeProgram,"wave"),1,w.data());
+    glUniform4fv(glGetUniformLocation(activeProgram,"detail"),1,w.data()+4);
+    glUniform4fv(glGetUniformLocation(activeProgram,"reflectionHorizon"),1,w.data()+8);
+    glUniform4fv(glGetUniformLocation(activeProgram,"reflectionZenith"),1,w.data()+12);
+    glUniform1f(glGetUniformLocation(activeProgram,"roughness"),m.roughness);
+    glUniform1f(glGetUniformLocation(activeProgram,"normalScale"),m.normalScale);
     glActiveTexture(GL_TEXTURE1);
     try {texture(m.shader==MaterialShader::Water&&m.normalTexture ? m.normalTexture : Texture::flatNormal());}
     catch(const UploadDeferred&) {++counters_.deferredAssetUploads;++counters_.deferredAssetDraws;return;}
-    glUniform1i(glGetUniformLocation(meshProgram_,"waterNormalTexture"),1);glActiveTexture(GL_TEXTURE0);
-    glUniform4f(glGetUniformLocation(meshProgram_,"uvTransform"),m.uvScale.x,m.uvScale.y,m.uvOffset.x,m.uvOffset.y);
-    glUniform3f(glGetUniformLocation(meshProgram_,"ambient"),scene_->ambient.x,scene_->ambient.y,scene_->ambient.z);
-    glUniform3f(glGetUniformLocation(meshProgram_,"emissive"),m.emissive.x,m.emissive.y,m.emissive.z);
-    glUniform1i(glGetUniformLocation(meshProgram_,"unlit"),m.shader==MaterialShader::Unlit);
-    glUniform1i(glGetUniformLocation(meshProgram_,"toneMapped"),m.shader!=MaterialShader::Unlit);
-    glUniform1i(glGetUniformLocation(meshProgram_,"masked"),m.alphaMode==AlphaMode::Mask);
-    glUniform1f(glGetUniformLocation(meshProgram_,"cutoff"),m.alphaCutoff);
+    glUniform1i(glGetUniformLocation(activeProgram,"waterNormalTexture"),1);glActiveTexture(GL_TEXTURE0);
+    glUniform4f(glGetUniformLocation(activeProgram,"uvTransform"),m.uvScale.x,m.uvScale.y,m.uvOffset.x,m.uvOffset.y);
+    glUniform3f(glGetUniformLocation(activeProgram,"ambient"),scene_->ambient.x,scene_->ambient.y,scene_->ambient.z);
+    glUniform3f(glGetUniformLocation(activeProgram,"emissive"),m.emissive.x,m.emissive.y,m.emissive.z);
+    glUniform1i(glGetUniformLocation(activeProgram,"unlit"),m.shader==MaterialShader::Unlit);
+    glUniform1i(glGetUniformLocation(activeProgram,"toneMapped"),m.shader!=MaterialShader::Unlit);
+    glUniform1i(glGetUniformLocation(activeProgram,"masked"),m.alphaMode==AlphaMode::Mask);
+    glUniform1f(glGetUniformLocation(activeProgram,"cutoff"),m.alphaCutoff);
     const auto count=std::min(std::size_t(8),frame.lights.size());std::array<float,32> positions{},directions{},colors{};
     for(std::size_t i=0;i<count;++i) {
         const auto& l=frame.lights[i];const auto k=i*4;
@@ -616,9 +647,9 @@ void WebGlRenderer::drawMesh(const MeshDraw& draw,const Mat4& vp,const SceneFram
         directions[k]=l.direction.x;directions[k+1]=l.direction.y;directions[k+2]=l.direction.z;directions[k+3]=l.range;
         colors[k]=l.color.x;colors[k+1]=l.color.y;colors[k+2]=l.color.z;colors[k+3]=l.intensity;
     }
-    glUniform1i(glGetUniformLocation(meshProgram_,"lightCount"),count);
-    if(count) { glUniform4fv(glGetUniformLocation(meshProgram_,"lightPosition"),count,positions.data());glUniform4fv(glGetUniformLocation(meshProgram_,"lightDirection"),count,directions.data());glUniform4fv(glGetUniformLocation(meshProgram_,"lightColor"),count,colors.data()); }
-    glUniform1i(glGetUniformLocation(meshProgram_,"fogWorld"),draw.layer==RenderLayer::World);glUniform1i(glGetUniformLocation(meshProgram_,"fogAdditive"),draw.blend==BlendMode::Additive);
+    glUniform1i(glGetUniformLocation(activeProgram,"lightCount"),count);
+    if(count) { glUniform4fv(glGetUniformLocation(activeProgram,"lightPosition"),count,positions.data());glUniform4fv(glGetUniformLocation(activeProgram,"lightDirection"),count,directions.data());glUniform4fv(glGetUniformLocation(activeProgram,"lightColor"),count,colors.data()); }
+    glUniform1i(glGetUniformLocation(activeProgram,"fogWorld"),draw.layer==RenderLayer::World);glUniform1i(glGetUniformLocation(activeProgram,"fogAdditive"),draw.blend==BlendMode::Additive);
     blend(draw.blend);glFrontFace((draw.mirrored!=reflectionPass_) ? GL_CW : GL_CCW);
     if(m.doubleSided) glDisable(GL_CULL_FACE);else { glEnable(GL_CULL_FACE);glCullFace(GL_BACK); }
     glDrawElements(GL_TRIANGLES,draw.indexCount,GL_UNSIGNED_INT,reinterpret_cast<void*>(std::size_t(draw.firstIndex)*4));
@@ -735,13 +766,17 @@ void WebGlRenderer::render(double updateMs,double intervalMs) {
         for(const auto& resolved:resolved_) {
             const auto& view=views_.views()[resolved.index];auto& camera=*view.camera;const float aspect=resolved.viewport.width/resolved.viewport.height;
             interactionParameters_=waterInteractionParameters(waterInteractions_,waterTime_,camera.visibilityMask());
-            glUseProgram(meshProgram_);fogUniform(meshProgram_,prepareFog(scene_->fog(),camera,view.fogEnabled));const auto eye=camera.worldPosition();
-            glUniform3f(glGetUniformLocation(meshProgram_,"cameraPosition"),eye.x,eye.y,eye.z);
-            matrix(meshProgram_,"inverseVp",camera.inverseViewProjection(aspect));
-            glUniform4f(glGetUniformLocation(meshProgram_,"waterViewport"),resolved.viewport.x,height_-resolved.viewport.y-resolved.viewport.height,resolved.viewport.width,resolved.viewport.height);
-            glUniform2f(glGetUniformLocation(meshProgram_,"waterExtent"),width_,height_);
+            const auto eye=camera.worldPosition();
             const auto cameraWorld=camera.worldMatrix();const auto forward=normalized(Vec3{-cameraWorld.m[8],-cameraWorld.m[9],-cameraWorld.m[10]});
-            glUniform3f(glGetUniformLocation(meshProgram_,"viewForward"),forward.x,forward.y,forward.z);
+            const auto fog=prepareFog(scene_->fog(),camera,view.fogEnabled);
+            for(const auto activeProgram:{simpleMeshProgram_,meshProgram_}) {
+                glUseProgram(activeProgram);fogUniform(activeProgram,fog);
+                glUniform3f(glGetUniformLocation(activeProgram,"cameraPosition"),eye.x,eye.y,eye.z);
+                matrix(activeProgram,"inverseVp",camera.inverseViewProjection(aspect));
+                glUniform4f(glGetUniformLocation(activeProgram,"waterViewport"),resolved.viewport.x,height_-resolved.viewport.y-resolved.viewport.height,resolved.viewport.width,resolved.viewport.height);
+                glUniform2f(glGetUniformLocation(activeProgram,"waterExtent"),width_,height_);
+                glUniform3f(glGetUniformLocation(activeProgram,"viewForward"),forward.x,forward.y,forward.z);
+            }
             glViewport(resolved.viewport.x,height_-resolved.viewport.y-resolved.viewport.height,resolved.viewport.width,resolved.viewport.height);
             glScissor(resolved.x,height_-resolved.y-resolved.height,resolved.width,resolved.height);glDepthMask(GL_TRUE);glDepthRangef(0,1);
             if(view.clearColor) { const auto& color=*view.clearColor;glClearColor(color[0],color[1],color[2],color[3]);glClear(GL_COLOR_BUFFER_BIT); }

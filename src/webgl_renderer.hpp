@@ -70,7 +70,7 @@ private:
     RenderQuality quality_;
     RenderCapabilities capabilities_;
     EMSCRIPTEN_WEBGL_CONTEXT_HANDLE context_=0;
-    GLuint meshProgram_=0,guiProgram_=0,guiVao_=0,guiVertices_=0,guiIndices_=0,particleVao_=0,particleBuffer_=0,ribbonVao_=0,ribbonBuffer_=0;
+    GLuint meshProgram_=0,simpleMeshProgram_=0,guiProgram_=0,guiVao_=0,guiVertices_=0,guiIndices_=0,particleVao_=0,particleBuffer_=0,ribbonVao_=0,ribbonBuffer_=0;
     GLuint skyProgram_=0,skyVao_=0,skySampler_=0;
     bool waterCapture_=false;
     std::vector<std::optional<UnderwaterView>> underwaterViews_;

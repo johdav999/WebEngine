@@ -140,3 +140,22 @@ These checks establish this Chrome/GPU execution and controlled acquisition
 conditions. They do not establish physical Android/iOS acceptance, a Safari/Firefox
 matrix or sustained mobile performance. Capability and visual targets on those
 devices still require device-specific evidence.
+
+## Material shader variants
+
+WebGL2 creates two private mesh programs per context. Ordinary unmasked,
+non-layered, non-water draws outside a planar-reflection pass use a specialized
+program with the unused water/layered/ribbon and mask/reflection-discard features
+compiled out. Lighting, fog, textures, tint, tone mapping, blending, geometry and
+LOD selection use the same expressions and resources. Water, layered materials,
+masked surfaces, planar-reflection passes, ribbons and particles retain the
+general program. Per-view camera/fog uniforms initialize both programs; resource
+release and context restoration destroy/recreate both. There is no new public
+API or application-specific shader substitution.
+
+The universal program was a measured GPU bottleneck on Intel UHD 770 / ANGLE
+D3D11 in RacingGame: compiling inactive features out raised a fixed racing view
+from roughly 11 FPS to 34 FPS, and removing inactive discard paths reached about
+49 FPS with the same scene/resolution. These diagnostic variants establish the
+shader cost, not production acceptance; validate the actual selected programs,
+special materials, context restoration, and matched before/after game captures.
