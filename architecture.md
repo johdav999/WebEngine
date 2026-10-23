@@ -546,6 +546,17 @@ No platform types enter portable APIs, and no second input/frame clock is added.
 See [contracts](docs/accessibility-input.md) and
 [validation](docs/accessibility-input-validation.md).
 
+### Compiled module SDK release handoff (2026-10-23)
+
+The standalone `examples/modules` and `examples/quests` consumers configure only
+the optional portable module/quest libraries. The quest consumer's separate
+`Example::QuestBindings` target installs pure typed inventory-fact evaluation;
+the executable owns independent runtimes, a staged game wallet and snapshot IO.
+Enabled and omitted targets register CTest on native and Node/Wasm. The SDK
+workflow validates this matrix independently of renderer/physics dependencies.
+There is no new runtime scheduler, scene owner or binary plugin ABI. See
+[module SDK handoff](docs/module-sdk.md).
+
 ### Formula circuit application demo (2026-10-19)
 
 `src/formula_demo.hpp` composes existing immutable closed spline/route resources,
@@ -2698,6 +2709,7 @@ in native host reports; all three APIs use the same WebGpuRenderer/WGSL as brows
 WebGPU. The optional direct renderer remains a strict independent implementation.
 See docs/windows-graphics-fallback.md and its separate validation evidence.
 
+
 ### Optional compiled code modules (M1)
 
 `engine_modules` / `WebEngine::Modules` is an optional standard-C++20-only target,
@@ -2757,3 +2769,16 @@ old work on lifecycle/scene/session replacement. Staged loads validate all game
 and quest state before publication; restore emits no rewards and rebases clocks.
 See [host contracts](docs/quests-host.md) and [cross-platform evidence](docs/quests-host-validation.md).
 Paws host extraction, pin publication and migration remain M4 onward.
+
+
+
+### Consumer host integration (M4)
+
+The engine exports WebEngine::Browser for reusable browser renderer packaging.
+GuiSystem supports idle clear/rebuild while retaining host ownership. DesktopHost
+exposes GUI-aware pointer/wheel notifications and an optional application-owned
+water phase. Preview reservation respects touch/pen GUI ownership; consumed
+post-GUI notifications do not also reach gameplay input. Native water overrides
+feed the existing private DesktopGraphics interface for either backend, with
+null preserving the host simulation clock. Sessions borrow the host Application; the engine gains no game save
+or quest policy. See [consumer host contracts](docs/consumer-hosts.md).

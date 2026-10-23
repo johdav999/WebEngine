@@ -2,6 +2,7 @@
 #include "engine/mesh_component.hpp"
 #include "engine/particle_emitter_component.hpp"
 #include <iostream>
+#include <limits>
 // This consumer intentionally has no SDL/Dawn/private source include directories.
 using namespace engine;
 namespace {
@@ -11,6 +12,8 @@ void test(DesktopBackend backend) {
     DesktopSettings settings;settings.hidden=true;settings.width=640;settings.height=480;
     settings.backend=backend;
     DesktopHost host(settings);rejects([&]{DesktopHost duplicate(settings);});
+    host.setWaterTime(12.5);rejects([&]{host.setWaterTime(-1);});rejects([&]{host.setWaterTime(1000001);});
+    rejects([&]{host.setWaterTime(std::numeric_limits<double>::quiet_NaN());});host.setWaterTime(std::nullopt);
     rejects([&]{host.simulateGraphicsLoss();});rejects([&]{host.simulateGraphicsFailure();});
     auto scene=std::make_unique<Scene>("First");auto& camera=scene->spawn("Camera").addComponent<CameraComponent>();
     const auto first=host.application().loadScene(std::move(scene));const DesktopView view{camera.id()};host.setViews(first,{&view,1});

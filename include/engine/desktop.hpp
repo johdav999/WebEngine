@@ -19,12 +19,15 @@ enum class DesktopControl : InputControlId {
     PadLeftX=100,PadLeftY,PadRightTrigger,PadLeftTrigger,PadSouth,PadEast,PadStart
 };
 constexpr InputControlId controlId(DesktopControl control) { return static_cast<InputControlId>(control); }
-enum class DesktopEventType { Control, FileDrop, InputCancelled, FocusChanged, Resized, CloseRequested };
+enum class DesktopEventType { Control, PointerPreview, Pointer, Wheel, FileDrop, InputCancelled, FocusChanged, Resized, CloseRequested };
 struct DesktopEvent {
     DesktopEventType type=DesktopEventType::Control;
     DesktopControl control=DesktopControl::Unknown;
     bool down=false,repeat=false,guiConsumed=false,focused=false;
     std::filesystem::path path;
+    GuiPointer pointer=GuiPointer::Move;
+    Vec2 position{},wheel{};
+    bool primary=true;
 };
 enum class DesktopBackend { Dawn, Direct3D12, DawnVulkan, Automatic, DawnD3D11 };
 struct DesktopSettings {
@@ -96,6 +99,8 @@ public:
     void setWindowSize(std::uint32_t width,std::uint32_t height);
     DesktopSize size() const;
     double nowSeconds() const;
+    // Optional game-owned simulation phase; absent uses the host presentation clock.
+    void setWaterTime(std::optional<double> seconds);
     void setQuality(const RenderQuality& quality);
     const RenderQuality& quality() const;
     const RenderCapabilities& capabilities() const;

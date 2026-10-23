@@ -1,10 +1,16 @@
 #include "scene.hpp"
 #include "engine/desktop.hpp"
 #include <iostream>
+template<class Settings> void selectBackend(Settings& settings,bool direct=false) {
+    if constexpr(requires { settings.backend; }) {
+        using Backend=decltype(settings.backend);
+        settings.backend=direct?Backend::Direct3D12:Backend::Dawn;
+    } else if(direct) throw std::invalid_argument("Direct D3D12 is not in this engine revision");
+}
 int main(int argc,char** argv){try{
     using namespace engine;
-    bool smoke=false;std::filesystem::path output=".";DesktopSettings settings;settings.title="WebEngine module sample";settings.width=900;settings.height=650;settings.backend=DesktopBackend::Dawn;
-    for(int i=1;i<argc;++i){std::string arg=argv[i];if(arg=="--smoke"&&i+1<argc){smoke=true;output=argv[++i];settings.hidden=true;}else if(arg=="--d3d12")settings.backend=DesktopBackend::Direct3D12;else throw std::invalid_argument("Use --smoke output-directory or --d3d12");}
+    bool smoke=false;std::filesystem::path output=".";DesktopSettings settings;settings.title="WebEngine module sample";settings.width=900;settings.height=650;selectBackend(settings);
+    for(int i=1;i<argc;++i){std::string arg=argv[i];if(arg=="--smoke"&&i+1<argc){smoke=true;output=argv[++i];settings.hidden=true;}else if(arg=="--d3d12")selectBackend(settings,true);else throw std::invalid_argument("Use --smoke output-directory or --d3d12");}
     counter_example::Demo demo;counter_example::View view;DesktopHost host(settings);
     auto id=host.application().loadScene(view.make());DesktopView v{view.camera->id()};host.setViews(id,{&v,1});host.application().start(id);
     DesktopFiles files;host.gui().setFont(GuiFont::loadTrustedTrueType(files.readAsset("fonts/NotoSans-Regular.ttf"),18));

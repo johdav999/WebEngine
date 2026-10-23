@@ -752,3 +752,9 @@ void GuiSystem::paint(Widget& widget,double seconds) {
     }
 }
 }
+
+void engine::GuiSystem::clear() {
+    cancelPointer(); blur(); hover_=nullptr; scrollCapture_=nullptr;
+    scrollDragging_=false; selectionAnchor_=0;
+    root_.children_.clear(); draw_={};
+}

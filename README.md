@@ -1901,3 +1901,9 @@ triplanar materials. **Cliff / terrain join** opens its close view on browser an
 Windows. The portable builder returns an immutable cut/mesh pair with protected
 LOD and full-detail collision. See [cliff contracts](docs/terrain-cliffs.md) and
 [validation](docs/terrain-cliffs-validation.md).
+
+Shared game hosts can consume [WebEngine::Browser and the desktop integration seams](docs/consumer-hosts.md).
+
+The [compiled module SDK handoff](docs/module-sdk.md) covers reusable non-quest
+plugins, an independent custom quest-binding consumer, native/Wasm CTest and
+feature-omission builds. These consumers configure without renderer downloads.

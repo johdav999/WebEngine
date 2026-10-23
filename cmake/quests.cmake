@@ -34,7 +34,7 @@ elseif(TARGET WebEngine::Desktop)
   add_custom_command(TARGET quest_demo_windows POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:quest_demo_windows>/assets/fonts"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/third_party/noto/NotoSans-Regular.ttf" "$<TARGET_FILE_DIR:quest_demo_windows>/assets/fonts"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:SDL3::SDL3-shared>" "$<TARGET_FILE_DIR:quest_demo_windows>")
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:SDL3::SDL3-shared>" "${WEBENGINE_DXC_DIR}/bin/x64/dxcompiler.dll" "${WEBENGINE_DXC_DIR}/bin/x64/dxil.dll" "$<TARGET_FILE_DIR:quest_demo_windows>")
 else()
   message(FATAL_ERROR "Quest demo needs Emscripten or WEBENGINE_BUILD_WINDOWS")
 endif()

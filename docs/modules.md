@@ -1,5 +1,8 @@
 # Optional compiled code modules
 
+The [M7 SDK handoff](module-sdk.md) provides independent-consumer build commands,
+the custom quest-binding module, omission checks and the release regression matrix.
+
 Implemented M1, 22 October 2026. `engine_modules` / `WebEngine::Modules` is a portable C++20 library with only standard-library dependencies. It supplies validated application composition for optional code plugins. It does not implement quests, an event bus, automatic discovery, dynamic linking, hot unloading or an execution scheduler.
 
 ## Consume and extend

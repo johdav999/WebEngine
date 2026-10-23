@@ -19,19 +19,25 @@ void require(bool value, const char *message) {
         throw std::runtime_error(message);
 }
 } // namespace
+template<class Settings> void selectBackend(Settings& settings,bool direct=false) {
+    if constexpr(requires { settings.backend; }) {
+        using Backend=decltype(settings.backend);
+        settings.backend=direct?Backend::Direct3D12:Backend::Dawn;
+    } else if(direct) throw std::invalid_argument("Direct D3D12 is not in this engine revision");
+}
 int main(int argc, char **argv) {
     try {
         DesktopSettings settings;
         settings.title = "Quest host integration";
         settings.width = 1000;
         settings.height = 780;
-        settings.backend = DesktopBackend::Dawn;
+        selectBackend(settings);
         std::string smoke;
         std::filesystem::path output = ".", userDirectory, importFile, exportFile;
         for (int i = 1; i < argc; ++i) {
             std::string arg = argv[i];
             if (arg == "--d3d12")
-                settings.backend = DesktopBackend::Direct3D12;
+                selectBackend(settings,true);
             else if (arg == "--smoke" && i + 2 < argc) {
                 smoke = argv[++i];
                 output = argv[++i];

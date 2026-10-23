@@ -728,3 +728,6 @@ include(cmake/quests.cmake)
 include(cmake/hybrid_terrain.cmake)
 include(cmake/network.cmake)
 include(cmake/planet.cmake)
+
+include(cmake/browser.cmake)
+include(cmake/host_integration.cmake)

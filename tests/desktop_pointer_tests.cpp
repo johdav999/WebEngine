@@ -24,6 +24,21 @@ void hostTest(DesktopBackend backend) {
     event.type=SDL_EVENT_FINGER_UP;push(event);host.step();require(clicks==1,"Host touch GUI activation");
     event={};event.type=SDL_EVENT_MOUSE_BUTTON_DOWN;event.button.windowID=id;event.button.which=SDL_TOUCH_MOUSEID;event.button.button=SDL_BUTTON_LEFT;event.button.down=true;event.button.x=20;event.button.y=20;push(event);
     event.type=SDL_EVENT_MOUSE_BUTTON_UP;event.button.down=false;push(event);host.step();require(clicks==1,"Synthetic mouse double activation");
+    bool reserve=true,handlePointer=false;int previews=0,notifications=0;bool guiConsumed=false;
+    host.setEventHandler([&](const DesktopEvent& e){
+        if(e.type==DesktopEventType::PointerPreview){++previews;return reserve;}
+        if(e.type==DesktopEventType::Pointer){++notifications;guiConsumed=e.guiConsumed;return handlePointer;}
+        return false;
+    });
+    auto mouse=[&](bool down,float x,float y){SDL_Event e{};e.type=down?SDL_EVENT_MOUSE_BUTTON_DOWN:SDL_EVENT_MOUSE_BUTTON_UP;
+        e.button.windowID=id;e.button.which=0;e.button.button=SDL_BUTTON_LEFT;e.button.down=down;e.button.x=x*units;e.button.y=y*units;push(e);host.step();};
+    mouse(true,20,20);mouse(false,20,20);
+    require(previews==2&&notifications==2&&guiConsumed&&clicks==1,"Reserved mouse contact reached GUI or lost notification ownership");
+    reserve=false;mouse(true,20,20);mouse(false,20,20);require(clicks==2&&guiConsumed,"Unreserved mouse contact bypassed retained GUI");
+    handlePointer=true;mouse(true,400,300);require(!guiConsumed&&host.application().input().pointers().empty(),"Handled post-GUI contact also reached gameplay");mouse(false,400,300);
+    SDL_Event touch{};touch.type=SDL_EVENT_FINGER_DOWN;touch.tfinger.windowID=id;touch.tfinger.touchID=7;touch.tfinger.fingerID=4;touch.tfinger.x=.03f;touch.tfinger.y=.03f;push(touch);host.step();
+    const auto beforePreview=previews;mouse(true,400,300);mouse(false,400,300);require(previews==beforePreview&&guiConsumed,"Mouse preview stole active touch GUI capture");
+    touch.type=SDL_EVENT_FINGER_UP;push(touch);host.step();require(clicks==3,"Mouse notifications disrupted touch GUI capture");host.setEventHandler({});
     event={};event.type=SDL_EVENT_PEN_DOWN;event.ptouch.windowID=id;event.ptouch.which=5;event.ptouch.x=400*units;event.ptouch.y=300*units;event.ptouch.pen_state=SDL_PEN_INPUT_DOWN;push(event);host.step();
     require(host.application().input().pointers().size()==1&&host.application().input().pointers().begin()->second.device==InputDevice::Pen,"Host pen routing");
     host.setPaused(true);host.step();require(host.application().input().pointers().empty(),"Pause retained pen contact");

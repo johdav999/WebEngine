@@ -9,6 +9,8 @@ const run=promisify(execFile);
  const executable=path.resolve(process.env.QUEST_NATIVE||'build/windows/Release/quest_demo_windows.exe');
  const base=process.env.QUEST_URL||'http://127.0.0.1:8147';
  const report={native:[],browser:[]};
+ const nativeBackends=(process.env.QUEST_NATIVE_BACKENDS||'dawn,d3d12').split(',');
+ assert(nativeBackends.length&&nativeBackends.every(x=>['dawn','d3d12'].includes(x)));
  async function native(backend,phase,user,folder,extra=[]){
   const args=['--smoke',phase,path.join(root,folder),'--user-directory',path.join(root,user),...extra];if(backend==='d3d12')args.push('--d3d12');
   const result=await run(executable,args,{windowsHide:true,timeout:180000,maxBuffer:1024*1024});
@@ -16,7 +18,7 @@ const run=promisify(execFile);
  }
  // Fresh temporary profiles ensure this never touches a player's default save.
  const stamp=Date.now().toString();
- if(!process.env.QUEST_BROWSER_ONLY) for(const backend of ['dawn','d3d12']){
+ if(!process.env.QUEST_BROWSER_ONLY) for(const backend of nativeBackends){
   const profile=`profile-${backend}-${stamp}`;
   await native(backend,'seed',profile,`${backend}-seed`);
   const state=await native(backend,'resume',profile,`${backend}-resume`,['--export',path.join(root,`${backend}-completed.qhost`)]);
@@ -67,9 +69,9 @@ const run=promisify(execFile);
   await page.screenshot({path:path.join(root,`${backend}.png`)});
   if(!process.env.QUEST_BROWSER_ONLY){
   // Real native export -> browser upload.
-  const oldLoads=(await state()).loads;await page.setInputFiles('#import',path.join(root,'dawn-completed.qhost'));await wait(()=>questDemoState.message==='Loaded saved session');assert((await state()).loads>oldLoads);assert.equal((await state()).wallet,20);
+  const oldLoads=(await state()).loads;await page.setInputFiles('#import',path.join(root,`${nativeBackends[0]}-completed.qhost`));await wait(()=>questDemoState.message==='Loaded saved session');assert((await state()).loads>oldLoads);assert.equal((await state()).wallet,20);
   // Actual browser download -> native host -> browser upload, not a Node-only codec test.
-  const nativeBackend=backend==='webgpu'?'dawn':'d3d12';const returned=path.join(root,`${backend}-from-desktop.qhost`);
+  const nativeBackend=backend==='webgl2'&&nativeBackends.includes('d3d12')?'d3d12':nativeBackends[0];const returned=path.join(root,`${backend}-from-desktop.qhost`);
   const nativeState=await native(nativeBackend,'import',`profile-import-${backend}-${stamp}`,`${backend}-import`,['--import',path.join(root,`${backend}-mid.qhost`),'--export',returned]);assert.equal(nativeState.wallet,20);
   const generation=(await state()).epoch;await page.setInputFiles('#import',returned);await page.waitForFunction(old=>questDemoState.epoch>old,generation);assert.equal((await state()).wallet,20);
   }
