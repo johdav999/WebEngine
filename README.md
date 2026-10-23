@@ -1712,3 +1712,37 @@ Archive v31 saves authored references and selected restoration requirements, omi
 resident caches. Open `?editor=1&scene=regions`; applications own loaders, predictive
 movement gating and restore handoff. See [contracts](docs/region-streaming.md) and
 [validation](docs/region-streaming-validation.md).
+
+## Optional compiled code modules
+
+Use `WebEngine::Modules` and the [external plugin template](examples/modules/README.md)
+for optional reusable C++ code plugins. The library has no rendering or platform
+dependency and supports native Windows and Wasm. Explicit typed registration,
+dependency/version validation and staged immutable publication preserve module
+ownership and independent session state. It is source-linked, with no dynamic
+DLL/Wasm loading. See [API/lifetimes](docs/modules.md) and
+[native/browser reproduction](docs/modules-validation.md).
+
+## Optional quest kernel
+
+`WebEngine::Quests` builds on the compiled module system with validated content,
+typed extensible objectives/conditions, sequential stages and branches, scoped
+events, bounded candidate transactions and versioned snapshots. Application
+sessions own runtime state; game policy owns rewards, puzzle rules and saves.
+The same portable library runs in browser Wasm and Windows. Enable
+`WEBENGINE_BUILD_QUESTS`; see [API and ownership](docs/quests.md),
+[standalone/custom-module sample](examples/quests/CMakeLists.txt) and
+[native/browser validation](docs/quests-validation.md). The delivered M2 kernel
+does not migrate Paws or supply its Windows application.
+
+The [M3 quest host sample](examples/quests/README.md) adds a shared browser/Windows
+controller with persistent Save/Load, pause-aware Application timing, scene travel
+and portable file exchange. Progress lives outside presentation scenes; one save
+joins the sample wallet and quest receipts. See [ownership/storage](docs/quests-host.md)
+and [actual host verification](docs/quests-host-validation.md).
+
+Shared game hosts can consume [WebEngine::Browser and the desktop integration seams](docs/consumer-hosts.md).
+
+The [compiled module SDK handoff](docs/module-sdk.md) covers reusable non-quest
+plugins, an independent custom quest-binding consumer, native/Wasm CTest and
+feature-omission builds. These consumers configure without renderer downloads.

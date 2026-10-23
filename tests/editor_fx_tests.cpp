@@ -22,7 +22,7 @@ int main(){try{
  check(editor.redo()&&editor.selectedEffect()->asset().name=="Authored fire","Redo restores authored asset");
  const auto valid=SceneArchive::save(scene);auto invalid=std::make_shared<EffectAsset>(*asset);auto bad=std::make_shared<ParticleEmitterDefinition>(*definition);bad->startDelay=-1;invalid->emitters[0].definition=bad;
  rejects([&]{editor.setEffectAsset(invalid);});check(SceneArchive::save(scene)==valid,"Invalid candidate preserves source bytes");
- const auto bytes=EffectArchive::save(asset);check(bytes[8]==std::byte{31},"Effect archive uses v31");auto loaded=EffectArchive::load(bytes);
+ const auto bytes=EffectArchive::save(asset);check(bytes[8]==std::byte{34},"Effect archive uses current v34");auto loaded=EffectArchive::load(bytes);
  check(loaded->name==asset->name&&loaded->emitters[0].definition->startDelay==.5,"Effect asset round trip keeps timing");
  check(loaded->emitters[1].definition->texture==loaded->emitters[2].definition->texture,"Effect file preserves shared texture identity");
  auto corrupt=bytes;corrupt.back()^=std::byte{1};rejects([&]{EffectArchive::load(corrupt);});

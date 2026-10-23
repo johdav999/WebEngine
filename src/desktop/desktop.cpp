@@ -67,6 +67,7 @@ struct DesktopHost::Impl {
     std::unique_ptr<SdlGpuHost> gpu;
     Application app;
     GuiSystem gui;
+    std::optional<double> waterTime;
     std::unique_ptr<SdlTextInput> text;
     std::unique_ptr<WindowsLifecycle> lifecycle;
     InputBindings bindings;
@@ -158,14 +159,21 @@ struct DesktopHost::Impl {
         const bool primary=move||event.button.button==SDL_BUTTON_LEFT;
         const bool owned=pointerOwned;
         if(primary&&action==GuiPointer::Down&&gui.focusedInput())text->cancel();
-        const bool consumed=primary&&gui.pointer(action,position,(SDL_GetModState()&SDL_KMOD_SHIFT)!=0);
+        DesktopEvent preview;preview.type=DesktopEventType::PointerPreview;preview.pointer=action;
+        preview.position=position;preview.primary=primary;
+        const bool previewConsumed=emit(preview);
+        if(previewConsumed&&action==GuiPointer::Down)gui.pointer(GuiPointer::Cancel,{});
+        const bool consumed=previewConsumed||(primary&&gui.pointer(action,position,(SDL_GetModState()&SDL_KMOD_SHIFT)!=0));
         if(primary&&action==GuiPointer::Down&&consumed) { pointerOwned=true;cancelBindings(); }
         if(primary&&action==GuiPointer::Up)pointerOwned=false;
         if(!move) {
             const auto button=event.button.button==SDL_BUTTON_LEFT?DesktopControl::MouseLeft:event.button.button==SDL_BUTTON_RIGHT?DesktopControl::MouseRight:DesktopControl::MouseMiddle;
             control(button,event.button.down,false,consumed||owned);
         }
-        if(gameplay()&&!consumed&&!owned) {
+        DesktopEvent contact;contact.type=DesktopEventType::Pointer;contact.pointer=action;
+        contact.position=position;contact.primary=primary;contact.guiConsumed=consumed||owned;
+        const bool handled=emit(contact);
+        if(gameplay()&&!consumed&&!owned&&!handled) {
             const auto logical=gpu->logicalSize();int width=0,height=0;gpu->drawableSize(width,height);
             InputPacket packet;packet.type=int(move?InputEventType::PointerMove:event.button.down?InputEventType::PointerDown:InputEventType::PointerUp);
             packet.id=1;packet.x=position.x;packet.y=position.y;packet.pixelX=position.x*width/std::max(1.,logical.width);packet.pixelY=position.y*height/std::max(1.,logical.height);
@@ -209,7 +217,10 @@ struct DesktopHost::Impl {
                 layout();const float units=desktopCoordinateScale(*window);const Vec2 position{event.wheel.mouse_x/units,event.wheel.mouse_y/units};
                 const float sign=event.wheel.direction==SDL_MOUSEWHEEL_FLIPPED?-1.f:1.f;
                 const Vec2 delta{event.wheel.x*sign*32,-event.wheel.y*sign*32};
-                if(!gui.wheel(position,delta)&&gameplay()) {bindings.control(controlId(DesktopControl::WheelX),event.wheel.x*sign);bindings.control(controlId(DesktopControl::WheelY),event.wheel.y*sign);}
+                DesktopEvent wheel;wheel.type=DesktopEventType::Wheel;wheel.position=position;wheel.wheel=delta;
+                wheel.guiConsumed=gui.wheel(position,delta);
+                const bool handled=emit(wheel);
+                if(!wheel.guiConsumed&&!handled&&gameplay()) {bindings.control(controlId(DesktopControl::WheelX),event.wheel.x*sign);bindings.control(controlId(DesktopControl::WheelY),event.wheel.y*sign);}
             } else if((event.type==SDL_EVENT_GAMEPAD_BUTTON_DOWN||event.type==SDL_EVENT_GAMEPAD_BUTTON_UP)&&pad&&event.gbutton.which==SDL_GetGamepadID(pad.get())&&focused&&!minimized) {
                 // Modal navigation remains available with a held driving axis. Only
                 // gameplay buttons wait for neutral; Start can always open the menu.
@@ -274,7 +285,7 @@ bool DesktopHost::step(const ApplicationFrameCallbacks& callbacks,std::optional<
     frameCallbacks.present=[&p,present=callbacks.present](Scene& scene,const ApplicationFrame& frame) {
         if(present)present(scene,frame);
         // Resolve handles again after user callbacks/ticks may have destroyed cameras.
-        if(p.renderer) {p.renderer->setViews(p.resolve(scene,p.viewsFor(scene),false));p.layout();p.renderer->setWaterTime(frame.presentation.seconds);p.renderer->render(0,frame.interval*1000);}
+        if(p.renderer) {p.renderer->setViews(p.resolve(scene,p.viewsFor(scene),false));p.layout();p.renderer->setWaterTime(p.waterTime.value_or(frame.presentation.seconds));p.renderer->render(0,frame.interval*1000);}
     };
     {Guard applicationGuard(p.advancing);p.app.advance(timestamp.value_or(nowSeconds()),frameCallbacks);}
     if(p.app.suspended())SDL_Delay(5);
@@ -322,4 +333,10 @@ DesktopFileDialogResult DesktopHost::showFileDialog(const DesktopFileDialogOptio
         p.app.setSuspended(suspended);p.cancel();return result;
     }catch(...){if(entered)p.app.setSuspended(suspended);throw;}
 }
+}
+
+void engine::DesktopHost::setWaterTime(std::optional<double> seconds) {
+    impl_->requireOwner();
+    if(seconds&&(!std::isfinite(*seconds)||*seconds<0||*seconds>1000000))throw std::invalid_argument("Invalid water phase");
+    impl_->waterTime=seconds;
 }

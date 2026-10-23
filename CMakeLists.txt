@@ -704,3 +704,9 @@ if(EMSCRIPTEN)
  target_link_options(audio_dsp_wasm_tests PRIVATE -fexceptions -sALLOW_MEMORY_GROWTH=1 -sENVIRONMENT=node -sEXIT_RUNTIME=1)
  set_target_properties(audio_dsp_wasm_tests PROPERTIES SUFFIX ".js")
 endif()
+
+# Optional portable compiled modules and host examples.
+include(cmake/modules.cmake)
+include(cmake/quests.cmake)
+include(cmake/browser.cmake)
+include(cmake/host_integration.cmake)
