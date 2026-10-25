@@ -29,12 +29,19 @@ void spatial(const State& state,const TacticalAction& op) {
     if(const auto* use=std::get_if<UseAbility>(&op.action)) {
         need(!op.spatial->path(),ErrorCode::InvalidSpatial,"Ability quote must not carry a movement path");
         need(use->entity==op.actor,ErrorCode::InvalidAction,"Ability caster differs from active actor");
-        for(auto target:use->targets)
-            need(std::binary_search(snapshot.legalTargets.begin(),snapshot.legalTargets.end(),target),
-                ErrorCode::InvalidTarget,"Target failed spatial query");
+        if(snapshot.targeting){
+            auto selected=selectTargets(state,snapshot,op.actor,*snapshot.targeting);
+            auto supplied=use->targets;std::sort(supplied.begin(),supplied.end());
+            need(supplied==selected,ErrorCode::InvalidTarget,"Ability targets differ from complete area selection");
+        }
+        if(!snapshot.targeting||snapshot.targeting->requireLineOfSight)
+            for(auto target:use->targets)
+                need(std::binary_search(snapshot.legalTargets.begin(),snapshot.legalTargets.end(),target),
+                    ErrorCode::InvalidTarget,"Target failed spatial query");
         const auto cooldowns=state.cooldowns.find(op.actor);
         need(cooldowns==state.cooldowns.end() || !cooldowns->second.contains(use->ability),ErrorCode::InvalidAction,"Ability is cooling down");
     } else {
+        need(!snapshot.targeting,ErrorCode::InvalidSpatial,"Movement quote cannot contain ability targeting");
         need(op.spatial->path().has_value(),ErrorCode::InvalidSpatial,"Movement requires a path");
         const auto& path=*op.spatial->path();
         need(path.reachable && path.destinationResident && path.destinationFree && path.cost>=0 &&

@@ -95,6 +95,15 @@ shared party/team sample. See [L2 contracts](docs/rpg-parties.md) and
 Third-person camera policy, Lattice abilities, balance, factions and campaign/world state stay
 in RPGGame. Existing engine core, Quests and hosts never depend on RPG.
 
+Library milestone L3 adds pure, bounded, exact-integer 3D single/sphere/cone/line
+target queries, cast range, self/LOS and L2 team filters. An optional query in the
+existing immutable spatial quote enforces the complete selected set before and
+after BeforeAction reactions. Existing action transactions publish all costs,
+effects and RNG together. Host physics facts and authored shape/effect policy stay
+outside the kernel. API 1.9.0 leaves durable snapshot formats unchanged; shared
+Windows/browser sample actions exercise the new query. See [L3 contracts](docs/rpg-targeting.md)
+and [validation status](docs/rpg-l3-validation.md).
+
 ## Current architecture
 
 ### Optional planetary terrain, stages 1 and 2 (2026-10-23)

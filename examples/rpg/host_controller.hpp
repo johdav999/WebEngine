@@ -73,10 +73,14 @@ class Controller {
             r::PathQuote p;p.start=start;p.destination=end;p.reachable=true;p.destinationResident=true;p.destinationFree=true;
             for(auto v:found.points){r::TacticalPosition vq{std::llround(v.x),0,std::llround(v.z)};if(p.route.empty()||p.route.back()!=vq){p.route.push_back(vq);route.push_back(point(vq));}}
             p.cost=static_cast<std::int64_t>(p.route.size()-1);path=std::move(p);
-        }else route={point(start),point(start)};
+        }else {
+            route={point(start),point(start)};
+            auto target=e.roster.front()==actor?e.roster.back():e.roster.front();
+            snapshot.targeting=r::TargetQuery{r::SphereTargets{state().positions.at(target),1},6,r::TargetTeam::Opponents,false,true};
+        }
         auto quote=game_->game().spatialQuote(actor,std::move(snapshot),std::move(path));
         r::TacticalAction action{actor,e.epoch,e.turnEpoch,r::MoveAction{},quote};
-        if(!move){auto target=e.roster.front()==actor?e.roster.back():e.roster.front();action.action=r::UseAbility{actor,r::ContentId("example.strike"),{target},{}};}
+        if(!move)action.action=r::UseAbility{actor,r::ContentId("example.strike"),r::selectTargets(state(),quote->snapshot(),actor,*quote->snapshot().targeting),{}};
         // Sole gameplay writer. Reserve all route cells/destination before final observation.
         // No motor, AI or physics body writes these presentation actors.
         reservation_.emplace(Reservation{actor,std::move(route),0});

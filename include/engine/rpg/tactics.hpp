@@ -1,17 +1,18 @@
 #pragma once
 #include "engine/rpg/abilities.hpp"
+#include "engine/rpg/targeting.hpp"
 #include <memory>
 #include <variant>
 
 namespace engine::rpg {
 struct WorldStamp { std::uint64_t identity = 0, revision = 0; auto operator<=>(const WorldStamp&) const = default; };
 // Game-defined integer coordinate units. No float/nav/scene representation enters the kernel.
-struct TacticalPosition { std::int64_t x = 0, y = 0, z = 0; auto operator<=>(const TacticalPosition&) const = default; };
 struct SpatialEntity { EntityId entity; TacticalPosition position; bool resident = true; };
 struct SpatialSnapshot {
     WorldStamp world;
     std::vector<SpatialEntity> entities;
     std::vector<EntityId> legalTargets; // Host queries supply range/LOS/target legality.
+    std::optional<TargetQuery> targeting; // When supplied, ability targets must equal the full selection.
 };
 struct PathQuote {
     TacticalPosition start, destination;
