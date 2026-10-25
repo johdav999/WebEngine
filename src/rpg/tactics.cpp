@@ -80,7 +80,7 @@ void applyTactics(State& state,Results& results,const Catalog& catalog,SessionId
     const auto& handler=*catalog.bindings()->registry().findEncounter(e.policy.id);
     need(bool(handler.authorize),ErrorCode::MissingHandler,"Encounter policy has no tactical authorization");
     const TacticalContext context{state,op};
-    auto eligible=[&](EntityId actor) {spend(work);return handler.eligible({state,e},actor);};
+    auto eligible=[&](EntityId actor) {spend(work);return canAct(state,actor)&&handler.eligible({state,e},actor);};
     need(eligible(op.actor),ErrorCode::InvalidAction,"Actor is incapacitated");
     spatial(state,op);
     // Discovery is pure. A token is queued/fired at most once across both phases.
@@ -126,7 +126,7 @@ void applyTactics(State& state,Results& results,const Catalog& catalog,SessionId
                 std::visit([&](const auto& value) {
                     need(member(e,value.entity),ErrorCode::InvalidTarget,"Reaction effect escaped roster");
                     using T=std::decay_t<decltype(value)>;
-                    if constexpr (!std::is_same_v<T,ResourceEffect>)
+                    if constexpr (std::is_same_v<T,ApplyStatus>||std::is_same_v<T,DispelStatus>)
                         need(statusSources.emplace(value.entity,value.source).second,ErrorCode::InvalidStatus,"Duplicate reaction status source");
                 },effect);
                 applyTacticalEffect(state,results,catalog,effect,effects);

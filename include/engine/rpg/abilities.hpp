@@ -1,6 +1,7 @@
 #pragma once
 #include "engine/rpg/characters.hpp"
 #include "engine/rpg/random.hpp"
+#include "engine/rpg/vitality.hpp"
 #include <variant>
 
 namespace engine::rpg {
@@ -33,7 +34,7 @@ struct AbilityDefinition {
 struct ResourceEffect { EntityId entity; ContentId resource; Amount delta; };
 struct ApplyStatus { EntityId entity; ContentId definition, source; };
 struct DispelStatus { EntityId entity; ContentId source; };
-using Effect = std::variant<ResourceEffect, ApplyStatus, DispelStatus>;
+using Effect = std::variant<ResourceEffect, ApplyStatus, DispelStatus, DamageEffect, HealEffect, ReviveEffect, DefeatEffect>;
 struct EffectProposal { bool accepted = true; std::vector<Effect> effects; };
 struct UseAbility {
     EntityId entity;

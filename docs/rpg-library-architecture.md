@@ -325,6 +325,16 @@ recruitment, AI, targeting and victory policy. Runtime snapshots retain v1
 compatibility and add a v2 party/team extension. Both hosts share the updated
 sample. See [contracts](rpg-parties.md) and [validation](rpg-l2-validation.md).
 
+## Library milestone L4 (implemented)
+
+API 1.10.0 adds optional vitality profiles over existing resources, typed
+damage/healing/defeat/revival effects, turn/reaction eligibility and team defeat
+queries. Game handlers retain formulas, resistance, revival eligibility/costs,
+outcome and checkpoint decisions. Runtime snapshot v3 persists life state;
+untracked v1/v2 saves retain legacy behavior. Shared Windows/browser examples
+exercise the pipeline. See [contracts](rpg-vitality.md) and
+[validation](rpg-l4-validation.md).
+
 ## Library milestone L3 (implemented)
 
 API 1.9.0 adds bounded deterministic 3D single, sphere, 90-degree cone and line

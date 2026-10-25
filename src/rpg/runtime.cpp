@@ -4,6 +4,9 @@
 #include <type_traits>
 
 namespace engine::rpg {
+void configureVitality(State&,Results&,const ConfigureVitality&);
+void reconcileVitality(State&,Results&,EntityId);
+void applyVitalEffect(State&,Results&,const Catalog&,const VitalEffect&,std::size_t&);
 void applyParty(State&, Results&, const Operation&);
 void applyInventory(State&, Results&, const Catalog&, SessionId, const Operation&);
 void applyAbilities(State&, Results&, const Catalog&, SessionId, const Operation&, std::size_t&, std::size_t&);
@@ -156,7 +159,11 @@ Transaction Runtime::prepare(const Command& command, Budget budget, std::optiona
     for (const auto& operation : command.operations_) {
       std::visit([&](const auto& op) {
         using T = std::decay_t<decltype(op)>;
-        if constexpr (std::is_same_v<T, SetParty> || std::is_same_v<T, RemoveParty>) {
+        if constexpr (std::is_same_v<T, ConfigureVitality>) {
+            configureVitality(*candidate,results,op);
+        } else if constexpr (std::is_same_v<T, ApplyVitalEffect>) {
+            applyVitalEffect(*candidate,results,*catalog_,op.effect,effects);
+        } else if constexpr (std::is_same_v<T, SetParty> || std::is_same_v<T, RemoveParty>) {
             applyParty(*candidate, results, operation);
         } else if constexpr (std::is_same_v<T, RecordAward>) {
             const auto& award = op.award;
@@ -293,12 +300,13 @@ Transaction Runtime::prepare(const Command& command, Budget budget, std::optiona
         }
     }, operation);
       // Lifecycle operations reconcile internally; other mutations check outcomes and active eligibility.
+      for(const auto&[entity,vitality]:candidate->vitality)reconcileVitality(*candidate,results,entity);
       if (!std::holds_alternative<BeginEncounter>(operation) && !std::holds_alternative<EndTurn>(operation) &&
           !std::holds_alternative<FinishEncounter>(operation) && !std::holds_alternative<ExitEncounter>(operation) &&
           !std::holds_alternative<TacticalAction>(operation) && !std::holds_alternative<AcknowledgePresentation>(operation) && !std::holds_alternative<RecordAward>(operation))
           reconcileEncounter(*candidate, results, *catalog_, session_, effects, draws, work);
     }
-    if (results.parties.size() + results.created.size() + results.advancements.size() + results.inventories.size() + results.items.size() +
+    if (results.vitality.size() + results.parties.size() + results.created.size() + results.advancements.size() + results.inventories.size() + results.items.size() +
         results.resources.size() + results.statuses.size() + results.abilities.size() + results.encounters.size() + results.cooldowns.size() + results.actions.size() + results.reactions.size() + results.presentations.size() + results.awards.size() > Limits::results)
         throw Error(ErrorCode::Limit, "Result record limit exceeded");
     candidate->producers.insert_or_assign(command.producer_, command.sequence_);

@@ -95,6 +95,14 @@ shared party/team sample. See [L2 contracts](docs/rpg-parties.md) and
 Third-person camera policy, Lattice abilities, balance, factions and campaign/world state stay
 in RPGGame. Existing engine core, Quests and hosts never depend on RPG.
 
+Library milestone L4 adds optional vitality over existing character resources,
+typed damage/healing/defeat/revival effects, incapacitated actor gates and
+nonempty-team defeat queries. Rulesets own formulas, resistance, revival costs,
+outcomes and checkpoint policy. Transactions publish life state with costs/RNG;
+runtime snapshot v3 stores profiles while v1/v2 remain supported. Both rendered
+hosts share the vitality sample. API 1.10.0; see
+[contracts](docs/rpg-vitality.md) and [validation](docs/rpg-l4-validation.md).
+
 Library milestone L3 adds pure, bounded, exact-integer 3D single/sphere/cone/line
 target queries, cast range, self/LOS and L2 team filters. An optional query in the
 existing immutable spatial quote enforces the complete selected set before and

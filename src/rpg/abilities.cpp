@@ -5,6 +5,8 @@
 #include <type_traits>
 
 namespace engine::rpg {
+void reconcileVitality(State&,Results&,EntityId);
+void applyVitalEffect(State&,Results&,const Catalog&,const VitalEffect&,std::size_t&);
 void recomputeEquipment(CharacterState&, const CharacterDefinition&);
 void applyInventory(State&, Results&, const Catalog&, SessionId, const Operation&);
 namespace {
@@ -50,6 +52,7 @@ void resource(State& state, Results& results, const Catalog& catalog, const Reso
     const auto next = value.current + delta;
     need(next >= 0 && next <= value.maximum, ErrorCode::InvalidAmount, "Effect resource outside bounds");
     value.current = next; results.resources.push_back(effect);
+    reconcileVitality(state,results,effect.entity);
 }
 void statusTargets(const StatusDefinition& status, const CharacterDefinition& def) {
     for (const auto& mod : status.modifiers) {
@@ -97,12 +100,14 @@ void status(State& state, Results& results, const Catalog& catalog, const ApplyS
         }
     }
     recomputeEquipment(ch, characterDef);
+    reconcileVitality(state,results,effect.entity);
     results.statuses.push_back({effect.entity, effect.source, kind});
 }
 void dispel(State& state, Results& results, const Catalog& catalog, const DispelStatus& effect, std::size_t& budget) {
     spend(budget); auto& ch = character(state, effect.entity);
     need(ch.statuses.erase(effect.source) == 1, ErrorCode::InvalidStatus, "Unknown dispel source");
     recomputeEquipment(ch, *catalog.character(ch.definition));
+    reconcileVitality(state,results,effect.entity);
     results.statuses.push_back({effect.entity, effect.source, StatusChangeKind::Dispelled});
 }
 void phase(State& state, Results& results, const Catalog& catalog, const AdvancePhase& op, std::size_t& budget) {
@@ -137,11 +142,22 @@ void phase(State& state, Results& results, const Catalog& catalog, const Advance
                 continue;
             }
             for (std::uint32_t stack = 0; stack < value.stacks; ++stack)
-                for (const auto& tick : def.tickEffects) resource(state, results, catalog, {id, tick.resource, tick.amount}, budget);
+                for (const auto& tick : def.tickEffects) {
+                    auto vital=state.vitality.find(id);
+                    if(vital==state.vitality.end()||vital->second.resource!=tick.resource)
+                        resource(state,results,catalog,{id,tick.resource,tick.amount},budget);
+                    else if(!canAct(state,id))spend(budget); // No implicit revival or finishing damage from periodic ticks.
+                    else if(tick.amount.value<0){
+                        need(tick.amount.value!=std::numeric_limits<std::int64_t>::min(),ErrorCode::Overflow,"Health tick magnitude overflow");
+                        auto amount=tick.amount;amount.value=-amount.value;
+                        applyVitalEffect(state,results,catalog,DamageEffect{id,amount},budget);
+                    }else applyVitalEffect(state,results,catalog,HealEffect{id,tick.amount},budget);
+                }
             if (--value.remaining == 0) {
                 results.statuses.push_back({id, current->first, StatusChangeKind::Expired});
                 ch.statuses.erase(current);
                 recomputeEquipment(ch, *catalog.character(ch.definition));
+                reconcileVitality(state,results,id);
             } else results.statuses.push_back({id, current->first, StatusChangeKind::Ticked});
         }
     }
@@ -153,7 +169,8 @@ void applyTacticalEffect(State& state, Results& results, const Catalog& catalog,
         using T = std::decay_t<decltype(value)>;
         if constexpr (std::is_same_v<T, ResourceEffect>) resource(state,results,catalog,value,budget);
         else if constexpr (std::is_same_v<T, ApplyStatus>) status(state,results,catalog,value,budget);
-        else dispel(state,results,catalog,value,budget);
+        else if constexpr (std::is_same_v<T, DispelStatus>) dispel(state,results,catalog,value,budget);
+        else applyVitalEffect(state,results,catalog,value,budget);
     },effect);
 }
 void Bindings::addAbilityHandler(ContentId id, AbilityHandler handler) {
@@ -219,6 +236,7 @@ void applyAbilities(State& state, Results& results, const Catalog& catalog, Sess
         else if constexpr (std::is_same_v<T, AdvancePhase>) phase(state, results, catalog, op, budget);
         else if constexpr (std::is_same_v<T, UseAbility>) {
             character(state, op.entity);
+            need(canAct(state,op.entity),ErrorCode::InvalidAction,"Incapacitated character cannot use abilities");
             const auto* def = catalog.ability(op.ability);
             need(def != nullptr, ErrorCode::MissingDefinition, "Unknown ability");
             need(op.targets.size() >= def->targets.minimum && op.targets.size() <= def->targets.maximum,
@@ -254,11 +272,11 @@ void applyAbilities(State& state, Results& results, const Catalog& catalog, Sess
                 need(value.entity == op.entity || std::binary_search(targets.begin(), targets.end(), value.entity),
                     ErrorCode::InvalidTarget, "Effect escaped caster/target set");
                 if constexpr (std::is_same_v<E, ResourceEffect>) resource(state, results, catalog, value, budget);
-                else {
+                else if constexpr (std::is_same_v<E, ApplyStatus> || std::is_same_v<E, DispelStatus>) {
                     need(sources.emplace(value.entity, value.source).second, ErrorCode::InvalidStatus, "Duplicate status source in proposal");
                     if constexpr (std::is_same_v<E, ApplyStatus>) status(state, results, catalog, value, budget);
                     else dispel(state, results, catalog, value, budget);
-                }
+                } else applyVitalEffect(state,results,catalog,value,budget);
             }, effect);
             results.abilities.push_back({op.entity, def->id});
         }

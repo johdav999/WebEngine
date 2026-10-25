@@ -14,6 +14,7 @@ int main(){try{
  c.execute(Action::Equip);check(c.state().items.begin()->second.slot.has_value(),"Equip failed");c.execute(Action::Deliver);check(c.awards()==2,"Reward missing");auto xp=c.state().characters.at(c.player()).experience;
  rejects([&]{c.execute(Action::Deliver);});check(c.state().characters.at(c.player()).experience==xp,"Duplicate reward");
  c.execute(Action::Begin);auto turn=c.state().turnEpoch;
+ check(c.state().vitality.size()==2&&r::canAct(c.state(),c.player()),"Sample vitality missing");
  check(c.state().parties.size()==1&&r::activePartyMembers(c.state(),r::ContentId("example.party"))==std::vector{c.player()},"Sample party missing");
  check(r::teamRelation(c.state(),c.state().characters.begin()->first,c.state().characters.rbegin()->first)==r::TeamRelation::Opponent,"Sample teams missing");
  auto resources=[&]{std::vector<std::int64_t> values;for(auto&[id,ch]:c.state().characters)for(auto&[key,r]:ch.resources)values.push_back(r.current);return values;};
@@ -31,6 +32,7 @@ int main(){try{
  auto corrupt=*saved;corrupt.back()^=1;rejects([&]{c.load(corrupt,c.epoch());});check(state==&c.state(),"Corrupt load published");
  c.execute(Action::Load);check(c.awards()==2&&c.state().turnEpoch==turn&&c.state().actionEpoch==action,"Load changed durable state");
  check(c.state().parties.size()==1&&c.state().encounter->teams.size()==2,"Combined save lost parties/teams");
+ check(c.state().vitality.size()==2,"Combined save lost vitality");
  c.execute(Action::EndTurn);check(c.state().turnEpoch>turn,"End turn failed");c.execute(Action::Move);c.cancelInput();tick();check(!c.reserved()&&!c.state().presentation,"Focus recovery failed");
  auto suspended=c.state().revision;app.setSuspended(true);for(int i=0;i<5;++i)tick();check(c.state().revision==suspended,"Suspension advanced gameplay");app.setSuspended(false);
  c.execute(Action::Move);for(int i=0;i<12;++i)tick();check(!c.reserved()&&!c.state().presentation,"Playback did not complete");

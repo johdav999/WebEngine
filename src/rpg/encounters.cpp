@@ -30,7 +30,7 @@ struct Driver {
         const auto& e = encounter();
         results.encounters.push_back({event,e.epoch,e.round,e.turnEpoch,entity,e.outcome,e.allowance});
     }
-    bool eligible(EntityId entity) { spend(work); return handler().eligible(context(), entity); }
+    bool eligible(EntityId entity) { spend(work); return canAct(state,entity)&&handler().eligible(context(), entity); }
     EncounterDecision decision(EncounterCheck check) {
         spend(work); auto result = handler().decide(context(), check);
         need(result.accepted && valid(result.outcome), ErrorCode::RejectedEncounter, "Encounter policy rejected transition");

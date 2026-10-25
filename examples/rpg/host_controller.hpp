@@ -35,6 +35,7 @@ class Controller {
     void initialize(){
         auto player=apply({r::CreateCharacter{r::ContentId("example.scholar")}}).created[0];
         auto partner=apply({r::CreateCharacter{r::ContentId("example.scholar")}}).created[0];
+        apply({r::ConfigureVitality{player,r::ContentId("example.reserve")},r::ConfigureVitality{partner,r::ContentId("example.reserve")}});
         apply({r::SetParty{r::ContentId("example.party"),{2,1,{{player,true,r::ControlMode::Player},{partner,false,r::ControlMode::Player}},player}}});
         auto bag=apply({r::CreateInventory{r::ContentId("example.pack"),player}}).inventories[0];
         apply({r::AddItem{bag,r::ContentId("example.blade"),1},r::AddItem{bag,r::ContentId("example.tonic"),2},

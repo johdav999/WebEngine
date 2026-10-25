@@ -38,7 +38,13 @@ inline r::EffectProposal effects(const r::AbilityContext& context, r::Random& ra
     if (delta.value < 0) delta.value -= random.uniform(3);
     const r::ContentId resource(context.definition.id == r::ContentId("example.concentrate") ? "example.focus" : "example.reserve");
     r::EffectProposal proposal;
-    for (auto target : context.targets) proposal.effects.push_back(r::ResourceEffect{target, resource, delta});
+    for (auto target : context.targets) {
+        auto vital=context.state.vitality.find(target);
+        if(vital!=context.state.vitality.end()&&vital->second.resource==resource){
+            if(delta.value<0){auto magnitude=delta;magnitude.value=-magnitude.value;proposal.effects.push_back(r::DamageEffect{target,magnitude});}
+            else proposal.effects.push_back(r::HealEffect{target,delta});
+        }else proposal.effects.push_back(r::ResourceEffect{target, resource, delta});
+    }
     return proposal;
 }
 inline std::shared_ptr<const r::Catalog> abilityCatalog(r::CatalogDefinition def = abilityDefinitions(),

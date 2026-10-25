@@ -8,7 +8,7 @@
 #include <utility>
 
 namespace engine::rpg {
-inline constexpr ModuleVersion apiVersion{1, 9, 0};
+inline constexpr ModuleVersion apiVersion{1, 10, 0};
 // API, content revision and snapshot wire version are independent.
 struct Limits {
     static constexpr std::size_t parties = 64, partyMembers = 64, teams = 16;
@@ -29,7 +29,7 @@ enum class ErrorCode {
     InvalidSession, ExhaustedIdentity, InvalidDefinition, MissingDefinition,
     InvalidAmount, Overflow, StaleCommand, InvalidSequence, Reentrant,
     MissingEntity, MissingValue, InvalidModifier, BudgetExceeded, RejectedUnlock,
-    ConsumedTransaction, MissingInventory, MissingItem, InvalidQuantity, Capacity, InvalidSlot, InvalidOwnership, IncompatibleStack, RejectedEffect, InvalidTarget, InvalidStatus, StalePhase, InvalidEncounter, StaleTurn, RejectedEncounter, InvalidSpatial, StaleWorld, InvalidAction, PresentationPending, StalePresentation, InvalidAward, DuplicateAward, InvalidSnapshot, InvalidParty, InvalidTeam
+    ConsumedTransaction, MissingInventory, MissingItem, InvalidQuantity, Capacity, InvalidSlot, InvalidOwnership, IncompatibleStack, RejectedEffect, InvalidTarget, InvalidStatus, StalePhase, InvalidEncounter, StaleTurn, RejectedEncounter, InvalidSpatial, StaleWorld, InvalidAction, PresentationPending, StalePresentation, InvalidAward, DuplicateAward, InvalidSnapshot, InvalidParty, InvalidTeam, InvalidVitality
 };
 class Error : public std::invalid_argument {
 public:
