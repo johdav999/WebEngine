@@ -70,7 +70,8 @@ acknowledgement. The example uses existing WaypointGraph navigation and host-own
 combined saves (localStorage / atomic DesktopFiles). No host dependency enters the
 RPG kernel. See [host contracts](docs/rpg-hosts.md) and [R9 evidence](docs/rpg-r9-validation.md).
 R10 adds a complete alternate standalone ruleset and the [release audit](docs/rpg-release-1.md).
-API 1.7.0 / wire 1 remain unchanged; rendered CI gates remain open.
+API 1.7.0 / wire 1 remain unchanged; L1 closes the RPG rendered CI gates with
+separate WARP/SwiftShader and Intel hardware evidence.
 Library stabilization L1 adds explicit `WEBENGINE_D3D12_WARP=1` diagnostic
 rendering for software-only Windows CI; default hardware selection remains strict.
 Adapter enumeration failures are checked before dereferencing returned interfaces.

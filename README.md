@@ -1947,3 +1947,5 @@ with [platform evidence](docs/rpg-r8-validation.md) and a sample-owned outer sav
 
 R10: [release audit and consumer guide](docs/rpg-release-1.md),
 [validation](docs/rpg-r10-validation.md), and [RPGGame adoption mapping](docs/rpg-game-adoption.md).
+L1: [release stabilization and passing RPG platform gates](docs/rpg-l1-validation.md),
+including software CI and separate Windows hardware evidence. Consumer pins remain unchanged.

@@ -86,6 +86,18 @@ Set RPG_SITE, EVIDENCE_DIR and optionally BROWSER_EXECUTABLE for a custom build.
 RPG_BACKENDS selects comma-separated backends; RPG_HARDWARE=1 uses the browser's
 hardware adapter instead of the default SwiftShader test flags. This is required
 for the validated local Edge WebGPU run. The two CI backend steps run independently.
+Linux software WebGPU requires full Chromium in a windowed Xvfb session:
+
+```sh
+npm install --no-save playwright@1.62.1 pngjs@7.0.0
+npx playwright install --with-deps chromium
+RPG_HEADED=1 RPG_BACKENDS=webgpu xvfb-run -a node scripts/rpg-host-smoke.cjs
+RPG_BACKENDS=webgl2 node scripts/rpg-host-smoke.cjs
+```
+
+The harness records adapter metadata, waits for completed GPU work and checks
+actual scene pixels. Unexpected GPU loss/validation errors fail acceptance.
+It keeps the browser GPU watchdog and a five-minute overall deadline enabled.
 
 Native `--smoke output-directory` captures D3D12 frames, drives shared commands and
 checks storage/recovery/shutdown. Use a fresh output directory for a fresh save fixture.
@@ -93,7 +105,12 @@ The smoke test injects focus, keyboard and drag events into SDL's native queue t
 exercise DesktopHost routing without taking focus from another app. It does not
 establish physical pointer/keyboard acceptance. `scripts/rpg-native-smoke.py` runs
 the executable with retained process/startup diagnostics; `scripts/rpg-check-frames.py`
-checks captured pixels. Native rendering requires a hardware D3D12 adapter; this
-engine backend deliberately has no implicit WARP fallback.
+checks captured pixels. Native rendering normally requires a hardware D3D12 adapter.
+`WEBENGINE_D3D12_WARP=1` explicitly selects software rendering for CI/diagnostics;
+there is no implicit fallback. CI also sets `WEBENGINE_D3D12_VALIDATION=1` and
+`WEBENGINE_D3D12_GPU_VALIDATION=1` to check bindings before and during execution.
+The native harness verifies the requested adapter mode and actual instanced draws.
 The `RPG rendered hosts` workflow builds both hosts and uploads evidence. Actual
-results and device/software coverage are recorded in [R9 validation](rpg-r9-validation.md).
+results and device/software coverage are recorded in [R9 validation](rpg-r9-validation.md)
+and [L1 stabilization](rpg-l1-validation.md). Software-renderer acceptance does not
+establish physical GPU coverage or sustained performance.

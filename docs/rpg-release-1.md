@@ -1,8 +1,8 @@
 # RPG release 1 handoff (R10)
 
-Status: release candidate, **not an unconditional rendered-platform release**.
+Status: **RPG release-1 scope validated by L1**; see [L1 evidence and limitations](rpg-l1-validation.md).
 API 1.7.0 and wire version 1 are unchanged. R10 adds consumer evidence and the
-adoption contract; [validation](rpg-r10-validation.md) identifies remaining gates.
+adoption contract. L1 closes R10's two rendered CI gates on source `c7db4b4`.
 
 ## Architecture audit and supported surface
 
@@ -18,7 +18,7 @@ adoption contract; [validation](rpg-r10-validation.md) identifies remaining gate
 | Quest awards once | `quests.hpp`, quest tests | Coordinator owns both kernels; campaign effects need an enclosing game transaction |
 | Canonical restore | `snapshot.hpp`, snapshot/save-game tests | Stable decision boundaries; exact catalogue and handler compatibility |
 | Two independent rulesets | `examples/rpg/rulesets.cpp`, `rpg_rulesets` | Scholar vs operator: different units, equipment, effects, initiative, AP and movement |
-| Rendered browser and Windows sample | `host_controller.hpp`, `host_scene.hpp`, host tests and R9 evidence | Local acceptance passed; hosted GPU CI remains a release gate |
+| Rendered browser and Windows sample | `host_controller.hpp`, `host_scene.hpp`, host tests and L1 evidence | CI WARP/SwiftShader and recorded Intel hardware passed; not a universal driver certification |
 | RPGGame adoption | [adoption mapping](rpg-game-adoption.md) | Planned; game pin and runtime unchanged |
 
 The independent consumer builds from its own CMake project and links only public
@@ -98,12 +98,14 @@ cannot preempt malicious compiled callbacks.
   default/RPG-off, bridge-off and missing-dependency configurations.
 - [x] Independent consumer excludes renderer/physics and dependency downloads.
 - [x] API, format, ownership, limits, migration and adoption documentation.
-- [ ] All rendered-host CI gates green on supported GPU runners. R9 local hardware
-  evidence is retained separately; it does not turn failing CI into a pass.
+- [x] Rendered-host CI gates green on WARP and SwiftShader; separate local Intel
+  hardware acceptance is recorded in L1 evidence.
 - [ ] Explicit RPGGame adoption task and validation before advancing its pin.
 
 Deferred: multiplayer/replication, real-time combat, crafting/economy, dialogue
 editors, procedural campaigns, full RPG editor, continuous physics combat,
 physical mobile acceptance, sustained performance and real driver-reset coverage.
 The neutral sample has primitive visuals and manually controlled actors; it does
-not implement The Shattered Sea. No release tag is warranted while gates remain.
+not implement The Shattered Sea. Consumer adoption remains separate from library
+release readiness. The pre-existing general-engine vehicle/spotlight failures are
+documented in L1; this is not a claim that every engine test or GPU is certified.

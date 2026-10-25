@@ -4,7 +4,7 @@ R10 prepares this plan; it does not advance RPGGame's engine submodule at
 `56080eca124c9a62e15b146799a8004bdad5a9b2`. The game remains a Windows 3D,
 third-person, turn-based RPG. Browser samples validate the engine, not a new game
 platform. Resolve the published candidate and its evidence in
-[R10 validation](rpg-r10-validation.md) before a separately authorized upgrade.
+[L1 validation](rpg-l1-validation.md) before a separately authorized upgrade.
 
 | Composition | RPGGame owner |
 | --- | --- |

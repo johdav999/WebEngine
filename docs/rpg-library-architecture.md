@@ -3,7 +3,7 @@
 Status: release architecture with R1 foundation, R2 characters/transactions,
 R3 inventory/equipment, R4 abilities/statuses/RNG, R5 encounters, R6 tactical actions,
 R7 quest bridge, R8 snapshots/restore, R9 shared sample hosts and R10 release handoff implemented.
-Release remains conditional on the [open acceptance gates](rpg-release-1.md). Created
+L1 closes the [RPG acceptance gates](rpg-l1-validation.md); consumer adoption remains separate. Created
 2026-10-25 against WebEngine `56080eca124c9a62e15b146799a8004bdad5a9b2`.
 The delivered subset is documented in [rpg.md](rpg.md): optional RPG target,
 identities, metadata bindings/catalogue and runtime ownership, plus
@@ -310,6 +310,7 @@ procedural campaigns and a full RPG editor from release 1.
 ## Engine-skill synchronization handoff
 
 R10 synchronizes available installed and game-local skill copies with the
-release handoff, API 1.7.0 / wire 1 and the conditional rendered acceptance gate.
-See [R10 evidence](rpg-r10-validation.md). Consumer pins must still be checked;
-RPGGame has not adopted this release candidate.
+release handoff, API 1.7.0 / wire 1 and the rendered acceptance contract. L1 updates
+the copies for validated software CI and separate hardware evidence.
+See [L1 evidence](rpg-l1-validation.md). Consumer pins must still be checked;
+RPGGame has not adopted this library release.
