@@ -1,4 +1,4 @@
-# Optional RPG library (R1-R6)
+# Optional RPG library (R1-R7)
 
 R1 implements `engine_rpg` / `WebEngine::RPG`: a standard-C++20 static library
 depending only on [Modules](modules.md). It supplies typed identities, validated
@@ -8,7 +8,8 @@ R3 adds [inventory, durable items and equipment transactions](rpg-inventory.md).
 R4 adds [abilities, statuses and deterministic randomness](rpg-abilities.md).
 R5 adds [encounters, initiative, turn allowances and cooldowns](rpg-encounters.md).
 R6 adds [tactical actions, spatial quotes, reactions and presentation gates](rpg-tactics.md).
-Quest bridge, full snapshots, scene integration, scheduler and renderer
+R7 adds the separately optional [quest bridge and award ledger](rpg-quests.md).
+Full snapshots, scene integration, scheduler and renderer
 remain outside the delivered library. Those remain later milestones
 in the [architecture](rpg-library-architecture.md) and
 [release prompts](rpg-library-release-1-prompts.md).
@@ -41,8 +42,8 @@ target_link_libraries(my_game PRIVATE WebEngine::RPG)
 
 Root builds include the same optional `rpg/` subdirectory through `cmake/rpg.cmake`.
 All four RPG options default OFF. `WEBENGINE_BUILD_RPG=ON` requires the existing
-Modules target. Tests require RPG enabled. `WEBENGINE_BUILD_RPG_QUESTS=ON` and
-`WEBENGINE_BUILD_RPG_DEMO=ON` fail clearly because R7/R9 are not implemented.
+Modules target. Tests require RPG enabled. `WEBENGINE_BUILD_RPG_QUESTS=ON` additionally requires the existing Quests target.
+`WEBENGINE_BUILD_RPG_DEMO=ON` still fails clearly because R9 is not implemented.
 Omitting RPG creates no RPG target/test and has no effect on other libraries.
 This is source/CMake composition with one compatible toolchain, not a binary ABI.
 
@@ -55,7 +56,7 @@ Headers are `engine/rpg/types.hpp`, `bindings.hpp`, `catalog.hpp` and `runtime.h
   underscore or hyphen within nonempty segments. Leading/trailing/repeated dots,
   uppercase, whitespace and non-ASCII bytes reject.
 - `ContentRevision` is an explicitly constructed positive uint64 selected by the
-  application. It is independent of `apiVersion` (currently 1.5.0).
+  application. It is independent of `apiVersion` (currently 1.6.0).
 - `SessionId` is a nonzero uint64 durable namespace chosen by the host. The host
   must ensure uniqueness between distinct persistent sessions. No global ID
   registry, random namespace generator or save restore is supplied.

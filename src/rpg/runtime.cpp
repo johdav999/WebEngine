@@ -137,7 +137,16 @@ Transaction Runtime::prepare(const Command& command, Budget budget, std::optiona
     for (const auto& operation : command.operations_) {
       std::visit([&](const auto& op) {
         using T = std::decay_t<decltype(op)>;
-        if constexpr (std::is_same_v<T, TacticalAction>) {
+        if constexpr (std::is_same_v<T, RecordAward>) {
+            const auto& award = op.award;
+            if (award.id.receipt.empty() || award.id.receipt.size() > Limits::receiptBytes ||
+                !std::all_of(award.id.receipt.begin(),award.id.receipt.end(),[](unsigned char c){return c >= 33 && c <= 126;}) ||
+                (award.disposition != AwardDisposition::Granted && award.disposition != AwardDisposition::ReplaySuppressed))
+                throw Error(ErrorCode::InvalidAward, "Invalid award receipt/disposition");
+            if (candidate->awards.contains(award.id)) throw Error(ErrorCode::DuplicateAward, "Award already recorded");
+            if (candidate->awards.size() >= Limits::awards) throw Error(ErrorCode::Limit, "Award ledger is full");
+            candidate->awards.emplace(award.id,award.disposition); results.awards.push_back(award);
+        } else if constexpr (std::is_same_v<T, TacticalAction>) {
             const auto& quote = op.spatial;
             if (!quote || quote->owner_ != owner_ || quote->generation_ != state_->generation ||
                 quote->revision_ != state_->revision || quote->actor_ != op.actor ||
@@ -265,11 +274,11 @@ Transaction Runtime::prepare(const Command& command, Budget budget, std::optiona
       // Lifecycle operations reconcile internally; other mutations check outcomes and active eligibility.
       if (!std::holds_alternative<BeginEncounter>(operation) && !std::holds_alternative<EndTurn>(operation) &&
           !std::holds_alternative<FinishEncounter>(operation) && !std::holds_alternative<ExitEncounter>(operation) &&
-          !std::holds_alternative<TacticalAction>(operation) && !std::holds_alternative<AcknowledgePresentation>(operation))
+          !std::holds_alternative<TacticalAction>(operation) && !std::holds_alternative<AcknowledgePresentation>(operation) && !std::holds_alternative<RecordAward>(operation))
           reconcileEncounter(*candidate, results, *catalog_, session_, effects, draws, work);
     }
     if (results.created.size() + results.advancements.size() + results.inventories.size() + results.items.size() +
-        results.resources.size() + results.statuses.size() + results.abilities.size() + results.encounters.size() + results.cooldowns.size() + results.actions.size() + results.reactions.size() + results.presentations.size() > Limits::results)
+        results.resources.size() + results.statuses.size() + results.abilities.size() + results.encounters.size() + results.cooldowns.size() + results.actions.size() + results.reactions.size() + results.presentations.size() + results.awards.size() > Limits::results)
         throw Error(ErrorCode::Limit, "Result record limit exceeded");
     candidate->producers.insert_or_assign(command.producer_, command.sequence_);
     transaction.state_ = std::move(candidate);

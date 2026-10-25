@@ -4,6 +4,9 @@
 #include "engine/rpg/encounters.hpp"
 
 namespace engine::rpg {
+struct AwardId { ContentId source; std::string receipt; auto operator<=>(const AwardId&) const = default; };
+enum class AwardDisposition { Granted, ReplaySuppressed };
+struct AwardRecord { AwardId id; AwardDisposition disposition = AwardDisposition::Granted; };
 // Read-only through Runtime/Transaction. This is NOT a wire/save schema.
 struct State {
     std::uint64_t generation = 1, revision = 0, nextEntity = 1;
@@ -18,6 +21,7 @@ struct State {
     std::optional<EncounterState> encounter;
     std::map<EntityId, TacticalPosition> positions;
     std::uint64_t actionEpoch = 0;
+    std::map<AwardId, AwardDisposition> awards;
     std::optional<PendingPresentation> presentation;
     std::map<EntityId, std::map<ContentId, CooldownState>> cooldowns;
 };
@@ -39,5 +43,6 @@ struct Results {
     std::vector<TacticalResult> actions;
     std::vector<ReactionResult> reactions;
     std::vector<PresentationResult> presentations;
+    std::vector<AwardRecord> awards;
 };
 } // namespace engine::rpg

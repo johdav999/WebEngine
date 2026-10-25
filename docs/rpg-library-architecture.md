@@ -1,7 +1,7 @@
 # Optional RPG library: release 1 architecture
 
 Status: release architecture with R1 foundation, R2 characters/transactions,
-R3 inventory/equipment, R4 abilities/statuses/RNG R5 encounters and R6 tactical actions implemented. Created
+R3 inventory/equipment, R4 abilities/statuses/RNG R5 encounters R6 tactical actions and R7 quest bridge implemented. Created
 2026-10-25 against WebEngine `56080eca124c9a62e15b146799a8004bdad5a9b2`.
 The delivered subset is documented in [rpg.md](rpg.md): optional RPG target,
 identities, metadata bindings/catalogue and runtime ownership, plus
@@ -10,7 +10,8 @@ identities, metadata bindings/catalogue and runtime ownership, plus
 [R4 abilities, statuses and candidate randomness](rpg-abilities.md) are delivered.
 [R5 encounters, initiative, allowances and cooldown phases](rpg-encounters.md) are delivered.
 [R6 tactical actions, spatial quotes, reactions and presentation gates](rpg-tactics.md)
-are delivered. Quest bridge, full snapshots and rendered hosts below remain proposed.
+are delivered. [R7 coordinated quest rewards](rpg-quests.md) are implemented.
+Full snapshots and rendered hosts below remain proposed.
 Use [validation](rpg-validation.md) for actual evidence. Existing
 [Modules](modules.md), [Quests](quests.md), [SDK composition](module-sdk.md),
 [Application](application-lifecycle.md) and [host contracts](consumer-hosts.md)
@@ -127,9 +128,10 @@ Avoid arbitrary expression graphs or multiplication chains in the first release.
 ## Transaction and extension contract
 
 Proposed flow is `prepare(command, context, budget)` then `commit(candidate)`.
-R2-R6 deliver prepare/commit for character, inventory/equipment, abilities, statuses,
+R2-R7 deliver prepare/commit for character, inventory/equipment, abilities, statuses,
 candidate RNG, encounter lifecycle, cooldowns, tactical actions, immutable spatial
-quotes and reactions. Quest/snapshot/host integration below remains future work.
+quotes, reactions and coordinated quest rewards/receipts. Snapshot/host integration
+below remains future work.
 
 1. Check command owner/generation/revision/turn and producer sequence.
 2. Resolve definitions and targets against one immutable snapshot and world stamp.
@@ -205,6 +207,9 @@ safe route/destination, reject before commit. Continuous physics-controlled comb
 movement with partial refunds/replans is explicitly beyond release 1.
 
 ## Quest coordination and progression
+
+R7 now implements the private-runtime coordinator and proves sequential no-throw
+publication in [rpg-quests.md](rpg-quests.md). Combined restore remains R8.
 
 Reuse Quests for objectives, stages, facts, events and completion receipts. The
 bridge projects explicit RPG facts and maps typed quest effects to staged RPG

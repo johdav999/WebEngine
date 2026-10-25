@@ -8,7 +8,8 @@ R1 is implemented as documented in [rpg.md](rpg.md) with evidence in
 with [R3 evidence](rpg-r3-validation.md). R4 adds [abilities/statuses/RNG](rpg-abilities.md),
 with [R4 evidence](rpg-r4-validation.md). R5 adds [encounter lifecycle and turn budgets](rpg-encounters.md),
 with [R5 evidence](rpg-r5-validation.md). R6 adds [tactical actions and spatial/reaction contracts](rpg-tactics.md),
-with [R6 evidence](rpg-r6-validation.md). Prompts 7-10 remain the sequential backlog.
+with [R6 evidence](rpg-r6-validation.md). R7 adds [coordinated quest rewards](rpg-quests.md),
+with [R7 evidence](rpg-r7-validation.md). Prompts 8-10 remain the sequential backlog.
 The original prompt text below is retained as the milestone acceptance scope.
 Run each prompt as a separate task in WebEngine; prompts 2-10 depend on the
 preceding delivered milestones. Keep working changes isolated and preserve other

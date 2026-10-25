@@ -6,6 +6,9 @@ if(NOT EXISTS "${WEBENGINE_SOURCE_DIR}/rpg/CMakeLists.txt")
   message(FATAL_ERROR "Set WEBENGINE_SOURCE_DIR to a WebEngine checkout with rpg/")
 endif()
 add_subdirectory("${WEBENGINE_SOURCE_DIR}/modules" engine-modules)
+if(WEBENGINE_BUILD_QUESTS)
+  add_subdirectory("${WEBENGINE_SOURCE_DIR}/quests" engine-quests)
+endif()
 add_subdirectory("${WEBENGINE_SOURCE_DIR}/rpg" engine-rpg)
 if(TARGET WebEngine::RPG)
   add_executable(rpg_consumer consumer.cpp)
@@ -37,9 +40,23 @@ if(WEBENGINE_BUILD_RPG_TESTS)
     "-DTOOLCHAIN=${CMAKE_TOOLCHAIN_FILE}"
     -P "${WEBENGINE_SOURCE_DIR}/tests/rpg_cmake_contract.cmake")
   set_tests_properties(rpg_cmake_contract PROPERTIES TIMEOUT 180)
+  add_test(NAME rpg_bridge_off COMMAND "${CMAKE_COMMAND}"
+    "-DENGINE_SOURCE=${WEBENGINE_SOURCE_DIR}"
+    "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/bridge-off-tests"
+    "-DGENERATOR=${CMAKE_GENERATOR}" "-DPLATFORM=${CMAKE_GENERATOR_PLATFORM}"
+    "-DTOOLCHAIN=${CMAKE_TOOLCHAIN_FILE}" -DONLY_BRIDGE_OFF=ON
+    -P "${WEBENGINE_SOURCE_DIR}/tests/rpg_cmake_contract.cmake")
+  # This test compiles the complete base RPG library, unlike the disabled-consumer matrix.
+  set_tests_properties(rpg_bridge_off PROPERTIES TIMEOUT 300)
 endif()
-# Structural check: this consumer may configure only these two engine libraries.
-foreach(forbidden engine_core engine_quests Jolt engine_desktop engine_gui)
+# Structural check: only portable Modules/RPG and explicitly selected Quests are allowed.
+if(NOT WEBENGINE_BUILD_RPG_QUESTS AND TARGET engine_rpg_quests)
+  message(FATAL_ERROR "Disabled bridge leaked a target")
+endif()
+if(NOT WEBENGINE_BUILD_QUESTS AND TARGET engine_quests)
+  message(FATAL_ERROR "Base RPG unexpectedly configured Quests")
+endif()
+foreach(forbidden engine_core Jolt engine_desktop engine_gui)
   if(TARGET ${forbidden})
     message(FATAL_ERROR "Standalone RPG consumer configured forbidden target: ${forbidden}")
   endif()

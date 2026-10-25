@@ -4,6 +4,7 @@
 #include <variant>
 
 namespace engine::rpg {
+struct RecordAward { AwardRecord award; };
 struct CreateCharacter { ContentId definition; };
 struct SetAttributeBase { EntityId entity; ContentId attribute; Amount amount; };
 struct AdjustResource { EntityId entity; ContentId resource; Amount delta; };
@@ -12,7 +13,7 @@ struct RemoveModifiers { EntityId entity; ContentId source; };
 struct AddExperience { EntityId entity; Amount amount; };
 using Operation = std::variant<CreateCharacter, SetAttributeBase, AdjustResource,
                                SetModifiers, RemoveModifiers, AddExperience, CreateInventory, AddItem, RemoveItem,
-                               SplitItem, MergeItems, TransferItem, EquipItem, UnequipItem, UseAbility, ApplyStatus, DispelStatus, AdvancePhase, BeginEncounter, EndTurn, FinishEncounter, ExitEncounter, SetCooldown, SetTacticalPosition, TacticalAction, AcknowledgePresentation>;
+                               SplitItem, MergeItems, TransferItem, EquipItem, UnequipItem, UseAbility, ApplyStatus, DispelStatus, AdvancePhase, BeginEncounter, EndTurn, FinishEncounter, ExitEncounter, SetCooldown, SetTacticalPosition, TacticalAction, AcknowledgePresentation, RecordAward>;
 struct Budget { std::size_t operations = 256, advancements = 256, effects = 256, randomDraws = 4096, encounterWork = 4096, reactions = 256, reactionDepth = 8; };
 class Command {
 public:

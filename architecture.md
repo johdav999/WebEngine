@@ -6,7 +6,7 @@ WebEngine is a C++20 engine for games running in desktop and mobile browsers thr
 
 This document describes the implementation inspected on 2026-10-10 and the architectural boundaries for future work. The current architecture sections describe existing code. The evolution table describes intended additions and extensions, not delivered functionality. Keep these sections current when implementations change; source code and focused validation establish actual capability.
 
-## Optional RPG library R1-R6 and release plan (2026-10-25)
+## Optional RPG library R1-R7 and release plan (2026-10-25)
 
 `engine_rpg` / `WebEngine::RPG` now implements the optional standard-C++20 foundation
 above Modules: explicit content/session/entity identities, bounded metadata
@@ -17,7 +17,7 @@ does not replace existing published state. Runtime identity allocation creates n
 scene entity and owns no clock, renderer, physics, IO or gameplay scheduler.
 
 The root and standalone builds share `rpg/`. RPG and its tests default off;
-missing Modules and undelivered quest/demo options fail explicitly. The external
+missing Modules/bridge dependencies and the undelivered demo option fail explicitly. The external
 `examples/rpg` consumer configures no engine core or platform dependencies. Native
 Windows/Linux and pinned Emscripten/Node contract/configuration tests are provided.
 See [delivered API](docs/rpg.md) and [actual evidence](docs/rpg-validation.md).
@@ -51,7 +51,13 @@ Commit rechecks the host-supplied world stamp without callbacks. A pending
 presentation blocks input until a matching acknowledgement; acknowledgement only
 unlocks, never replays gameplay. Host route reservations/frozen writers are an
 explicit R9 integration obligation. See [R6 contracts](docs/rpg-tactics.md) and
-[evidence](docs/rpg-r6-validation.md). Full snapshots, RPGQuests and
+[evidence](docs/rpg-r6-validation.md). R7 adds the optional RPGQuests target above
+RPG and Quests, keeping their registries distinct. A private owner-thread coordinator
+prepares quest progress, typed reward operations and bounded award receipts,
+preflights both kernels and publishes without callbacks/interleaving. Failed rewards
+preserve the quest queue. Replay records suppression without granting rewards. See
+[R7 contracts and publication proof](docs/rpg-quests.md) and [evidence](docs/rpg-r7-validation.md).
+Full snapshots and
 rendered browser/Windows samples remain future work. Third-person
 camera policy, Lattice abilities, balance, factions and campaign/world state stay
 in RPGGame. Existing engine core, Quests and hosts never depend on RPG.
