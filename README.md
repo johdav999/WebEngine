@@ -1908,13 +1908,16 @@ The [compiled module SDK handoff](docs/module-sdk.md) covers reusable non-quest
 plugins, an independent custom quest-binding consumer, native/Wasm CTest and
 feature-omission builds. These consumers configure without renderer downloads.
 
-## Planned optional RPG library
+## Optional RPG foundation
 
-The [RPG release-1 architecture](docs/rpg-library-architecture.md) separates generic
-character, inventory, ability, turn-based encounter and snapshot mechanisms from
-game-specific rules and content. It builds on the existing Modules/Quests pattern,
-with standalone portable consumers and browser/Windows integration gates.
-`WebEngine::RPG` and `WebEngine::RPGQuests` are proposed, not delivered targets.
-Use the [ten sequential implementation prompts](docs/rpg-library-release-1-prompts.md)
-to implement the first release. RPGGame owns The Shattered Sea's Lattice rules,
-balance, world, story, third-person camera and presentation.
+`WebEngine::RPG` provides the portable R1 foundation: typed IDs, validated catalogue
+metadata, immutable module bindings and independent session ownership. It depends
+only on Modules and C++20, and defaults off. The
+[standalone consumer](examples/rpg/README.md) builds without core/renderer/physics
+downloads on native Windows/Linux and Wasm. See [API and ownership](docs/rpg.md)
+and [validation evidence](docs/rpg-validation.md).
+
+Characters, inventory, abilities, turn-based encounters, snapshots, RPGQuests and
+rendered hosts remain in the [release architecture](docs/rpg-library-architecture.md)
+and [ten implementation prompts](docs/rpg-library-release-1-prompts.md). RPGGame
+owns The Shattered Sea's rules, balance, world, story and third-person presentation.

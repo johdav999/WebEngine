@@ -6,25 +6,28 @@ WebEngine is a C++20 engine for games running in desktop and mobile browsers thr
 
 This document describes the implementation inspected on 2026-10-10 and the architectural boundaries for future work. The current architecture sections describe existing code. The evolution table describes intended additions and extensions, not delivered functionality. Keep these sections current when implementations change; source code and focused validation establish actual capability.
 
-## Planned optional RPG library (2026-10-25)
+## Optional RPG foundation R1 and release plan (2026-10-25)
 
-The [RPG library architecture](docs/rpg-library-architecture.md) proposes
-`engine_rpg` / `WebEngine::RPG`, a standard-C++20 library above Modules, plus a
-separately optional `WebEngine::RPGQuests` bridge to the existing quest kernel.
-It follows the puzzle-game module extraction: reusable mechanisms in optional
-libraries, authored game rules/content and host policy in consumers. No RPG target
-or API is implemented by this architecture change.
+`engine_rpg` / `WebEngine::RPG` now implements the optional standard-C++20 foundation
+above Modules: explicit content/session/entity identities, bounded metadata
+catalogues, typed definition validators and independent application-owned runtimes.
+Immutable catalogues retain module snapshots/providers; registry callbacks are
+destroyed before provider captures. Composition or catalogue validation failure
+does not replace existing published state. Runtime identity allocation creates no
+scene entity and owns no clock, renderer, physics, IO or gameplay scheduler.
 
-Release 1 covers character/resources, progression, inventory/equipment, bounded
-ability/status transactions, turn-based encounters and canonical snapshots.
-Immutable catalogues retain providers; application-owned runtimes own state;
-owner-thread preparation and no-throw publication preserve rejected state/RNG.
-Scene, physics, renderer and platform ownership stay outside the kernel. Browser
-and native Windows samples and standalone native/Wasm consumers are release gates.
-Third-person camera policy, Lattice abilities, factions and world/campaign state
-remain in RPGGame. The [ten implementation prompts](docs/rpg-library-release-1-prompts.md)
-define the sequential delivery and validation plan. Existing Quests, engine core
-and host targets gain no dependency on RPG.
+The root and standalone builds share `rpg/`. RPG and its tests default off;
+missing Modules and undelivered quest/demo options fail explicitly. The external
+`examples/rpg` consumer configures no engine core or platform dependencies. Native
+Windows/Linux and pinned Emscripten/Node contract/configuration tests are provided.
+See [delivered API](docs/rpg.md) and [actual evidence](docs/rpg-validation.md).
+
+The [full architecture](docs/rpg-library-architecture.md) and
+[ten prompts](docs/rpg-library-release-1-prompts.md) remain the release roadmap.
+Characters, progression, inventory, effects, encounters, transactions, RNG, snapshots,
+RPGQuests and rendered browser/Windows samples are not delivered in R1. Third-person
+camera policy, Lattice abilities, balance, factions and campaign/world state stay
+in RPGGame. Existing engine core, Quests and hosts never depend on RPG.
 
 ## Current architecture
 

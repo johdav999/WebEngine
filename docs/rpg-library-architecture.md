@@ -1,8 +1,11 @@
 # Optional RPG library: release 1 architecture
 
-Status: proposed implementation architecture, not a delivered API. Created
+Status: release architecture with R1 foundation implemented. Created
 2026-10-25 against WebEngine `56080eca124c9a62e15b146799a8004bdad5a9b2`.
-All RPG target names, types and build options below are proposed. Existing
+The delivered subset is documented in [rpg.md](rpg.md): optional RPG target,
+identities, metadata bindings/catalogue and runtime ownership. Gameplay,
+transactions, quest bridge, serialization and hosts below remain proposed.
+Use [validation](rpg-validation.md) for actual evidence. Existing
 [Modules](modules.md), [Quests](quests.md), [SDK composition](module-sdk.md),
 [Application](application-lifecycle.md) and [host contracts](consumer-hosts.md)
 remain authoritative for delivered functionality. Implement using the
@@ -293,8 +296,8 @@ task. No skill copy was created or replaced. When those existing copies are
 available, merge this navigation entry into SKILL.md and its architecture reference:
 
 > RPG library planning: read docs/rpg-library-architecture.md and
-> docs/rpg-library-release-1-prompts.md. RPG/RPGQuests targets and APIs are proposed,
-> not delivered. Reuse Modules/Quests; keep portable RPG mechanisms optional and
+> docs/rpg-library-release-1-prompts.md. Read docs/rpg.md for the delivered R1
+> RPG foundation; RPGQuests and gameplay APIs remain planned. Reuse Modules/Quests; keep portable RPG mechanisms optional and
 > keep game definitions, Lattice rules, presentation and save policy in consumers.
 > Require native Windows and browser evidence before claiming release support.
 

@@ -1,7 +1,9 @@
 # RPG library release 1: ten implementation prompts
 
 These prompts implement [the RPG library architecture](rpg-library-architecture.md).
-They are a sequential backlog, not work completed by the architecture change.
+R1 is implemented as documented in [rpg.md](rpg.md) with evidence in
+[rpg-validation.md](rpg-validation.md). Prompts 2-10 remain the sequential backlog.
+The original prompt text below is retained as the milestone acceptance scope.
 Run each prompt as a separate task in WebEngine; prompts 2-10 depend on the
 preceding delivered milestones. Keep working changes isolated and preserve other
 work. Do not implement later milestones to conceal a missing prerequisite.
