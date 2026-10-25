@@ -18,6 +18,7 @@ jobs:
       - name: D3D12 rendered smoke
         env:
           WEBENGINE_D3D12_WARP: '1'
+          WEBENGINE_D3D12_VALIDATION: '1'
         run: python scripts/rpg-native-smoke.py build/rpg-host/Release/rpg_demo_windows.exe build/evidence/rpg-d3d12
       - name: Native diagnostics
         if: always()
@@ -49,6 +50,8 @@ jobs:
           cmake --build build/rpg-host --target rpg_demo rpg_host_tests --parallel 4
           ctest --test-dir build/rpg-host -R rpg_host --output-on-failure
       - name: WebGPU input and pixel acceptance
+        env:
+          DEBUG: 'pw:browser'
         run: |
           npm install --no-save playwright@1.62.1 pngjs@7.0.0
           npx playwright install --with-deps chromium
