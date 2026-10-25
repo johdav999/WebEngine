@@ -32,8 +32,10 @@ int main(int argc,char**argv){try{
     controller.start();host.gui().setFont(GuiFont::loadTrustedTrueType(files.readAsset("fonts/NotoSans-Regular.ttf"),16));
     auto&panel=host.gui().root().add<Panel>();panel.setPosition({14,14});panel.setSize({280,710});panel.setPadding(10);panel.setLayout(VerticalLayout{4});
     auto&title=panel.add<TextLabel>("Training Court");title.setSize({260,28});auto&status=panel.add<TextLabel>();status.setSize({260,70});auto&message=panel.add<TextLabel>();message.setSize({260,44});
-    for(int i=0;i<12;++i){auto&button=panel.add<Button>(actionNames[i]);button.setSize({260,34});button.onClick([&,i]{controller.enqueue(Action(i));});}
+    for(int row=0;row<6;++row){auto&line=panel.add<Panel>();line.setSize({260,34});line.setLayout(HorizontalLayout{8});
+        for(int column=0;column<2;++column){int i=row*2+column;auto&button=line.add<Button>(actionNames[i]);button.setSize({126,34});button.onClick([&,i]{controller.enqueue(Action(i));});}}
     auto callbacks=controller.callbacks();auto present=callbacks.present;callbacks.present=[&](Scene&s,const ApplicationFrame&f){present(s,f);auto&e=controller.state().encounter;
+        panel.setSize({280,std::max(420.f,host.size().height-28)});
         status.setText("XP "+std::to_string(controller.state().characters.at(controller.player()).experience)+" | Stacks "+std::to_string(controller.state().items.size())+"\nTurn "+std::to_string(controller.state().turnEpoch)+" | AP "+std::to_string(e?e->allowance.ap:0)+(controller.paused()?" | Paused":""));message.setText(controller.message);};
     bool readyBefore=false;
     auto step=[&](){auto size=host.size();controller.aspect(size.width/std::max(1.f,size.height));bool ready=host.diagnostics().ready;if(readyBefore&&!ready)controller.cancelInput();readyBefore=ready;controller.drain();return host.step(callbacks);};
@@ -53,6 +55,9 @@ int main(int argc,char**argv){try{
     EnumWindows([](HWND candidate,LPARAM data)->BOOL{DWORD process=0;GetWindowThreadProcessId(candidate,&process);wchar_t title[128]{};GetWindowTextW(candidate,title,128);
         if(process==GetCurrentProcessId()&&std::wstring_view(title)==L"RPG - Training Court"){*reinterpret_cast<HWND*>(data)=candidate;return FALSE;}return TRUE;},reinterpret_cast<LPARAM>(&window));
     require(window!=nullptr,"Native sample window missing");
+    // Hidden smoke windows have no OS keyboard focus. Inject the focus event into
+    // this window's queue without taking focus from the user's foreground app.
+    require(PostMessageW(window,WM_SETFOCUS,0,0)!=0,"Native focus event failed");tick();
     auto key=[&](WPARAM value){auto scan=MapVirtualKeyW(static_cast<UINT>(value),MAPVK_VK_TO_VSC);auto down=LPARAM(1)|(LPARAM(scan)<<16);
         require(PostMessageW(window,WM_KEYDOWN,value,down)!=0,"Native key down failed");
         require(PostMessageW(window,WM_KEYUP,value,down|LPARAM(0xc0000000u))!=0,"Native key up failed");};

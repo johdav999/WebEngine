@@ -40,16 +40,20 @@ jobs:
           .tools/emsdk/emsdk install "$(cat .emscripten-version)"
           .tools/emsdk/emsdk activate "$(cat .emscripten-version)"
       - name: Build shared tests and browser host
+        id: browser-build
         run: |
           source .tools/emsdk/emsdk_env.sh
           emcmake cmake -S . -B build/rpg-host -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DWEBENGINE_BUILD_RPG=ON -DWEBENGINE_BUILD_QUESTS=ON -DWEBENGINE_BUILD_RPG_QUESTS=ON -DWEBENGINE_BUILD_RPG_DEMO=ON
           cmake --build build/rpg-host --target rpg_demo rpg_host_tests --parallel 4
           ctest --test-dir build/rpg-host -R rpg_host --output-on-failure
-      - name: Browser input and pixel acceptance
+      - name: WebGPU input and pixel acceptance
         run: |
           npm install --no-save playwright@1.62.1 pngjs@7.0.0
           npx playwright install --with-deps chromium
-          node scripts/rpg-host-smoke.cjs
+          RPG_BACKENDS=webgpu EVIDENCE_DIR=build/evidence/rpg-host/webgpu node scripts/rpg-host-smoke.cjs
+      - name: WebGL2 input and pixel acceptance
+        if: always() && steps.browser-build.outcome == 'success'
+        run: RPG_BACKENDS=webgl2 EVIDENCE_DIR=build/evidence/rpg-host/webgl2 node scripts/rpg-host-smoke.cjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
