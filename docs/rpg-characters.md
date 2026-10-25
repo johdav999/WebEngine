@@ -1,5 +1,8 @@
 # RPG R2: characters and transactions
 
+Current release status: [R10 handoff](rpg-release-1.md), API 1.7.0 / wire 1.
+Milestone-specific “future” statements below describe that milestone’s original scope.
+
 R2 extends the optional `WebEngine::RPG` library with immutable character/resource/
 progression definitions, session-owned character state, modifiers, XP advancement
 and a shared command transaction boundary. R2 introduced API 1.1.0; R3 extends it

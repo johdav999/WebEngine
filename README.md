@@ -1919,7 +1919,7 @@ and [validation evidence](docs/rpg-validation.md).
 
 R2 adds [characters, resources, modifiers, progression and atomic transactions](docs/rpg-characters.md),
 with [native/Wasm validation](docs/rpg-r2-validation.md).
-Turn-based encounters, snapshots and optional RPGQuests are delivered; rendered hosts remain in the [release architecture](docs/rpg-library-architecture.md)
+Turn-based encounters, snapshots and optional RPGQuests are delivered; [rendered hosts](docs/rpg-hosts.md) are delivered with [explicit acceptance limits](docs/rpg-r9-validation.md). See the [release architecture](docs/rpg-library-architecture.md)
 and [ten implementation prompts](docs/rpg-library-release-1-prompts.md). RPGGame
 owns The Shattered Sea's rules, balance, world, story and third-person presentation.
 
@@ -1944,3 +1944,6 @@ RPG R7: optional [quest bridge, award ledger and publication proof](docs/rpg-que
 [Windows/Linux/Wasm evidence](docs/rpg-r7-validation.md). Base RPG remains independent
 of Quests. R8 adds [canonical snapshots and coordinated restore](docs/rpg-snapshots.md),
 with [platform evidence](docs/rpg-r8-validation.md) and a sample-owned outer save envelope.
+
+R10: [release audit and consumer guide](docs/rpg-release-1.md),
+[validation](docs/rpg-r10-validation.md), and [RPGGame adoption mapping](docs/rpg-game-adoption.md).

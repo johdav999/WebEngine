@@ -15,6 +15,13 @@ jobs:
         run: cmake -S examples/rpg -B build/rpg-sdk -DWEBENGINE_SOURCE_DIR="${{ github.workspace }}" -DWEBENGINE_BUILD_RPG=ON -DWEBENGINE_BUILD_RPG_TESTS=ON -DWEBENGINE_BUILD_MODULE_TESTS=ON -DWEBENGINE_BUILD_QUESTS=ON -DWEBENGINE_BUILD_QUEST_TESTS=ON -DWEBENGINE_BUILD_RPG_QUESTS=ON
       - run: cmake --build build/rpg-sdk --config Release --parallel 2
       - run: ctest --test-dir build/rpg-sdk -C Release --output-on-failure
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rpg-library-${{ matrix.os }}
+          path: |
+            build/rpg-sdk/Testing/Temporary/LastTest.log
+            build/rpg-sdk/CMakeCache.txt
   wasm:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -28,6 +35,15 @@ jobs:
       - name: Configure, build and test standalone Wasm and omission matrix
         run: |
           source .tools/emsdk/emsdk_env.sh
+          emcc --version
+          node --version
           emcmake cmake -S examples/rpg -B build/rpg-sdk -G Ninja -DCMAKE_BUILD_TYPE=Release -DWEBENGINE_SOURCE_DIR="$PWD" -DWEBENGINE_BUILD_RPG=ON -DWEBENGINE_BUILD_RPG_TESTS=ON -DWEBENGINE_BUILD_MODULE_TESTS=ON -DWEBENGINE_BUILD_QUESTS=ON -DWEBENGINE_BUILD_QUEST_TESTS=ON -DWEBENGINE_BUILD_RPG_QUESTS=ON
           cmake --build build/rpg-sdk --parallel 2
           ctest --test-dir build/rpg-sdk --output-on-failure
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rpg-library-wasm
+          path: |
+            build/rpg-sdk/Testing/Temporary/LastTest.log
+            build/rpg-sdk/CMakeCache.txt

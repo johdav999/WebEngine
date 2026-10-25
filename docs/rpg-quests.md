@@ -1,5 +1,8 @@
 # Optional RPG quest bridge (R7)
 
+Current release status: [R10 handoff](rpg-release-1.md), API 1.7.0 / wire 1.
+Milestone-specific “future” statements below describe that milestone’s original scope.
+
 API 1.6.0 adds `engine_rpg_quests` / `WebEngine::RPGQuests`, depending on the
 existing `WebEngine::RPG` and `WebEngine::Quests` targets. It supplies coordinated
 quest progress, RPG rewards and award receipts. It does not add a quest evaluator,

@@ -6,7 +6,7 @@ WebEngine is a C++20 engine for games running in desktop and mobile browsers thr
 
 This document describes the implementation inspected on 2026-10-10 and the architectural boundaries for future work. The current architecture sections describe existing code. The evolution table describes intended additions and extensions, not delivered functionality. Keep these sections current when implementations change; source code and focused validation establish actual capability.
 
-## Optional RPG library R1-R9 and release plan (2026-10-25)
+## Optional RPG library R1-R10 and release candidate (2026-10-25)
 
 `engine_rpg` / `WebEngine::RPG` now implements the optional standard-C++20 foundation
 above Modules: explicit content/session/entity identities, bounded metadata
@@ -69,8 +69,9 @@ are rebuilt on travel/load; interrupted playback snaps to committed positions be
 acknowledgement. The example uses existing WaypointGraph navigation and host-owned
 combined saves (localStorage / atomic DesktopFiles). No host dependency enters the
 RPG kernel. See [host contracts](docs/rpg-hosts.md) and [R9 evidence](docs/rpg-r9-validation.md).
-Third-person
-camera policy, Lattice abilities, balance, factions and campaign/world state stay
+R10 adds a complete alternate standalone ruleset and the [release audit](docs/rpg-release-1.md).
+API 1.7.0 / wire 1 remain unchanged; rendered CI gates remain open.
+Third-person camera policy, Lattice abilities, balance, factions and campaign/world state stay
 in RPGGame. Existing engine core, Quests and hosts never depend on RPG.
 
 ## Current architecture

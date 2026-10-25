@@ -1,5 +1,8 @@
 # RPG inventory and equipment (R3)
 
+Current release status: [R10 handoff](rpg-release-1.md), API 1.7.0 / wire 1.
+Milestone-specific “future” statements below describe that milestone’s original scope.
+
 R3 extends the R2 transaction in `WebEngine::RPG`, API 1.2.0. It is portable
 C++20 with no new dependencies, callback registry, scene bindings or save format.
 Game content supplies `ItemDefinition` and `InventoryDefinition` in the immutable

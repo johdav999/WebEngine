@@ -1,5 +1,8 @@
 # RPG abilities, statuses and randomness (R4)
 
+Current release status: [R10 handoff](rpg-release-1.md), API 1.7.0 / wire 1.
+Milestone-specific “future” statements below describe that milestone’s original scope.
+
 R4 extends `WebEngine::RPG` to API 1.3.0. It uses the R2 command transaction and
 R3 inventory ownership. It adds no dependencies, scheduler, encounter state machine,
 damage model, script interpreter or renderer. Sample policies are in

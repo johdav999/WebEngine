@@ -1,4 +1,4 @@
-# Optional RPG library (R1-R9)
+# Optional RPG library (R1-R10)
 
 R1 implements `engine_rpg` / `WebEngine::RPG`: a standard-C++20 static library
 depending only on [Modules](modules.md). It supplies typed identities, validated
@@ -10,7 +10,8 @@ R5 adds [encounters, initiative, turn allowances and cooldowns](rpg-encounters.m
 R6 adds [tactical actions, spatial quotes, reactions and presentation gates](rpg-tactics.md).
 R7 adds the separately optional [quest bridge and award ledger](rpg-quests.md).
 R8 adds [canonical snapshots and safe restore](rpg-snapshots.md).
-R9 adds the optional [shared rendered hosts](rpg-hosts.md); the library owns no scheduler or renderer. See later milestones
+R9 adds the optional [shared rendered hosts](rpg-hosts.md); the library owns no scheduler or renderer. R10 adds the [release handoff](rpg-release-1.md),
+two-ruleset consumer and [adoption mapping](rpg-game-adoption.md). See scope
 in the [architecture](rpg-library-architecture.md) and
 [release prompts](rpg-library-release-1-prompts.md).
 
@@ -137,7 +138,7 @@ diagnostics, not save bytes. Exhausted allocation throws without changing state.
 R2 adds character state and a shared transaction boundary; see
 [command, revision and lifetime contracts](rpg-characters.md). Allocation now
 advances revision and invalidates prepared commands/candidates. R4 adds candidate
-RNG with a versioned state encoding; there is no event scheduler or full snapshot.
+RNG with a versioned state encoding; there is no event scheduler. R8 supplies full durable snapshots.
 
 Composition replacement/destruction does not invalidate retained sessions.
 Runtime state is destroyed before its catalogue. The catalogue retains immutable
@@ -147,6 +148,6 @@ registrations/snapshots may extend those lifetimes; no dynamic code unload exist
 
 R2 extends these types with character/resource state, owner/generation/revision
 stamps and producer sequencing. R3 reuses that boundary for inventory/equipment,
-and R4 for abilities/statuses/RNG. Future full snapshot versions remain separate. The [external consumer](../examples/rpg/consumer.cpp)
+and R4 for abilities/statuses/RNG. Snapshot wire versions remain separate from API and content versions. The [external consumer](../examples/rpg/consumer.cpp)
 proves isolated identity allocation and usable retained definitions. See
 [validation evidence](rpg-validation.md) for actual checks and limitations.

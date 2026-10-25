@@ -1,5 +1,8 @@
 # RPG encounters and turn budgets (R5)
 
+Current release status: [R10 handoff](rpg-release-1.md), API 1.7.0 / wire 1.
+Milestone-specific “future” statements below describe that milestone’s original scope.
+
 API 1.4.0 adds portable encounter lifecycle operations to `WebEngine::RPG`.
 It retains R2's single prepare/commit transaction and R4's status/RNG semantics.
 No Application, scene, device input, navigation, renderer, clock or new scheduler

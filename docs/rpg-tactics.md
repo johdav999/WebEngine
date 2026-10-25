@@ -1,5 +1,8 @@
 # RPG tactical actions, spatial quotes and reactions (R6)
 
+Current release status: [R10 handoff](rpg-release-1.md), API 1.7.0 / wire 1.
+Milestone-specific “future” statements below describe that milestone’s original scope.
+
 API 1.5.0 adds tactical resolution to the same `WebEngine::RPG` transaction.
 It depends only on Modules and C++20. Sample policy is in
 [examples/rpg/tactics.hpp](../examples/rpg/tactics.hpp), with

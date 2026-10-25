@@ -2,7 +2,8 @@
 
 Status: release architecture with R1 foundation, R2 characters/transactions,
 R3 inventory/equipment, R4 abilities/statuses/RNG, R5 encounters, R6 tactical actions,
-R7 quest bridge, R8 snapshots/restore and R9 shared sample hosts implemented. Created
+R7 quest bridge, R8 snapshots/restore, R9 shared sample hosts and R10 release handoff implemented.
+Release remains conditional on the [open acceptance gates](rpg-release-1.md). Created
 2026-10-25 against WebEngine `56080eca124c9a62e15b146799a8004bdad5a9b2`.
 The delivered subset is documented in [rpg.md](rpg.md): optional RPG target,
 identities, metadata bindings/catalogue and runtime ownership, plus
@@ -60,7 +61,7 @@ them as example data. ElevenLabs/Tripo remain external authoring tools in RPGGam
 
 ## Targets, dependencies and source layout
 
-| Proposed target | Required dependencies | Responsibility |
+| Delivered target (except future game target) | Required dependencies | Responsibility |
 | --- | --- | --- |
 | `engine_rpg` / `WebEngine::RPG` | `WebEngine::Modules`, C++20 standard library | Catalogue, session state, transactions, characters, inventory, effects, turns, snapshots |
 | `engine_rpg_quests` / `WebEngine::RPGQuests` | `WebEngine::RPG`, `WebEngine::Quests` | Typed projection/reward helpers and coordinated publication contract |
@@ -74,11 +75,11 @@ library before two real consumers demonstrate reusable binding code; keep the
 first adapter in the sample and RPGGame. Do not introduce a second ECS, scene
 registry, scheduler, navigation system, physics engine, script VM or plugin loader.
 
-Proposed files:
+Source layout (bridge is composed in rpg/CMakeLists.txt, not a separate subdirectory):
 
 ```text
 rpg/CMakeLists.txt                 Standalone portable target and test options
-rpg/quests/CMakeLists.txt          Optional bridge
+src/rpg/quest_bridge.cpp          Optional bridge, composed by rpg/CMakeLists.txt
 cmake/rpg.cmake                   Root opt-in integration and demo selection
 include/engine/rpg/               Public typed contracts
   types.hpp bindings.hpp catalog.hpp state.hpp runtime.hpp snapshot.hpp
@@ -133,7 +134,7 @@ Proposed flow is `prepare(command, context, budget)` then `commit(candidate)`.
 R2-R7 deliver prepare/commit for character, inventory/equipment, abilities, statuses,
 candidate RNG, encounter lifecycle, cooldowns, tactical actions, immutable spatial
 quotes, reactions and coordinated quest rewards/receipts. R8 adds detached snapshot validation and restore; host integration
-below remains future work.
+below is delivered by R9 with the recorded platform limitations.
 
 1. Check command owner/generation/revision/turn and producer sequence.
 2. Resolve definitions and targets against one immutable snapshot and world stamp.
@@ -308,17 +309,7 @@ procedural campaigns and a full RPG editor from release 1.
 
 ## Engine-skill synchronization handoff
 
-AGENTS.md requires the installed engine-skill and CatGame mirror to track
-architecture changes. Its configured `C:/Users/Johan/...` locations and the
-corresponding EJOHDAV engine-skill copies were not present during this documentation
-task. No skill copy was created or replaced. When those existing copies are
-available, merge this navigation entry into SKILL.md and its architecture reference:
-
-> RPG library planning: read docs/rpg-library-architecture.md and
-> docs/rpg-library-release-1-prompts.md. Read docs/rpg.md for the delivered R1
-> RPG foundation; RPGQuests and gameplay APIs remain planned. Reuse Modules/Quests; keep portable RPG mechanisms optional and
-> keep game definitions, Lattice rules, presentation and save policy in consumers.
-> Require native Windows and browser evidence before claiming release support.
-
-Preserve all existing and CatGame-specific skill guidance. Future implementation
-tasks must update the available skill copies with actual APIs and validation.
+R10 synchronizes available installed and game-local skill copies with the
+release handoff, API 1.7.0 / wire 1 and the conditional rendered acceptance gate.
+See [R10 evidence](rpg-r10-validation.md). Consumer pins must still be checked;
+RPGGame has not adopted this release candidate.

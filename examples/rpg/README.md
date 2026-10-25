@@ -44,3 +44,11 @@ boundaries and R9 host responsibilities; no storage or rendered host is added he
 R9 adds the root-build rendered sample alongside this standalone consumer. See
 [host build/run and controls](../../docs/rpg-hosts.md) and
 [platform evidence](../../docs/rpg-r9-validation.md).
+
+## R10 independent rulesets
+
+`rpg_rulesets` builds automatically with RPG enabled, including bridge-off builds.
+It uses only WebEngine::RPG and exercises scholar/operator resources, equipment,
+ability/initiative/AP policy, save/restore and atomic rejection. The complete
+module registration is in rulesets.cpp. See ../../docs/rpg-release-1.md for the
+release contract and remaining rendered-platform gates.
