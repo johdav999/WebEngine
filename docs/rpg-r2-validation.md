@@ -33,8 +33,19 @@ ctest --test-dir build/rpg-r1-wasm --output-on-failure
 This reuses the R1 configured standalone build with the repository-local pinned
 toolchain and RPG/module tests enabled. An initial test invocation began before
 linking completed and reported a missing sample executable; the complete rerun
-above passed after the build finished. Native and clean Wasm CI results follow
-after execution. No rendered browser,
+above passed after the build finished.
+
+## CI evidence
+
+Implementation commit `b7c0d1991f4b3c22cf7fe94e721c75c9cb4f3fc7` passed
+[RPG library CI](https://github.com/johdav999/WebEngine/actions/runs/40193203457)
+on Ubuntu 24.04, Windows Server 2022/MSVC Release and pinned Emscripten/Node.
+All three jobs built the standalone library and passed the six CTest cases.
+The existing [Portable module SDK workflow](https://github.com/johdav999/WebEngine/actions/runs/40193203469)
+also passed Linux, Windows and Wasm consumers, including omitted-module builds.
+These results validate the portable RPG module, not the complete renderer.
+
+No rendered browser,
 GPU, native-window or physics test is claimed: R2 adds only portable rules.
 Inventory, combat, quest rewards, wire snapshots and rendered hosts remain later
 milestones. RPGGame's engine pin is unchanged.
