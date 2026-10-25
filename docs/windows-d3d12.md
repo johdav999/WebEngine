@@ -7,6 +7,13 @@ camera and GuiSystem. There is no browser or Windows Forms layer in either path.
 
 ## Select and build
 
+For explicit software-renderer diagnostics, set `WEBENGINE_D3D12_WARP=1` before
+launching a direct-D3D12 host. It selects WARP even when hardware exists and reports
+`adapter.software:true`; it is never an automatic fallback. Leave it unset for
+hardware acceptance and normal play, and keep the selection unchanged throughout
+the host lifetime. The RPG CI smoke verifies the reported selection. See
+[library stabilization evidence](rpg-l1-validation.md).
+
 ```powershell
 ./scripts/setup-windows.ps1
 ./scripts/build-windows.ps1 # Both renderer implementations, Automatic default

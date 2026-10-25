@@ -18,6 +18,8 @@ const fs=require('node:fs/promises'),path=require('node:path'),http=require('nod
    const request=GPUAdapter.prototype.requestDevice;
    GPUAdapter.prototype.requestDevice=async function(...args){
     const device=await request.apply(this,args);
+    const destroy=device.destroy.bind(device);
+    device.destroy=()=>{console.warn('GPU destroy requested:',new Error().stack);return destroy();};
     device.addEventListener('uncapturederror',event=>console.error('GPU uncaptured:',event.error.message));
     device.lost.then(info=>console.warn('GPU lost:',info.reason,info.message));
     return device;

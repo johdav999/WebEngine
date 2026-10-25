@@ -3,13 +3,29 @@
 #include <fstream>
 #include <iostream>
 #include <SDL3/SDL.h>
+#define NOMINMAX
+#include <windows.h>
+
+namespace {
+LONG WINAPI smokeCrash(EXCEPTION_POINTERS* exception){
+    auto address=exception->ExceptionRecord->ExceptionAddress;
+    HMODULE module=nullptr;char path[MAX_PATH]{};
+    GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+        reinterpret_cast<LPCSTR>(address),&module);
+    if(module)GetModuleFileNameA(module,path,MAX_PATH);
+    std::cerr<<"Native exception 0x"<<std::hex<<exception->ExceptionRecord->ExceptionCode
+        <<" module="<<path<<" offset=0x"<<(reinterpret_cast<std::uintptr_t>(address)-reinterpret_cast<std::uintptr_t>(module))<<std::endl;
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+}
 
 int main(int argc,char**argv){try{
     using namespace engine;using namespace rpg_example;
     bool smoke=false;std::filesystem::path output="rpg-smoke";
     for(int i=1;i<argc;++i){std::string arg=argv[i];if(arg=="--smoke"&&i+1<argc){smoke=true;output=argv[++i];}else throw std::invalid_argument("Use --smoke output-directory");}
+    if(smoke){SetUnhandledExceptionFilter(smokeCrash);std::cerr<<"RPG smoke: constructing desktop host"<<std::endl;}
     DesktopSettings settings;settings.title="RPG - Training Court";settings.backend=DesktopBackend::Direct3D12;settings.hidden=smoke;settings.width=1100;settings.height=760;
-    DesktopHost host(settings);DesktopFileSettings fs;fs.application="WebEngineRpgSample";if(smoke)fs.userDirectory=std::filesystem::absolute(output/"user");DesktopFiles files(fs);
+    DesktopHost host(settings);if(smoke)std::cerr<<"RPG smoke: desktop host constructed"<<std::endl;DesktopFileSettings fs;fs.application="WebEngineRpgSample";if(smoke)fs.userDirectory=std::filesystem::absolute(output/"user");DesktopFiles files(fs);
     bool failWrite=false;Storage storage;
     storage.read=[&]()->std::optional<std::vector<std::uint8_t>>{auto path=files.userPath(DesktopStorage::Saves,"rpg.save");if(!std::filesystem::exists(path))return {};auto raw=readDesktopFile(path,r::snapshotByteLimit);auto*b=reinterpret_cast<const std::uint8_t*>(raw.data());return std::vector<std::uint8_t>(b,b+raw.size());};
     storage.write=[&](auto bytes){if(failWrite)throw std::runtime_error("Injected failed write; previous save retained");files.writeUser(DesktopStorage::Saves,"rpg.save",std::as_bytes(bytes),r::snapshotByteLimit);};
@@ -25,7 +41,9 @@ int main(int argc,char**argv){try{
         if(e.type==DesktopEventType::Control&&e.down&&!e.repeat){if(e.control==DesktopControl::M)controller.enqueue(Action::Move);else if(e.control==DesktopControl::A)controller.enqueue(Action::Strike);else if(e.control==DesktopControl::Space)controller.enqueue(Action::EndTurn);}
         return false;
     });
+    if(smoke)std::cerr<<"RPG smoke: starting controller"<<std::endl;
     controller.start();host.gui().setFont(GuiFont::loadTrustedTrueType(files.readAsset("fonts/NotoSans-Regular.ttf"),16));
+    if(smoke)std::cerr<<"RPG smoke: controller and font ready"<<std::endl;
     auto&panel=host.gui().root().add<Panel>();panel.setPosition({14,14});panel.setSize({280,710});panel.setPadding(10);panel.setLayout(VerticalLayout{4});
     auto&title=panel.add<TextLabel>("Training Court");title.setSize({260,28});auto&status=panel.add<TextLabel>();status.setSize({260,70});auto&message=panel.add<TextLabel>();message.setSize({260,44});
     for(int row=0;row<6;++row){auto&line=panel.add<Panel>();line.setSize({260,34});line.setLayout(HorizontalLayout{8});
@@ -37,7 +55,7 @@ int main(int argc,char**argv){try{
     auto step=[&](){auto size=host.size();controller.aspect(size.width/std::max(1.f,size.height));bool ready=host.diagnostics().ready;if(readyBefore&&!ready)controller.cancelInput();readyBefore=ready;controller.drain();return host.step(callbacks);};
     if(!smoke){while(!host.closeRequested()&&step()){}return 0;}
     std::filesystem::create_directories(output);auto require=[](bool b,const char*s){if(!b)throw std::runtime_error(s);};double deadline=host.nowSeconds()+90;
-    auto tick=[&](){require(step(),"Host stopped");require(host.nowSeconds()<deadline,"Smoke timeout");};
+    auto tick=[&](){require(step(),"Host stopped");auto diagnostic=host.diagnostics();if(!diagnostic.error.empty())throw std::runtime_error(diagnostic.error);require(host.nowSeconds()<deadline,"Smoke timeout");};
     while(host.diagnostics().presentedFrames<10)tick();
     std::ofstream(output/"device.json")<<host.diagnostics().renderState;
     auto capture=[&](const char*name){host.captureFrame(output/name);do{tick();}while(host.capturePending());require(host.captureError().empty(),"Capture failed");};
