@@ -1,10 +1,11 @@
-# Optional RPG foundation (R1)
+# Optional RPG library (R1-R2)
 
 R1 implements `engine_rpg` / `WebEngine::RPG`: a standard-C++20 static library
 depending only on [Modules](modules.md). It supplies typed identities, validated
 catalogue metadata, provider registration and independent runtime ownership.
-It contains no character rules, inventory, combat, progression, quest bridge,
-snapshots, scene integration, scheduler or renderer. Those remain later milestones
+R2 adds [characters, modifiers, progression and shared transactions](rpg-characters.md).
+Inventory, combat, quest bridge, snapshots, scene integration, scheduler and renderer
+remain outside the delivered library. Those remain later milestones
 in the [architecture](rpg-library-architecture.md) and
 [release prompts](rpg-library-release-1-prompts.md).
 
@@ -50,7 +51,7 @@ Headers are `engine/rpg/types.hpp`, `bindings.hpp`, `catalog.hpp` and `runtime.h
   underscore or hyphen within nonempty segments. Leading/trailing/repeated dots,
   uppercase, whitespace and non-ASCII bytes reject.
 - `ContentRevision` is an explicitly constructed positive uint64 selected by the
-  application. It is independent of `apiVersion` (currently 1.0.0).
+  application. It is independent of `apiVersion` (currently 1.1.0).
 - `SessionId` is a nonzero uint64 durable namespace chosen by the host. The host
   must ensure uniqueness between distinct persistent sessions. No global ID
   registry, random namespace generator or save restore is supplied.
@@ -60,19 +61,20 @@ Headers are `engine/rpg/types.hpp`, `bindings.hpp`, `catalog.hpp` and `runtime.h
   not a save validator. Copying an allocator does not establish a new namespace.
   Runtime's allocator is private and each new Runtime starts at one.
 - `Definition` holds content ID, handler ID and exact positive handler version.
-  It is metadata only: R1 does not promise a generic payload/expression format.
+  It remains metadata only; R2 adds separate typed CharacterDefinition and
+  ProgressionDefinition records, not a generic payload/expression format.
 - `Error` contains an `ErrorCode` and readable message. Module graph errors use
   existing `ModuleError`; provider exceptions propagate unchanged.
 
-`Limits` caps keys at 128 bytes, catalogue definitions at 4096 and registry handlers
-at 256. Limits reject without truncation. Broader release-1 gameplay limits remain
-planned until the corresponding systems exist. No content/snapshot wire schema or
+`Limits` caps keys at 128 bytes, catalogue records at 4096 and registry handlers
+at 256. R2 adds character, modifier, producer and transaction caps documented in
+[the character contract](rpg-characters.md). Limits reject without truncation. No content/snapshot wire schema or
 fingerprint is advertised in R1; R8 will define them independently from module API
 and application content revision. Runtime IDs are not scene handles.
 
 ## Explicit composition and validation
 
-`moduleRegistration()` supplies `webengine.rpg`, API version 1.0.0, with no implicit
+`moduleRegistration()` supplies `webengine.rpg`, API version 1.1.0, with no implicit
 handlers or schema claims. Game modules declare a dependency on this registration
 and install typed `DefinitionHandler` entries into staging `Bindings`. A handler
 has a positive uint32 version and a required `void(const Definition&)` validator.
@@ -127,8 +129,10 @@ Runtimes are noncopyable/nonmovable, hold a shared const catalogue, and own thei
 own entity allocator. `allocateEntityId` only reserves an identity; it creates no
 actor, character or entity record. `nextEntity` exposes the next cursor for
 diagnostics, not save bytes. Exhausted allocation throws without changing state.
-R1 has no commands, events, RNG or preparation/commit API; R2 introduces that
-transaction boundary alongside actual character state.
+R2 adds character state and a shared transaction boundary; see
+[command, revision and lifetime contracts](rpg-characters.md). Allocation now
+advances revision and invalidates prepared commands/candidates. No RNG, event
+scheduler or wire snapshots are introduced.
 
 Composition replacement/destruction does not invalidate retained sessions.
 Runtime state is destroyed before its catalogue. The catalogue retains immutable
@@ -136,9 +140,8 @@ bindings and all installer/provider captures. The SDK destroys registry callback
 before releasing installer captures in reverse dependency order. Other retained
 registrations/snapshots may extend those lifetimes; no dynamic code unload exists.
 
-R2 should extend these types and targets with character/resource definitions and
-state, not replace Modules or create a second registry. Add runtime owner/generation/
-revision and producer sequencing with the shared transaction boundary. Keep future
-snapshot versions separate. The [external consumer](../examples/rpg/consumer.cpp)
+R2 extends these types with character/resource state, owner/generation/revision
+stamps and producer sequencing. R3 must reuse that transaction boundary for
+inventory and equipment. Future snapshot versions remain separate. The [external consumer](../examples/rpg/consumer.cpp)
 proves isolated identity allocation and usable retained definitions. See
 [validation evidence](rpg-validation.md) for actual checks and limitations.

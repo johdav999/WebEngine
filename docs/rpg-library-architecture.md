@@ -1,10 +1,11 @@
 # Optional RPG library: release 1 architecture
 
-Status: release architecture with R1 foundation implemented. Created
+Status: release architecture with R1 foundation and R2 characters/transactions implemented. Created
 2026-10-25 against WebEngine `56080eca124c9a62e15b146799a8004bdad5a9b2`.
 The delivered subset is documented in [rpg.md](rpg.md): optional RPG target,
-identities, metadata bindings/catalogue and runtime ownership. Gameplay,
-transactions, quest bridge, serialization and hosts below remain proposed.
+identities, metadata bindings/catalogue and runtime ownership, plus
+[R2 characters, modifiers, progression and transactions](rpg-characters.md).
+Inventory, combat, quest bridge, serialization and hosts below remain proposed.
 Use [validation](rpg-validation.md) for actual evidence. Existing
 [Modules](modules.md), [Quests](quests.md), [SDK composition](module-sdk.md),
 [Application](application-lifecycle.md) and [host contracts](consumer-hosts.md)
@@ -121,7 +122,8 @@ Avoid arbitrary expression graphs or multiplication chains in the first release.
 ## Transaction and extension contract
 
 Proposed flow is `prepare(command, context, budget)` then `commit(candidate)`.
-These names describe intent, not currently callable APIs.
+R2 delivers prepare/commit for character operations; spatial, encounter, RNG and
+later-system integration below remain future work.
 
 1. Check command owner/generation/revision/turn and producer sequence.
 2. Resolve definitions and targets against one immutable snapshot and world stamp.
