@@ -23,7 +23,9 @@ const fs=require('node:fs/promises'),path=require('node:path'),http=require('nod
    GPUAdapter.prototype.requestDevice=async function(...args){
     const info=this.info;
     window.rpgGpuAdapter=info?{vendor:info.vendor,architecture:info.architecture,device:info.device,description:info.description,isFallbackAdapter:info.isFallbackAdapter??this.isFallbackAdapter}:null;
+    console.info('GPU adapter:',JSON.stringify(window.rpgGpuAdapter));
     const device=await request.apply(this,args);
+    window.rpgGpuQueueDone=()=>device.queue.onSubmittedWorkDone();
     const destroy=device.destroy.bind(device);
     device.destroy=()=>{console.warn('GPU destroy requested:',new Error().stack);return destroy();};
     device.addEventListener('uncapturederror',event=>console.error('GPU uncaptured:',event.error.message));
@@ -35,8 +37,14 @@ const fs=require('node:fs/promises'),path=require('node:path'),http=require('nod
   const state=()=>page.evaluate(()=>window.rpgState);const wait=async fn=>{try{await page.waitForFunction(fn,null,{timeout:60000});}catch(e){console.error("Failed predicate",String(fn),await state());throw e;}};
   const click=id=>page.locator(`[data-command="${id}"]`).click();
   await page.goto(`${url}/?backend=${backend}`);await wait(()=>window.rpgState?.frames>8);assert.equal((await state()).backend,backend==='webgpu'?0:1);
-  const canvas=page.locator('canvas');const png=PNG.sync.read(await canvas.screenshot());const colors=new Set();let colored=0;
-  for(let i=0;i<png.data.length;i+=4){const[r,g,b]=png.data.subarray(i,i+3);colors.add(`${r>>3},${g>>3},${b>>3}`);if(Math.max(r,g,b)>70)colored++;}
+  const canvas=page.locator('canvas');let colors=new Set(),colored=0;const pixelDeadline=Date.now()+30000;
+  do{
+   await page.evaluate(async()=>{if(window.rpgGpuQueueDone)await window.rpgGpuQueueDone();await new Promise(requestAnimationFrame);});
+   const png=PNG.sync.read(await canvas.screenshot());colors=new Set();colored=0;
+   for(let i=0;i<png.data.length;i+=4){const[r,g,b]=png.data.subarray(i,i+3);colors.add(`${r>>3},${g>>3},${b>>3}`);if(Math.max(r,g,b)>70)colored++;}
+   if(colors.size>=7&&colored>1000)break;
+   await page.waitForTimeout(250);
+  }while(Date.now()<pixelDeadline);
   console.log('pixels',colors.size,colored,await state());await page.screenshot({path:path.join(evidence,backend+'-debug.png')});
   assert(colors.size>=7&&colored>1000,'3D framebuffer lacks scene pixels');await page.screenshot({path:path.join(evidence,`${backend}-before.png`)});
   await click(4);await click(5);await wait(()=>rpgState.awards===2);await click(0);await wait(()=>rpgState.active>0);await click(1);await wait(()=>rpgState.pending);
