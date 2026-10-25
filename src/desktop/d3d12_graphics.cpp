@@ -11,6 +11,7 @@
 #include <dxgi1_6.h>
 #include <wrl/client.h>
 #include <cstring>
+#include <cstdio>
 #include <fstream>
 #include <map>
 #include <set>
@@ -487,7 +488,10 @@ public:
             {GpuSpan timing(*this,"GUI");gui(frame,guiData);}const bool copying=!capturePath_.empty()&&!captureBuffer_;
             if(copying){GpuSpan timing(*this,"Framebuffer capture");copyCapture(target);}else transition(*list_.Get(),target,D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_PRESENT);
             endGpuSpan(gpuFrame);resolveGpuTiming();
-            checked(list_->Close(),"Close draw list");checkValidation();ID3D12CommandList* commands[]{list_.Get()};queue_->ExecuteCommandLists(1,commands);
+            checked(list_->Close(),"Close draw list");checkValidation();ID3D12CommandList* commands[]{list_.Get()};
+            if(debug_)fprintf(stderr,"D3D12 submitting frame\n");
+            queue_->ExecuteCommandLists(1,commands);
+            if(debug_)fprintf(stderr,"D3D12 submitted frame\n");
             frame.fence=++nextFence_;checked(queue_->Signal(fence_.Get(),frame.fence),"Submit frame fence");if(copying)captureFence_=frame.fence;
             submitGpuTiming(frame.fence);
             checked(swapchain_->Present(1,0),"Present swapchain");++presented_;

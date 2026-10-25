@@ -73,6 +73,8 @@ ID3D12PipelineState* materialPipeline(const MeshDraw& draw,bool shadow,bool inst
     p.DepthStencilState.DepthFunc=blend?D3D12_COMPARISON_FUNC_LESS_EQUAL:D3D12_COMPARISON_FUNC_LESS;
     p.PrimitiveTopologyType=D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;p.NumRenderTargets=shadow?0:1;p.RTVFormats[0]=shadow?DXGI_FORMAT_UNKNOWN:colorFormat();
     p.DSVFormat=DXGI_FORMAT_D32_FLOAT;p.SampleDesc.Count=key[2];
+    if(debug_)fprintf(stderr,"D3D12 creating material pipeline shadow=%d instanced=%d\n",int(shadow),int(instanced));
     ComPtr<ID3D12PipelineState> result;checked(device_->CreateGraphicsPipelineState(&p,IID_PPV_ARGS(&result)),"Create material pipeline");
+    if(debug_)fprintf(stderr,"D3D12 material pipeline ready\n");
     return meshPipelines_.emplace(key,std::move(result)).first->second.Get();
 }
