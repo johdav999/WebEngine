@@ -4,7 +4,8 @@ Scope: portable inventory/item/equipment operations through the existing R2
 transaction. API 1.2.0; no snapshot format or renderer change. See
 [contracts](rpg-inventory.md) and [test fixtures](../tests/rpg_inventory_tests.cpp).
 
-The RPG workflow builds Release on Windows/MSVC, Linux and pinned Emscripten/Node.
+The RPG workflow builds Windows/MSVC Release, Linux native and pinned
+Emscripten/Node Release.
 The new inventory test joins both consumers, module tests, R1/R2 tests and the
 configuration matrix. Two authored rulesets assert fixed canonical state strings.
 Generated sequences exercise conservation and rejection invariants. Stress cases
@@ -31,6 +32,19 @@ corrected. The final build and complete local Wasm CTest suite passed 7/7 in
 checks, both consumers and the six-case configuration matrix. The R3 test itself
 took 1.45 seconds. Local commands used `cmake --build ../wasm --parallel 2` and
 `ctest --test-dir ../wasm --output-on-failure` from the isolated checkout.
+
+## CI evidence
+
+Implementation commit `401cad1ab28442ce3d9a0c5b8c17b493b3461f79` passed all
+three [RPG library CI jobs](https://github.com/johdav999/WebEngine/actions/runs/40194249572):
+Ubuntu 24.04 native, Windows Server 2022/MSVC Release and pinned Emscripten/Node
+Release. Each job passed the seven CTest cases, including the same two fixed R3
+state fixtures. The existing [Portable module SDK workflow](https://github.com/johdav999/WebEngine/actions/runs/40194249551)
+also passed all Linux, Windows and Wasm jobs. These are focused portable-library
+results, not a claim about the full engine renderer or rendered sample hosts.
+
+Changed contract links/code fences and the three available skill supplements
+were checked locally. Project-specific skill context was preserved.
 
 ## Skill synchronization
 
