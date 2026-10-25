@@ -313,4 +313,14 @@ R10 synchronizes available installed and game-local skill copies with the
 release handoff, API 1.7.0 / wire 1 and the rendered acceptance contract. L1 updates
 the copies for validated software CI and separate hardware evidence.
 See [L1 evidence](rpg-l1-validation.md). Consumer pins must still be checked;
-RPGGame has not adopted this library release.
+RPGGame adoption is tracked in its own repository; this library task does not
+advance consumer pins.
+
+## Library milestone L2 (implemented)
+
+API 1.8.0 provides persistent parties with ordered active/reserve membership,
+leader and control metadata, plus complete immutable encounter team assignments.
+Party replacement/removal use the existing transaction lifecycle. Hosts retain
+recruitment, AI, targeting and victory policy. Runtime snapshots retain v1
+compatibility and add a v2 party/team extension. Both hosts share the updated
+sample. See [contracts](rpg-parties.md) and [validation](rpg-l2-validation.md).

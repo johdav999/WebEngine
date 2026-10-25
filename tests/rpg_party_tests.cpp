@@ -68,7 +68,7 @@ void limits(){
     for(std::size_t i=0;i<r::Limits::parties;++i)apply(run,{r::SetParty{r::ContentId("test.p"+std::to_string(i)),{}}});
     reject(run,r::ErrorCode::Limit,{r::SetParty{id("test.extra"),{}}});
     r::BeginEncounter e{{id("example.turns"),1},{}};
-    for(std::size_t i=0;i<=r::Limits::teams;++i){auto a=apply(run,{r::CreateCharacter{id("example.scholar")}}).created[0];e.roster.push_back(a);e.teams.emplace(a,r::CombatMember{r::ContentId("test.t"+std::to_string(i))});}
+    for(std::size_t i=0;i<=r::Limits::teams;++i){auto a=apply(run,{r::CreateCharacter{id("example.scholar")}}).created[0];e.participants.push_back(a);e.teams.emplace(a,r::CombatMember{r::ContentId("test.t"+std::to_string(i))});}
     reject(run,r::ErrorCode::Limit,{e});
 }
 }

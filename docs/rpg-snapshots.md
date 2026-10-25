@@ -1,5 +1,9 @@
 # RPG canonical snapshots and restore (R8)
 
+L2 extends runtime snapshots to v2 for party/team data, while reading v1 and
+preserving v1 output for states without that data. Catalogue and combined outer
+envelopes remain v1. See [L2 compatibility](rpg-parties.md#persistence-and-compatibility).
+
 API 1.7.0 adds `engine/rpg/snapshot.hpp` to `WebEngine::RPG`. No new target,
 scene archive version, filesystem, renderer, migration service or automatic save
 schedule is introduced. The same C++20 codec runs on Windows, Linux and Wasm.
