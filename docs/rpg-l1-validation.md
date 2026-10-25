@@ -30,11 +30,13 @@ Validation of these corrections is pending; earlier WARP runs crashed inside
 error. Adapter enumeration alone did not resolve that crash.
 
 Scene-only isolation reproduces WARP's execution crash while GUI-only rendering
-passes. Instance buffers now use bounded structured SRVs instead of root GPU
-addresses. Each batch validates its range and declares its first element, count
-and 256-byte stride; shadow/reflection paths use the same binding. Shared sample
-meshes and native performance assertions exercise multi-instance rendering.
-This correction still requires full platform validation before closing L1.
+passes. Individual (non-instanced) draws reproduce the same crash, ruling out
+instancing as the cause. A trial bounded descriptor binding did not resolve it
+and was removed; the original object-buffer binding/lifetime is retained. Shared
+sample meshes and native performance assertions exercise multi-instance rendering.
+An ordinary unlit pixel-shader specialization is undergoing platform validation;
+it preserves alpha, reflection clipping, emission and fog while excluding the
+unused lighting/water graph. Browser pipelines already specialize materials.
 
 Native WARP and browser SwiftShader checks establish software-renderer acceptance,
 not physical GPU or performance coverage. Local hardware checks remain separate.

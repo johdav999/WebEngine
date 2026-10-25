@@ -24,14 +24,13 @@ int main(int argc,char**argv){try{
     using namespace engine;using namespace rpg_example;
     bool smoke=false;std::filesystem::path output="rpg-smoke";
     for(int i=1;i<argc;++i){std::string arg=argv[i];if(arg=="--smoke"&&i+1<argc){smoke=true;output=argv[++i];}else throw std::invalid_argument("Use --smoke output-directory");}
-    const std::string isolated=smoke&&std::getenv("RPG_SMOKE_LAYER")?std::getenv("RPG_SMOKE_LAYER"):"";
     if(smoke){SetUnhandledExceptionFilter(smokeCrash);std::cerr<<"RPG smoke: constructing desktop host"<<std::endl;}
     DesktopSettings settings;settings.title="RPG - Training Court";settings.backend=DesktopBackend::Direct3D12;settings.hidden=smoke;settings.width=1100;settings.height=760;
     DesktopHost host(settings);if(smoke)std::cerr<<"RPG smoke: desktop host constructed"<<std::endl;DesktopFileSettings fs;fs.application="WebEngineRpgSample";if(smoke)fs.userDirectory=std::filesystem::absolute(output/"user");DesktopFiles files(fs);
     bool failWrite=false;Storage storage;
     storage.read=[&]()->std::optional<std::vector<std::uint8_t>>{auto path=files.userPath(DesktopStorage::Saves,"rpg.save");if(!std::filesystem::exists(path))return {};auto raw=readDesktopFile(path,r::snapshotByteLimit);auto*b=reinterpret_cast<const std::uint8_t*>(raw.data());return std::vector<std::uint8_t>(b,b+raw.size());};
     storage.write=[&](auto bytes){if(failWrite)throw std::runtime_error("Injected failed write; previous save retained");files.writeUser(DesktopStorage::Saves,"rpg.save",std::as_bytes(bytes),r::snapshotByteLimit);};
-    Controller controller(host.application(),storage,[&](SceneId id,HostScene&scene){if(isolated=="gui")scene.cameraView().setVisibilityMask(0);DesktopView view{scene.camera};host.setViews(id,{&view,1});});
+    Controller controller(host.application(),storage,[&](SceneId id,HostScene&scene){DesktopView view{scene.camera};host.setViews(id,{&view,1});});
     struct Cleanup {DesktopHost&host;~Cleanup(){host.setEventHandler({});host.gui().clear();host.application().shutdown();}} cleanup{host};
     bool dragging=false;Vec2 previous{};
     host.setEventHandler([&](const DesktopEvent&e){
@@ -47,7 +46,6 @@ int main(int argc,char**argv){try{
     controller.start();host.gui().setFont(GuiFont::loadTrustedTrueType(files.readAsset("fonts/NotoSans-Regular.ttf"),16));
     if(smoke)std::cerr<<"RPG smoke: controller and font ready"<<std::endl;
     auto&panel=host.gui().root().add<Panel>();panel.setPosition({14,14});panel.setSize({280,710});panel.setPadding(10);panel.setLayout(VerticalLayout{4});
-    if(isolated=="scene")panel.setVisible(false);
     auto&title=panel.add<TextLabel>("Training Court");title.setSize({260,28});auto&status=panel.add<TextLabel>();status.setSize({260,70});auto&message=panel.add<TextLabel>();message.setSize({260,44});
     for(int row=0;row<6;++row){auto&line=panel.add<Panel>();line.setSize({260,34});line.setLayout(HorizontalLayout{8});
         for(int column=0;column<2;++column){int i=row*2+column;auto&button=line.add<Button>(actionNames[i]);button.setSize({126,34});button.onClick([&,i]{controller.enqueue(Action(i));});}}

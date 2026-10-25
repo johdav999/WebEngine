@@ -11,7 +11,6 @@
 #include <dxgi1_6.h>
 #include <wrl/client.h>
 #include <cstring>
-#include <cstdio>
 #include <fstream>
 #include <map>
 #include <set>
@@ -294,7 +293,7 @@ class D3D12Graphics final:public DesktopGraphics {
         instanceUploadBudget_=std::size_t(objectBytes);
         validateDeformation();
     }
-    void draw(Frame& frame,const MeshDraw& draw,bool shadow=false,UINT instances=1,D3D12_GPU_DESCRIPTOR_HANDLE objects={}) {
+    void draw(Frame& frame,const MeshDraw& draw,bool shadow=false,UINT instances=1,D3D12_GPU_VIRTUAL_ADDRESS objects=0) {
         if(draws_>=40960)throw std::runtime_error("Direct D3D12 total draw budget exceeded");
         auto& gpu=mesh(frame,draw.mesh);const auto& m=draw.material;
         UINT wraps=0;const auto textures=drawTextures(draw);for(UINT i=0;i<9;++i)if(textures[i]){
@@ -314,8 +313,8 @@ class D3D12Graphics final:public DesktopGraphics {
             vertices={image.GetGPUVirtualAddress(),UINT(draw.morphPose->vertices.size()*sizeof(Vertex)),sizeof(Vertex)};++morphDraws_;}
         if(draw.skinPose){auto& image=poseBuffer(frame,draw.skinPose,skins_,draw.skinPose->bones.data(),draw.skinPose->bones.size()*sizeof(BoneUniform),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,skinUploads_,skinUploadBytes_);
             list_->SetGraphicsRootShaderResourceView(10,image.GetGPUVirtualAddress());list_->IASetVertexBuffers(1,1,&gpu.skinVb);++skinnedDraws_;}
-        if(objects.ptr)list_->SetGraphicsRootDescriptorTable(16,objects);
-        list_->SetPipelineState(materialPipeline(draw,shadow,objects.ptr!=0));list_->IASetVertexBuffers(0,1,&vertices);list_->IASetIndexBuffer(&gpu.ib);
+        if(objects)list_->SetGraphicsRootShaderResourceView(16,objects);
+        list_->SetPipelineState(materialPipeline(draw,shadow,objects!=0));list_->IASetVertexBuffers(0,1,&vertices);list_->IASetIndexBuffer(&gpu.ib);
         list_->DrawIndexedInstanced(draw.indexCount,instances,draw.firstIndex,0,0);++draws_;const auto triangles=std::uint64_t(draw.indexCount/3)*instances;triangles_+=triangles;
         submittedInstances_+=instances;instancedDraws_+=instances>1;maxInstances_=std::max(maxInstances_,std::uint64_t(instances));
         if(shadow){++shadowDraws_;shadowTriangles_+=triangles;}else if(reflectionPass_){++reflectionDraws_;reflectionTriangles_+=triangles;}
@@ -427,7 +426,7 @@ public:
                 const DetailView detail{camera.viewProjection(aspect),float(resolved.width)*quality_.detailScale,float(resolved.height)*quality_.detailScale};
                 collected.collect(*scene_,true,camera.visibilityMask(),&camera.frustum(aspect),quality_.lod?&detail:nullptr);
                 cameraLodParts_+=collected.cameraLodParts();
-                ID3D12Resource* objects=nullptr;{GpuSpan timing(*this,"Object uploads",int(resolved.index));objects=instanceObjects(frame,collected,resolved.index);}
+                D3D12_GPU_VIRTUAL_ADDRESS objects=0;{GpuSpan timing(*this,"Object uploads",int(resolved.index));objects=instanceObjects(frame,collected,resolved.index);}
                 const auto& scene=collected.sceneFrame();FrameConstants constants{};constants.viewProjection=camera.viewProjection(aspect);
                 constants.fog=prepareFog(scene_->fog(),camera,view.fogEnabled);constants.output={hdr_?1.f:0.f,0,0,0};
                 constants.waterClock={float(waterTime_),0,0,0};constants.inverseViewProjection=camera.inverseViewProjection(aspect);
@@ -510,9 +509,7 @@ public:
             if(copying){GpuSpan timing(*this,"Framebuffer capture");copyCapture(target);}else transition(*list_.Get(),target,D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_PRESENT);
             endGpuSpan(gpuFrame);resolveGpuTiming();
             checked(list_->Close(),"Close draw list");checkValidation();ID3D12CommandList* commands[]{list_.Get()};
-            if(debug_)fprintf(stderr,"D3D12 submitting frame\n");
             queue_->ExecuteCommandLists(1,commands);
-            if(debug_)fprintf(stderr,"D3D12 submitted frame\n");
             frame.fence=++nextFence_;checked(queue_->Signal(fence_.Get(),frame.fence),"Submit frame fence");if(copying)captureFence_=frame.fence;
             submitGpuTiming(frame.fence);
             checked(swapchain_->Present(1,0),"Present swapchain");++presented_;

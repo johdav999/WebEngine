@@ -21,8 +21,7 @@ void pipelines() {
     params[13].ParameterType=D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;params[13].DescriptorTable={1,&captureRange};params[13].ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
     params[14].ParameterType=D3D12_ROOT_PARAMETER_TYPE_CBV;params[14].Descriptor.ShaderRegister=6;params[14].ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
     params[15].ParameterType=D3D12_ROOT_PARAMETER_TYPE_CBV;params[15].Descriptor.ShaderRegister=7;
-    const D3D12_DESCRIPTOR_RANGE instanceRange{D3D12_DESCRIPTOR_RANGE_TYPE_SRV,1,23,0,D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND};
-    params[16].ParameterType=D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;params[16].DescriptorTable={1,&instanceRange};params[16].ShaderVisibility=D3D12_SHADER_VISIBILITY_VERTEX;
+    params[16].ParameterType=D3D12_ROOT_PARAMETER_TYPE_SRV;params[16].Descriptor.ShaderRegister=23;params[16].ShaderVisibility=D3D12_SHADER_VISIBILITY_VERTEX;
     std::array<D3D12_STATIC_SAMPLER_DESC,6> samplers{};
     for(UINT i=0;i<6;++i){auto& s=samplers[i];s.Filter=D3D12_FILTER_MIN_MAG_MIP_LINEAR;
         s.AddressU=(i>=4||(i&1))?D3D12_TEXTURE_ADDRESS_MODE_CLAMP:D3D12_TEXTURE_ADDRESS_MODE_WRAP;
@@ -76,8 +75,6 @@ ID3D12PipelineState* materialPipeline(const MeshDraw& draw,bool shadow,bool inst
     p.DepthStencilState.DepthFunc=blend?D3D12_COMPARISON_FUNC_LESS_EQUAL:D3D12_COMPARISON_FUNC_LESS;
     p.PrimitiveTopologyType=D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;p.NumRenderTargets=shadow?0:1;p.RTVFormats[0]=shadow?DXGI_FORMAT_UNKNOWN:colorFormat();
     p.DSVFormat=DXGI_FORMAT_D32_FLOAT;p.SampleDesc.Count=key[2];
-    if(debug_)fprintf(stderr,"D3D12 creating material pipeline shadow=%d instanced=%d\n",int(shadow),int(instanced));
     ComPtr<ID3D12PipelineState> result;checked(device_->CreateGraphicsPipelineState(&p,IID_PPV_ARGS(&result)),"Create material pipeline");
-    if(debug_)fprintf(stderr,"D3D12 material pipeline ready\n");
     return meshPipelines_.emplace(key,std::move(result)).first->second.Get();
 }

@@ -27,14 +27,12 @@ const fs=require('node:fs/promises'),path=require('node:path'),http=require('nod
     console.info('GPU adapter:',JSON.stringify(window.rpgGpuAdapter));
     const device=await request.apply(this,args);
     window.rpgGpuQueueDone=()=>device.queue.onSubmittedWorkDone();
-    const destroy=device.destroy.bind(device);
-    device.destroy=()=>{console.warn('GPU destroy requested:',new Error().stack);return destroy();};
     device.addEventListener('uncapturederror',event=>console.error('GPU uncaptured:',event.error.message));
-    device.lost.then(info=>console.warn('GPU lost:',info.reason,info.message));
+    device.lost.then(info=>{if(info.reason!=='destroyed')console.error('GPU lost:',info.reason,info.message);});
     return device;
    };
   });
-  const page=await context.newPage();const errors=[];page.on('pageerror',e=>{errors.push(String(e));console.error(e);});page.on('console',m=>console.log(backend,m.type(),m.text()));
+  const page=await context.newPage();const errors=[];page.on('pageerror',e=>{errors.push(String(e));console.error(e);});page.on('console',m=>{console.log(backend,m.type(),m.text());if(m.type()==='error'&&/^GPU (uncaptured|lost):/.test(m.text()))errors.push(m.text());});
   const state=()=>page.evaluate(()=>window.rpgState);const wait=async fn=>{try{await page.waitForFunction(fn,null,{timeout:60000});}catch(e){console.error("Failed predicate",String(fn),await state());throw e;}};
   const click=id=>page.locator(`[data-command="${id}"]`).click();
   await page.goto(`${url}/?backend=${backend}`);await wait(()=>window.rpgState?.frames>8);assert.equal((await state()).backend,backend==='webgpu'?0:1);

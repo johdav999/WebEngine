@@ -29,8 +29,7 @@ if result.returncode == 0:
     expected_software = os.environ.get('WEBENGINE_D3D12_WARP', '').startswith('1')
     assert device['adapter']['software'] is expected_software, 'Unexpected hardware/software adapter selection'
     assert device['adapter']['backend'] == 'D3D12', 'Unexpected renderer backend'
-    if os.environ.get('RPG_SMOKE_LAYER') != 'gui':
-        counters = json.loads((output / 'performance.json').read_text())['counters']
-        assert counters['maxInstancesPerDraw'] > 1, 'Sample did not exercise multi-instance mesh rendering'
+    counters = json.loads((output / 'performance.json').read_text())['counters']
+    assert counters['maxInstancesPerDraw'] > 1, 'Sample did not exercise multi-instance mesh rendering'
     print('Verified adapter:', device['adapter']['device'], 'software=', expected_software)
 sys.exit(0 if result.returncode == 0 else 1)

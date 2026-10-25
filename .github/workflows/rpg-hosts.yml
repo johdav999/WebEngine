@@ -22,30 +22,6 @@ jobs:
           WEBENGINE_D3D12_VALIDATION: '1'
           WEBENGINE_D3D12_GPU_VALIDATION: '1'
         run: python scripts/rpg-native-smoke.py build/rpg-host/Release/rpg_demo_windows.exe build/evidence/rpg-d3d12
-      - name: Isolate native scene rendering
-        if: failure() && steps.native-smoke.outcome == 'failure'
-        continue-on-error: true
-        env:
-          WEBENGINE_D3D12_WARP: '1'
-          WEBENGINE_D3D12_VALIDATION: '1'
-          RPG_SMOKE_LAYER: scene
-        run: python scripts/rpg-native-smoke.py build/rpg-host/Release/rpg_demo_windows.exe build/evidence/rpg-isolate-scene
-      - name: Isolate native GUI rendering
-        if: failure() && steps.native-smoke.outcome == 'failure'
-        continue-on-error: true
-        env:
-          WEBENGINE_D3D12_WARP: '1'
-          WEBENGINE_D3D12_VALIDATION: '1'
-          RPG_SMOKE_LAYER: gui
-        run: python scripts/rpg-native-smoke.py build/rpg-host/Release/rpg_demo_windows.exe build/evidence/rpg-isolate-gui
-      - name: Isolate native individual draws
-        if: failure() && steps.native-smoke.outcome == 'failure'
-        continue-on-error: true
-        env:
-          WEBENGINE_D3D12_WARP: '1'
-          WEBENGINE_D3D12_VALIDATION: '1'
-          WEBENGINE_DIAG_UNBATCHED: '1'
-        run: python scripts/rpg-native-smoke.py build/rpg-host/Release/rpg_demo_windows.exe build/evidence/rpg-isolate-unbatched
       - name: Native diagnostics
         if: always()
         run: if (Test-Path rpg-host-error.txt) { Get-Content rpg-host-error.txt }
@@ -56,9 +32,6 @@ jobs:
           name: rpg-windows-host
           path: |
             build/evidence/rpg-d3d12
-            build/evidence/rpg-isolate-scene
-            build/evidence/rpg-isolate-gui
-            build/evidence/rpg-isolate-unbatched
             build/rpg-host/Release
             rpg-host-error.txt
   browser:
