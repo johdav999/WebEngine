@@ -38,6 +38,14 @@ jobs:
           WEBENGINE_D3D12_VALIDATION: '1'
           RPG_SMOKE_LAYER: gui
         run: python scripts/rpg-native-smoke.py build/rpg-host/Release/rpg_demo_windows.exe build/evidence/rpg-isolate-gui
+      - name: Isolate native individual draws
+        if: failure() && steps.native-smoke.outcome == 'failure'
+        continue-on-error: true
+        env:
+          WEBENGINE_D3D12_WARP: '1'
+          WEBENGINE_D3D12_VALIDATION: '1'
+          WEBENGINE_DIAG_UNBATCHED: '1'
+        run: python scripts/rpg-native-smoke.py build/rpg-host/Release/rpg_demo_windows.exe build/evidence/rpg-isolate-unbatched
       - name: Native diagnostics
         if: always()
         run: if (Test-Path rpg-host-error.txt) { Get-Content rpg-host-error.txt }
@@ -50,6 +58,7 @@ jobs:
             build/evidence/rpg-d3d12
             build/evidence/rpg-isolate-scene
             build/evidence/rpg-isolate-gui
+            build/evidence/rpg-isolate-unbatched
             build/rpg-host/Release
             rpg-host-error.txt
   browser:
@@ -75,7 +84,7 @@ jobs:
         run: |
           npm install --no-save playwright@1.62.1 pngjs@7.0.0
           npx playwright install --with-deps chromium
-          RPG_BACKENDS=webgpu EVIDENCE_DIR=build/evidence/rpg-host/webgpu node scripts/rpg-host-smoke.cjs
+          RPG_HEADED=1 RPG_BACKENDS=webgpu EVIDENCE_DIR=build/evidence/rpg-host/webgpu xvfb-run -a node scripts/rpg-host-smoke.cjs
       - name: WebGL2 input and pixel acceptance
         if: always() && steps.browser-build.outcome == 'success'
         run: RPG_BACKENDS=webgl2 EVIDENCE_DIR=build/evidence/rpg-host/webgl2 node scripts/rpg-host-smoke.cjs

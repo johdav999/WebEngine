@@ -14,6 +14,14 @@ ID3D12Resource* instanceObjects(Frame& frame,RenderFrame& collected,std::size_t 
     return gpu.image.Get();
 }
 void drawBatch(Frame& frame,const RenderFrame& collected,const InstanceBatch& batch,ID3D12Resource* objects,bool shadow=false,const ShadowBatch* selected=nullptr){
+    if(GetEnvironmentVariableA("WEBENGINE_DIAG_UNBATCHED",nullptr,0)){
+        for(UINT i=0;i<batch.instanceCount;++i){
+            auto single=collected.instanceDraw(batch.firstInstance+i);
+            if(selected){single.mesh=selected->mesh;single.firstIndex=selected->firstIndex;single.indexCount=selected->indexCount;}
+            draw(frame,single,shadow);
+        }
+        return;
+    }
     auto source=collected.instanceDraw(batch.firstInstance);
     if(selected){source.mesh=selected->mesh;source.firstIndex=selected->firstIndex;source.indexCount=selected->indexCount;}
     if(!objects||!batch.instanceCount||std::uint64_t(batch.firstInstance)+batch.instanceCount>objects->GetDesc().Width/RenderFrame::objectStride)
