@@ -41,8 +41,18 @@ fixed state/result trace; R1–R5, Modules and both consumers also passed. The
 Emscripten/CMake shared-library warning does not affect these static targets.
 Documentation checks resolved 30 relative links, and `git diff --check` passed.
 
-Published Windows/Linux/Wasm CI evidence is pending. No local MSVC toolchain was
-available; native Windows validation uses the CI Release build/test job.
+Implementation commit `c5fd005864b72fbcc85c9949ccd5302e2da2a7a9` passed the
+[RPG library workflow](https://github.com/johdav999/WebEngine/actions/runs/40199021514)
+on Ubuntu 24.04 native, Windows Server 2022/MSVC Release and pinned
+Emscripten/Node Release. Every job built and passed the ten CTest cases,
+including the identical literal R6 tactical state/result trace.
+The [Portable module SDK workflow](https://github.com/johdav999/WebEngine/actions/runs/40199021695)
+also passed all Linux, Windows and Wasm jobs, covering the existing module/quest
+consumers and omitted-feature configurations.
+
+No local MSVC toolchain was available; native Windows evidence is the successful
+CI Release build/test, not a local GPU run. This final evidence update changes
+documentation only; the implementation SHA above identifies the tested source.
 
 ## Documentation and remaining work
 
