@@ -21,7 +21,8 @@ void pipelines() {
     params[13].ParameterType=D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;params[13].DescriptorTable={1,&captureRange};params[13].ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
     params[14].ParameterType=D3D12_ROOT_PARAMETER_TYPE_CBV;params[14].Descriptor.ShaderRegister=6;params[14].ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
     params[15].ParameterType=D3D12_ROOT_PARAMETER_TYPE_CBV;params[15].Descriptor.ShaderRegister=7;
-    params[16].ParameterType=D3D12_ROOT_PARAMETER_TYPE_SRV;params[16].Descriptor.ShaderRegister=23;params[16].ShaderVisibility=D3D12_SHADER_VISIBILITY_VERTEX;
+    const D3D12_DESCRIPTOR_RANGE instanceRange{D3D12_DESCRIPTOR_RANGE_TYPE_SRV,1,23,0,D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND};
+    params[16].ParameterType=D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;params[16].DescriptorTable={1,&instanceRange};params[16].ShaderVisibility=D3D12_SHADER_VISIBILITY_VERTEX;
     std::array<D3D12_STATIC_SAMPLER_DESC,6> samplers{};
     for(UINT i=0;i<6;++i){auto& s=samplers[i];s.Filter=D3D12_FILTER_MIN_MAG_MIP_LINEAR;
         s.AddressU=(i>=4||(i&1))?D3D12_TEXTURE_ADDRESS_MODE_CLAMP:D3D12_TEXTURE_ADDRESS_MODE_WRAP;

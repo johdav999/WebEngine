@@ -25,8 +25,9 @@ struct HostScene:engine::Scene {
     explicit HostScene(const r::State&state,unsigned location):Scene(location?"Practice garden":"Training court"){
         using namespace engine;
         auto material=[](Vec3 color){auto m=std::make_shared<Material>();m->shader=MaterialShader::Unlit;m->baseColor=color;return m;};
+        static const auto cubeMesh=Mesh::cube();
         auto cube=[&](Actor&a,const char*name,Vec3 p,Vec3 size,Vec3 color)->MeshComponent&{
-            auto&m=a.addComponent<MeshComponent>(name,Mesh::cube());m.transform.position=p;m.transform.scale=size;m.setMaterial(0,MaterialInstance{material(color)});return m;};
+            auto&m=a.addComponent<MeshComponent>(name,cubeMesh);m.transform.position=p;m.transform.scale=size;m.setMaterial(0,MaterialInstance{material(color)});return m;};
         cube(spawn("Ground"),"Ground",{0,-.2f,0},{12,.3f,9},location?Vec3{.12f,.22f,.16f}:Vec3{.12f,.17f,.23f});
         for(int z=-2;z<=2;++z)for(int x=-4;x<=4;++x)if(x||z)
             cube(spawn("Path tile"),"Tile",{float(x),-.02f,float(z)},{.92f,.07f,.92f},((x+z)&1)?Vec3{.28f,.35f,.38f}:Vec3{.34f,.41f,.43f});

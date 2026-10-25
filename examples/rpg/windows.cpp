@@ -61,6 +61,7 @@ int main(int argc,char**argv){try{
     auto tick=[&](){require(step(),"Host stopped");auto diagnostic=host.diagnostics();if(!diagnostic.error.empty())throw std::runtime_error(diagnostic.error);require(host.nowSeconds()<deadline,"Smoke timeout");};
     while(host.diagnostics().presentedFrames<10)tick();
     std::ofstream(output/"device.json")<<host.diagnostics().renderState;
+    std::ofstream(output/"performance.json")<<host.diagnostics().performance;
     auto capture=[&](const char*name){host.captureFrame(output/name);do{tick();}while(host.capturePending());require(host.captureError().empty(),"Capture failed");};
     auto act=[&](Action a){controller.execute(a);tick();};capture("before.ppm");
     act(Action::Equip);act(Action::Deliver);require(controller.awards()==2,"Reward missing");act(Action::Begin);act(Action::Move);

@@ -51,7 +51,7 @@ void drawUnderwater(Frame& frame,ID3D12Resource* source,D3D12_CPU_DESCRIPTOR_HAN
     list_->SetGraphicsRootConstantBufferView(14,upload(frame,&data,sizeof(data)));list_->SetGraphicsRootDescriptorTable(12,waterBinding(frame));
     list_->OMSetRenderTargets(1,&target,FALSE,nullptr);fullViewport();list_->RSSetScissorRects(1,&rect);list_->SetPipelineState(waterPipeline(true));list_->DrawInstanced(3,1,0,0);++underwaterPasses_;
 }
-void drawReflection(Frame& frame,const RenderFrame& collected,D3D12_GPU_VIRTUAL_ADDRESS objects,const WaterReflection& reflection,const FrameConstants& constants,const D3D12_RECT& rect,const D3D12_VIEWPORT& viewport){
+void drawReflection(Frame& frame,const RenderFrame& collected,ID3D12Resource* objects,const WaterReflection& reflection,const FrameConstants& constants,const D3D12_RECT& rect,const D3D12_VIEWPORT& viewport){
     auto mirrored=constants;mirrored.viewProjection=constants.reflectionViewProjection;mirrored.reflectionOptions={0,1,0,0};
     const auto eye=transformPoint(reflection.mirror,{constants.cameraEnvironment[0],constants.cameraEnvironment[1],constants.cameraEnvironment[2]});mirrored.cameraEnvironment[0]=eye.x;mirrored.cameraEnvironment[1]=eye.y;mirrored.cameraEnvironment[2]=eye.z;
     list_->SetGraphicsRootConstantBufferView(0,upload(frame,&mirrored,sizeof(mirrored)));list_->SetGraphicsRootDescriptorTable(12,waterBinding(frame,true));

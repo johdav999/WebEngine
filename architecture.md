@@ -75,7 +75,11 @@ Library stabilization L1 adds explicit `WEBENGINE_D3D12_WARP=1` diagnostic
 rendering for software-only Windows CI; default hardware selection remains strict.
 Adapter enumeration failures are checked before dereferencing returned interfaces.
 Native pipelines initialize valid disabled-state enums and check debug-layer
-errors before command submission. Linux software browser acceptance uses Vulkan
+errors before command submission. Private D3D12 instance bindings use bounded
+structured SRV descriptors per batch (explicit first element, count and stride),
+retained in the owning frame's descriptor heap; object buffers keep their existing
+per-view/fence lifetime. The sample shares primitive meshes to exercise batches.
+Linux software browser acceptance uses Vulkan
 shared-image presentation and retains real frame/input/storage assertions and
 the normal GPU watchdog. See [L1 evidence](docs/rpg-l1-validation.md).
 Third-person camera policy, Lattice abilities, balance, factions and campaign/world state stay
