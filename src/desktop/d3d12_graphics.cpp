@@ -357,13 +357,17 @@ public:
         if(same)return;
         views_=std::move(candidate);viewCameraIds_=std::move(ids);clearCollectedFrames();resetGpuTiming();
     }
+    void checkValidation() {
+        if(debugQueue_){const auto end=debugQueue_->GetNumStoredMessages();
+            for(;checkedMessages_<end;++checkedMessages_){SIZE_T bytes=0;debugQueue_->GetMessage(checkedMessages_,nullptr,&bytes);if(bytes>16384)continue;std::vector<unsigned char> data(bytes);auto* message=reinterpret_cast<D3D12_MESSAGE*>(data.data());if(SUCCEEDED(debugQueue_->GetMessage(checkedMessages_,message,&bytes))&&(message->Severity==D3D12_MESSAGE_SEVERITY_ERROR||message->Severity==D3D12_MESSAGE_SEVERITY_CORRUPTION))error_=std::string("D3D12 validation: ")+message->pDescription;}
+        }
+        if(!error_.empty())throw std::runtime_error(error_);
+    }
     void service() override {
         checked(device_->GetDeviceRemovedReason(),"D3D12 device service");
         collectGpuTimings();
         finishCapture();
-        if(debugQueue_){const auto end=debugQueue_->GetNumStoredMessages();
-            for(;checkedMessages_<end;++checkedMessages_){SIZE_T bytes=0;debugQueue_->GetMessage(checkedMessages_,nullptr,&bytes);if(bytes>16384)continue;std::vector<unsigned char> data(bytes);auto* message=reinterpret_cast<D3D12_MESSAGE*>(data.data());if(SUCCEEDED(debugQueue_->GetMessage(checkedMessages_,message,&bytes))&&(message->Severity==D3D12_MESSAGE_SEVERITY_ERROR||message->Severity==D3D12_MESSAGE_SEVERITY_CORRUPTION))error_=std::string("D3D12 validation: ")+message->pDescription;}
-        }
+        checkValidation();
     }
     void render(double seconds,double) override {
         ProfileScope cpuProfile(ProfileCategory::Render,"Direct D3D12 render");
@@ -483,7 +487,7 @@ public:
             {GpuSpan timing(*this,"GUI");gui(frame,guiData);}const bool copying=!capturePath_.empty()&&!captureBuffer_;
             if(copying){GpuSpan timing(*this,"Framebuffer capture");copyCapture(target);}else transition(*list_.Get(),target,D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_PRESENT);
             endGpuSpan(gpuFrame);resolveGpuTiming();
-            checked(list_->Close(),"Close draw list");ID3D12CommandList* commands[]{list_.Get()};queue_->ExecuteCommandLists(1,commands);
+            checked(list_->Close(),"Close draw list");checkValidation();ID3D12CommandList* commands[]{list_.Get()};queue_->ExecuteCommandLists(1,commands);
             frame.fence=++nextFence_;checked(queue_->Signal(fence_.Get(),frame.fence),"Submit frame fence");if(copying)captureFence_=frame.fence;
             submitGpuTiming(frame.fence);
             checked(swapchain_->Present(1,0),"Present swapchain");++presented_;
