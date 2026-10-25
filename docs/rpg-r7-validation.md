@@ -37,14 +37,26 @@ ctest --test-dir ../wasm --output-on-failure
 
 Local Windows-hosted WebAssembly Release build passed all 13 CTest cases in
 158.19 seconds, including the base-RPG omission build and unchanged quest suite.
-Published platform checks are pending. Native Windows uses CI because no local
-MSVC toolchain is available.
+The focused bridge executable passed 140 checks.
+
+Published implementation: `13ba7fb5e320c09593a68abb0fa7158474895307`.
+
+- [RPG library CI](https://github.com/johdav999/WebEngine/actions/runs/40200918453):
+  Windows/MSVC Release, Linux native and WebAssembly all passed.
+- [Portable module SDK CI](https://github.com/johdav999/WebEngine/actions/runs/40200918387):
+  Windows, Linux and WebAssembly all passed.
+- Patch whitespace validation and 35 relative documentation links passed.
+
+Native Windows uses CI because no local MSVC toolchain is available. These results
+cover the RPG and portable module workflows, not the unrelated root renderer build.
 
 ## Documentation and remaining scope
 
 Architecture, target/dependency documentation, roadmap and bridge contracts are
 updated. Existing installed engine-skill and required CatGame guides are updated
 separately while preserving their local context.
+Both skill entry points and reference guides were verified in WebEngine, RPGGame,
+CafeGame, the required CatGame mirror and the existing Johan/EJOHDAV user installs.
 
 RPGGame stays pinned to 56080eca124c9a62e15b146799a8004bdad5a9b2. R8 receives
 RPG state and award dispositions, quest receipts/source sequences, retained
