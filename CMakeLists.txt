@@ -734,4 +734,5 @@ include(cmake/network.cmake)
 include(cmake/planet.cmake)
 
 include(cmake/browser.cmake)
+include(cmake/rpg_hosts.cmake)
 include(cmake/host_integration.cmake)

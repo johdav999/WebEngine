@@ -10,6 +10,7 @@ public:
               bridge::Policy policy=rewardPolicy())
         :rpg_(std::move(rpg)),quests_(std::move(quests)),policy_(std::move(policy)),live_(fresh()){}
     bridge::Coordinator& game(){return *live_->game;}
+    const bridge::Coordinator& game()const{return *live_->game;}
     std::uint64_t checkpoint()const{return live_->checkpoint;}
     void checkpoint(std::uint64_t value){live_->checkpoint=value;}
     std::vector<std::uint8_t> save() const {

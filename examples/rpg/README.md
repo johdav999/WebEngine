@@ -21,7 +21,7 @@ Leaving RPG OFF builds a tiny omission executable; it must not link the kernel.
 
 With tests enabled, CTest also configures separate default-off/all-off consumers
 and asserts actionable failures for missing Modules, tests without RPG, and the
-undelivered quest/demo switches. The configuration matrix checks for accidental
+missing bridge dependencies and root-only demo switches. The configuration matrix checks for accidental
 engine-core, physics, GUI and dependency-download setup. See
 [full API/ownership contracts](../../docs/rpg.md) and
 [validation](../../docs/rpg-validation.md).
@@ -40,3 +40,7 @@ and an outer envelope around coordinated RPG/quest snapshots. The sample prepare
 and validates a complete replacement before publishing it. See
 [snapshot contracts](../../docs/rpg-snapshots.md) for canonical formats, stable-save
 boundaries and R9 host responsibilities; no storage or rendered host is added here.
+
+R9 adds the root-build rendered sample alongside this standalone consumer. See
+[host build/run and controls](../../docs/rpg-hosts.md) and
+[platform evidence](../../docs/rpg-r9-validation.md).

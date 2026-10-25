@@ -2,7 +2,7 @@
 
 Status: release architecture with R1 foundation, R2 characters/transactions,
 R3 inventory/equipment, R4 abilities/statuses/RNG, R5 encounters, R6 tactical actions,
-R7 quest bridge and R8 snapshots/restore implemented. Created
+R7 quest bridge, R8 snapshots/restore and R9 shared sample hosts implemented. Created
 2026-10-25 against WebEngine `56080eca124c9a62e15b146799a8004bdad5a9b2`.
 The delivered subset is documented in [rpg.md](rpg.md): optional RPG target,
 identities, metadata bindings/catalogue and runtime ownership, plus
@@ -13,7 +13,7 @@ identities, metadata bindings/catalogue and runtime ownership, plus
 [R6 tactical actions, spatial quotes, reactions and presentation gates](rpg-tactics.md)
 are delivered. [R7 coordinated quest rewards](rpg-quests.md) are implemented.
 [R8 snapshots and combined restore](rpg-snapshots.md) are implemented.
-Rendered hosts below remain proposed.
+[R9 shared sample hosts](rpg-hosts.md) are implemented; see [platform evidence](rpg-r9-validation.md).
 Use [validation](rpg-validation.md) for actual evidence. Existing
 [Modules](modules.md), [Quests](quests.md), [SDK composition](module-sdk.md),
 [Application](application-lifecycle.md) and [host contracts](consumer-hosts.md)
@@ -163,7 +163,7 @@ preempt malicious compiled code: providers are trusted, reviewed application cod
 
 R5 commits inactive/awaiting-command/finished encounter states. R6 delivers tactical
 spending and a separate committed presentation gate that also covers terminal
-outcomes. Host reservation/playback adapters remain R9. The following describes
+outcomes. R9 supplies host reservation/playback adapters in the optional sample. The following describes
 the complete release architecture. Release 1 uses an explicit state machine: inactive, awaiting command, preparing
 resolution, committed presentation pending, next turn, finished. Preparation is
 synchronous and private; the host observes only committed states. The encounter

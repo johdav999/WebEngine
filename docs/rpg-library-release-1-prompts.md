@@ -10,7 +10,8 @@ with [R4 evidence](rpg-r4-validation.md). R5 adds [encounter lifecycle and turn 
 with [R5 evidence](rpg-r5-validation.md). R6 adds [tactical actions and spatial/reaction contracts](rpg-tactics.md),
 with [R6 evidence](rpg-r6-validation.md). R7 adds [coordinated quest rewards](rpg-quests.md),
 with [R7 evidence](rpg-r7-validation.md). R8 adds [canonical snapshots and safe restore](rpg-snapshots.md),
-with [R8 evidence](rpg-r8-validation.md). Prompts 9-10 remain the sequential backlog.
+with [R8 evidence](rpg-r8-validation.md). R9 adds [shared rendered hosts](rpg-hosts.md), with [R9 evidence](rpg-r9-validation.md).
+Prompt 10 remains the sequential backlog; acceptance limitations are recorded separately.
 The original prompt text below is retained as the milestone acceptance scope.
 Run each prompt as a separate task in WebEngine; prompts 2-10 depend on the
 preceding delivered milestones. Keep working changes isolated and preserve other

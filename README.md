@@ -1937,7 +1937,8 @@ hosts remain later milestones.
 
 RPG R6: [tactical actions, immutable spatial quotes, bounded reactions and
 presentation recovery](docs/rpg-tactics.md); [validation](docs/rpg-r6-validation.md).
-Host route reservation and frozen-writer requirements are documented for R9.
+R9 supplies optional browser/Windows hosts with route reservation and frozen writers.
+See [build/run instructions](docs/rpg-hosts.md) and [validation](docs/rpg-r9-validation.md).
 
 RPG R7: optional [quest bridge, award ledger and publication proof](docs/rpg-quests.md);
 [Windows/Linux/Wasm evidence](docs/rpg-r7-validation.md). Base RPG remains independent

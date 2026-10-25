@@ -1,0 +1,55 @@
+name: RPG rendered hosts
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python tools/setup_windows.py
+      - run: cmake -S . -B build/rpg-host -A x64 -DBUILD_TESTING=OFF -DWEBENGINE_BUILD_WINDOWS=ON -DWEBENGINE_WINDOWS_DAWN=OFF -DWEBENGINE_BUILD_RPG=ON -DWEBENGINE_BUILD_QUESTS=ON -DWEBENGINE_BUILD_RPG_QUESTS=ON -DWEBENGINE_BUILD_RPG_DEMO=ON
+      - run: cmake --build build/rpg-host --config Release --target rpg_demo_windows rpg_host_tests --parallel 4
+      - run: ctest --test-dir build/rpg-host -C Release -R rpg_host --output-on-failure
+      - name: D3D12 rendered smoke
+        run: build/rpg-host/Release/rpg_demo_windows.exe --smoke build/evidence/rpg-d3d12
+      - run: python scripts/rpg-check-frames.py build/evidence/rpg-d3d12
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rpg-windows-host
+          path: |
+            build/evidence/rpg-d3d12
+            build/rpg-host/Release
+  browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Emscripten
+        run: |
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git .tools/emsdk
+          .tools/emsdk/emsdk install "$(cat .emscripten-version)"
+          .tools/emsdk/emsdk activate "$(cat .emscripten-version)"
+      - name: Build shared tests and browser host
+        run: |
+          source .tools/emsdk/emsdk_env.sh
+          emcmake cmake -S . -B build/rpg-host -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DWEBENGINE_BUILD_RPG=ON -DWEBENGINE_BUILD_QUESTS=ON -DWEBENGINE_BUILD_RPG_QUESTS=ON -DWEBENGINE_BUILD_RPG_DEMO=ON
+          cmake --build build/rpg-host --target rpg_demo rpg_host_tests --parallel 4
+          ctest --test-dir build/rpg-host -R rpg_host --output-on-failure
+      - name: Browser input and pixel acceptance
+        run: |
+          npm install --no-save playwright@1.62.1 pngjs@7.0.0
+          npx playwright install --with-deps chromium
+          node scripts/rpg-host-smoke.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rpg-browser-host
+          path: |
+            build/rpg-host/rpg-site
+            build/evidence/rpg-host

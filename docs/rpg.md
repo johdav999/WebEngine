@@ -1,4 +1,4 @@
-# Optional RPG library (R1-R8)
+# Optional RPG library (R1-R9)
 
 R1 implements `engine_rpg` / `WebEngine::RPG`: a standard-C++20 static library
 depending only on [Modules](modules.md). It supplies typed identities, validated
@@ -10,7 +10,7 @@ R5 adds [encounters, initiative, turn allowances and cooldowns](rpg-encounters.m
 R6 adds [tactical actions, spatial quotes, reactions and presentation gates](rpg-tactics.md).
 R7 adds the separately optional [quest bridge and award ledger](rpg-quests.md).
 R8 adds [canonical snapshots and safe restore](rpg-snapshots.md).
-Scene integration remains R9; the library owns no scheduler or renderer. See later milestones
+R9 adds the optional [shared rendered hosts](rpg-hosts.md); the library owns no scheduler or renderer. See later milestones
 in the [architecture](rpg-library-architecture.md) and
 [release prompts](rpg-library-release-1-prompts.md).
 
@@ -43,7 +43,8 @@ target_link_libraries(my_game PRIVATE WebEngine::RPG)
 Root builds include the same optional `rpg/` subdirectory through `cmake/rpg.cmake`.
 All four RPG options default OFF. `WEBENGINE_BUILD_RPG=ON` requires the existing
 Modules target. Tests require RPG enabled. `WEBENGINE_BUILD_RPG_QUESTS=ON` additionally requires the existing Quests target.
-`WEBENGINE_BUILD_RPG_DEMO=ON` still fails clearly because R9 is not implemented.
+`WEBENGINE_BUILD_RPG_DEMO=ON` selects the root-only rendered sample and requires
+RPGQuests. Standalone kernel consumers reject this host option explicitly.
 Omitting RPG creates no RPG target/test and has no effect on other libraries.
 This is source/CMake composition with one compatible toolchain, not a binary ABI.
 

@@ -6,7 +6,7 @@ WebEngine is a C++20 engine for games running in desktop and mobile browsers thr
 
 This document describes the implementation inspected on 2026-10-10 and the architectural boundaries for future work. The current architecture sections describe existing code. The evolution table describes intended additions and extensions, not delivered functionality. Keep these sections current when implementations change; source code and focused validation establish actual capability.
 
-## Optional RPG library R1-R8 and release plan (2026-10-25)
+## Optional RPG library R1-R9 and release plan (2026-10-25)
 
 `engine_rpg` / `WebEngine::RPG` now implements the optional standard-C++20 foundation
 above Modules: explicit content/session/entity identities, bounded metadata
@@ -17,7 +17,7 @@ does not replace existing published state. Runtime identity allocation creates n
 scene entity and owns no clock, renderer, physics, IO or gameplay scheduler.
 
 The root and standalone builds share `rpg/`. RPG and its tests default off;
-missing Modules/bridge dependencies and the undelivered demo option fail explicitly. The external
+missing Modules/bridge dependencies fail explicitly; the demo requires the root host build. The external
 `examples/rpg` consumer configures no engine core or platform dependencies. Native
 Windows/Linux and pinned Emscripten/Node contract/configuration tests are provided.
 See [delivered API](docs/rpg.md) and [actual evidence](docs/rpg-validation.md).
@@ -49,8 +49,8 @@ R6 now adds tactical ability/item/move authorization, AP/movement/resource costs
 immutable runtime/turn/world-stamped query quotes and bounded ordered reactions.
 Commit rechecks the host-supplied world stamp without callbacks. A pending
 presentation blocks input until a matching acknowledgement; acknowledgement only
-unlocks, never replays gameplay. Host route reservations/frozen writers are an
-explicit R9 integration obligation. See [R6 contracts](docs/rpg-tactics.md) and
+unlocks, never replays gameplay. The R9 sample reserves routes before commit and attaches no competing simulation
+writers to its presentation actors. See [R6 contracts](docs/rpg-tactics.md) and
 [evidence](docs/rpg-r6-validation.md). R7 adds the optional RPGQuests target above
 RPG and Quests, keeping their registries distinct. A private owner-thread coordinator
 prepares quest progress, typed reward operations and bounded award receipts,
@@ -62,7 +62,14 @@ rebased standalone restore and one-swap combined RPG/quest restore. The sample o
 envelope joins its checkpoint state to both kernels. No IO, migration, scene archive
 change or reward evaluation occurs during restore. See [R8 contracts](docs/rpg-snapshots.md)
 and [evidence](docs/rpg-r8-validation.md).
-Rendered browser/Windows samples remain future work. Third-person
+R9 adds a shared primitive 3D sample controller and scene under examples/rpg,
+with thin browser and DesktopHost adapters. Application owns ticks; only explicit
+commands advance turns. Camera inspection is presentation-only. Scene-scoped handles
+are rebuilt on travel/load; interrupted playback snaps to committed positions before
+acknowledgement. The example uses existing WaypointGraph navigation and host-owned
+combined saves (localStorage / atomic DesktopFiles). No host dependency enters the
+RPG kernel. See [host contracts](docs/rpg-hosts.md) and [R9 evidence](docs/rpg-r9-validation.md).
+Third-person
 camera policy, Lattice abilities, balance, factions and campaign/world state stay
 in RPGGame. Existing engine core, Quests and hosts never depend on RPG.
 

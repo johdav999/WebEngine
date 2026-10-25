@@ -1,10 +1,10 @@
 # Standalone consumer: add modules/ then rpg/. No engine root configuration.
 option(WEBENGINE_BUILD_RPG "Build portable RPG foundation" OFF)
 option(WEBENGINE_BUILD_RPG_TESTS "Build RPG native/Wasm contract tests" OFF)
-option(WEBENGINE_BUILD_RPG_DEMO "Build RPG rendered hosts (requires R9)" OFF)
+option(WEBENGINE_BUILD_RPG_DEMO "Build RPG rendered hosts and controller tests" OFF)
 option(WEBENGINE_BUILD_RPG_QUESTS "Build optional RPG quest bridge" OFF)
-if(WEBENGINE_BUILD_RPG_DEMO)
-  message(FATAL_ERROR "WEBENGINE_BUILD_RPG_DEMO is not implemented; rendered hosts are R9")
+if(WEBENGINE_BUILD_RPG_DEMO AND NOT TARGET engine_core)
+  message(FATAL_ERROR "WEBENGINE_BUILD_RPG_DEMO requires the root host build; standalone RPG stays renderer-free")
 endif()
 if(WEBENGINE_BUILD_RPG_QUESTS AND NOT WEBENGINE_BUILD_RPG)
   message(FATAL_ERROR "WEBENGINE_BUILD_RPG_QUESTS requires WEBENGINE_BUILD_RPG=ON")
