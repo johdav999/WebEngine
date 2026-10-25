@@ -11,7 +11,7 @@ const fs=require('node:fs/promises'),path=require('node:path'),http=require('nod
  const report={browser:await browser.version(),mode:'headless, SwiftShader requested',results:[]};
  try{for(const backend of (process.env.RPG_BACKENDS||'webgpu,webgl2').split(',')){
   const context=await browser.newContext({viewport:{width:1200,height:800}});const page=await context.newPage();const errors=[];page.on('pageerror',e=>{errors.push(String(e));console.error(e);});page.on('console',m=>console.log(backend,m.type(),m.text()));
-  const state=()=>page.evaluate(()=>window.rpgState);const wait=fn=>page.waitForFunction(fn,null,{timeout:60000});
+  const state=()=>page.evaluate(()=>window.rpgState);const wait=async fn=>{try{await page.waitForFunction(fn,null,{timeout:60000});}catch(e){console.error("Failed predicate",String(fn),await state());throw e;}};
   const click=id=>page.locator(`[data-command="${id}"]`).click();
   await page.goto(`${url}/?backend=${backend}`);await wait(()=>window.rpgState?.frames>8);assert.equal((await state()).backend,backend==='webgpu'?0:1);
   const canvas=page.locator('canvas');const png=PNG.sync.read(await canvas.screenshot());const colors=new Set();let colored=0;

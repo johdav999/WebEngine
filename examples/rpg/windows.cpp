@@ -2,6 +2,11 @@
 #include "engine/desktop.hpp"
 #include <fstream>
 #include <iostream>
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#endif
 
 int main(int argc,char**argv){try{
     using namespace engine;using namespace rpg_example;
@@ -42,6 +47,17 @@ int main(int argc,char**argv){try{
     auto turn=controller.state().turnEpoch;act(Action::Pause);controller.orbit(.4f);for(int i=0;i<5;++i)tick();require(controller.state().turnEpoch==turn,"Pause advanced turn");
     act(Action::Recover);act(Action::Pause);act(Action::Save);auto saved=storage.read();require(saved.has_value(),"Save missing");
     failWrite=true;try{controller.execute(Action::Save);throw std::logic_error("Write should fail");}catch(const std::runtime_error&){}failWrite=false;require(storage.read()==saved,"Failed write replaced save");
+#ifdef _WIN32
+    // Exercise the native window event queue and DesktopHost control mapping.
+    HWND window=nullptr;
+    EnumWindows([](HWND candidate,LPARAM data)->BOOL{DWORD process=0;GetWindowThreadProcessId(candidate,&process);
+        if(process==GetCurrentProcessId()){*reinterpret_cast<HWND*>(data)=candidate;return FALSE;}return TRUE;},reinterpret_cast<LPARAM>(&window));
+    require(window!=nullptr,"Native sample window missing");
+    auto key=[&](WPARAM value){auto scan=MapVirtualKeyW(static_cast<UINT>(value),MAPVK_VK_TO_VSC);auto down=LPARAM(1)|(LPARAM(scan)<<16);
+        require(PostMessageW(window,WM_KEYDOWN,value,down)!=0,"Native key down failed");
+        require(PostMessageW(window,WM_KEYUP,value,down|LPARAM(0xc0000000u))!=0,"Native key up failed");};
+    key(VK_SPACE);for(int i=0;i<5;++i)tick();require(controller.state().turnEpoch==turn+1,"Native keyboard did not end exactly one turn");
+#endif
     controller.enqueue(Action::Travel);controller.enqueue(Action::EndTurn);tick();require(controller.discarded>0,"Travel retained input");
     act(Action::Load);require(controller.awards()==2&&controller.state().turnEpoch==turn,"Reload changed receipts/turn");
     auto old=&controller.state();auto corrupt=*saved;corrupt.back()^=1;try{controller.load(corrupt,controller.epoch());throw std::logic_error("Corrupt load should fail");}catch(const std::invalid_argument&){}require(&controller.state()==old,"Corrupt load published");

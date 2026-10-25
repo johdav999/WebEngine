@@ -2,11 +2,11 @@
 #include "engine/renderer.hpp"
 #include <emscripten.h>
 
-EM_JS(int,readSave,(unsigned char*out,int capacity),{
+EM_JS(int,readSave,(unsigned char* out,int capacity),{
  try{let text=localStorage.getItem('webengine.rpg.v1');if(text===null)return 0;if(text.length>capacity*2)return -1;
  let bytes=atob(text);if(!bytes.length||bytes.length>capacity)return -1;for(let i=0;i<bytes.length;i++)HEAPU8[out+i]=bytes.charCodeAt(i);return bytes.length;}catch(e){return -1;}
 });
-EM_JS(int,writeSave,(const unsigned char*data,int size),{
+EM_JS(int,writeSave,(const unsigned char* data,int size),{
  try{if(window.rpgFailWrite)throw Error('Injected storage failure');let text="";for(let i=0;i<size;i++)text+=String.fromCharCode(HEAPU8[data+i]);
  localStorage.setItem('webengine.rpg.v1',btoa(text));return 1;}catch(e){return 0;}
 });
