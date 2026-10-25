@@ -169,4 +169,4 @@ R9's browser/Windows hosts must:
 These are documented integration requirements, not implemented host adapters or
 GPU acceptance. R7 receives the same single prepare/preflight/commit boundary for
 coordinated quest rewards; R8 must serialize durable positions/counters and reject
-saves while presentation is pending. Rendered host delivery remains R9.
+saves while presentation is pending. R9 delivers [shared rendered sample hosts](rpg-hosts.md); see [actual acceptance evidence](rpg-r9-validation.md).

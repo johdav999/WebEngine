@@ -128,7 +128,7 @@ allowance balances, cooldowns, phase hooks, outcome and the same prepare/commit
 candidate for tactical authorization. The host still owns commands and presentation.
 No simultaneous turns, mid-round summons, delay-turn, tactical positions, movement
 cost application, reaction system, pending-animation state or snapshot wire format
-is delivered here. Browser/Windows rendered integration remains R9. RPGGame's pin
+is delivered here. R9 supplies [browser/Windows rendered integration](rpg-hosts.md). RPGGame's pin
 is unchanged pending explicit adoption.
 
 ## R6 integration update

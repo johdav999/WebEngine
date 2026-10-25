@@ -129,5 +129,5 @@ It validates and restores a new sample bundle, then swaps the whole bundle once.
 Failure preserves sample state as well as both kernels. Its namespace, checkpoint
 meaning and storage/migration policy are sample choices, not engine defaults.
 
-R9 receives this boundary for browser/Windows storage and projection rebuilding.
+R9 implements [browser/Windows storage and projection rebuilding](rpg-hosts.md) above this boundary.
 No disk atomicity, backup recovery, rendered UI or GPU acceptance is claimed here.

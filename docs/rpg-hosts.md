@@ -83,9 +83,17 @@ localStorage setItem and DesktopFiles atomic write preserve the previous save on
 keyboard and pointer drag, inspect pixels on both browser backends, reload saves and
 test write failure. It owns a temporary browser profile and local HTTP server.
 Set RPG_SITE, EVIDENCE_DIR and optionally BROWSER_EXECUTABLE for a custom build.
+RPG_BACKENDS selects comma-separated backends; RPG_HARDWARE=1 uses the browser's
+hardware adapter instead of the default SwiftShader test flags. This is required
+for the validated local Edge WebGPU run. The two CI backend steps run independently.
 
 Native `--smoke output-directory` captures D3D12 frames, drives shared commands and
-checks storage/recovery/shutdown. `scripts/rpg-check-frames.py` checks captured pixels.
-The native script does not establish physical pointer/keyboard acceptance.
+checks storage/recovery/shutdown. Use a fresh output directory for a fresh save fixture.
+The smoke test injects focus, keyboard and drag events into SDL's native queue to
+exercise DesktopHost routing without taking focus from another app. It does not
+establish physical pointer/keyboard acceptance. `scripts/rpg-native-smoke.py` runs
+the executable with retained process/startup diagnostics; `scripts/rpg-check-frames.py`
+checks captured pixels. Native rendering requires a hardware D3D12 adapter; this
+engine backend deliberately has no implicit WARP fallback.
 The `RPG rendered hosts` workflow builds both hosts and uploads evidence. Actual
 results and device/software coverage are recorded in [R9 validation](rpg-r9-validation.md).
