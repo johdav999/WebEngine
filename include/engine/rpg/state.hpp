@@ -24,6 +24,7 @@ struct State {
     std::map<AwardId, AwardDisposition> awards;
     std::optional<PendingPresentation> presentation;
     std::map<EntityId, std::map<ContentId, CooldownState>> cooldowns;
+    std::map<ContentId, PartyState> parties;
 };
 struct AdvancementResult {
     EntityId entity;
@@ -44,5 +45,6 @@ struct Results {
     std::vector<ReactionResult> reactions;
     std::vector<PresentationResult> presentations;
     std::vector<AwardRecord> awards;
+    std::vector<PartyResult> parties;
 };
 } // namespace engine::rpg

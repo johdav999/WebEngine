@@ -1,5 +1,6 @@
 #pragma once
 #include "engine/rpg/abilities.hpp"
+#include "engine/rpg/parties.hpp"
 #include <functional>
 #include "engine/rpg/tactics.hpp"
 
@@ -19,6 +20,7 @@ struct EncounterState {
     TurnAllowance allowance;
     EncounterStage stage = EncounterStage::AwaitingCommand;
     EncounterOutcome outcome = EncounterOutcome::Continue;
+    std::map<EntityId, CombatMember> teams; // Empty legacy mode, otherwise exactly covers the fixed roster.
 };
 struct EncounterContext { const State& state; const EncounterState& encounter; };
 struct EncounterDecision { bool accepted = true; EncounterOutcome outcome = EncounterOutcome::Continue; };
@@ -33,7 +35,7 @@ struct EncounterHandler {
     std::function<std::vector<ReactionToken>(const TacticalContext&, ReactionPhase, const std::optional<ReactionToken>&)> reactions;
     std::function<EffectProposal(const ReactionContext&, Random&)> react;
 };
-struct BeginEncounter { HandlerReference policy; std::vector<EntityId> participants; };
+struct BeginEncounter { HandlerReference policy; std::vector<EntityId> participants; std::map<EntityId, CombatMember> teams; };
 struct EndTurn { EntityId entity; std::uint64_t encounterEpoch, turnEpoch; };
 struct FinishEncounter { std::uint64_t encounterEpoch, turnEpoch; };
 struct ExitEncounter { std::uint64_t encounterEpoch, turnEpoch; };

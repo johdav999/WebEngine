@@ -3,6 +3,8 @@
 #include <limits>
 
 namespace engine::rpg {
+void validateParties(const State&);
+void validateTeams(const State&, const EncounterState&);
 void recomputeEquipment(CharacterState&,const CharacterDefinition&);
 namespace {
 void need(bool ok,const char* text){if(!ok)throw Error(ErrorCode::InvalidSnapshot,text);}
@@ -24,6 +26,8 @@ void modifiers(const std::vector<Modifier>&v,const CharacterDefinition&d){
 void validateSnapshot(const Catalog&c,const Snapshot&snapshot){
     need(snapshot.catalog==encodeCatalog(c),"Snapshot catalogue compatibility mismatch");
     const auto&s=snapshot.state;
+    try{validateParties(s);if(s.encounter)validateTeams(s,*s.encounter);}
+    catch(const Error& e){throw Error(ErrorCode::InvalidSnapshot,e.what());}
     if(s.presentation)throw Error(ErrorCode::PresentationPending,"Complete or recover presentation before saving/loading");
     need(s.generation!=0,"Invalid generation");need(s.random.version==1,"Unknown random algorithm");
     cap(s.characters,Limits::characters);cap(s.inventories,Limits::inventories);cap(s.items,Limits::items);

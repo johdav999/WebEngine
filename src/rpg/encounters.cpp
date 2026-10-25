@@ -4,6 +4,7 @@
 #include <type_traits>
 
 namespace engine::rpg {
+void validateTeams(const State&, const EncounterState&);
 void applyAbilities(State&, Results&, const Catalog&, SessionId, const Operation&, std::size_t&, std::size_t&);
 namespace {
 void need(bool ok, ErrorCode code, const char* message) { if (!ok) throw Error(code, message); }
@@ -146,6 +147,7 @@ void applyEncounter(State& state, Results& results, const Catalog& catalog, Sess
             state.encounterEpoch = next(state.encounterEpoch);
             state.encounter.emplace(EncounterState{op.policy});
             auto& e = *state.encounter; e.epoch = state.encounterEpoch; e.turnEpoch = state.turnEpoch; e.roster = std::move(roster);
+            e.teams=op.teams;validateTeams(state,e);
             d.record(EncounterEvent::Began);
             if (!d.evaluate() && d.round()) d.seek();
         } else if constexpr (std::is_same_v<T, EndTurn>) {

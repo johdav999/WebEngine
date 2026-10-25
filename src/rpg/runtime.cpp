@@ -4,6 +4,7 @@
 #include <type_traits>
 
 namespace engine::rpg {
+void applyParty(State&, Results&, const Operation&);
 void applyInventory(State&, Results&, const Catalog&, SessionId, const Operation&);
 void applyAbilities(State&, Results&, const Catalog&, SessionId, const Operation&, std::size_t&, std::size_t&);
 void applyEncounter(State&, Results&, const Catalog&, SessionId, const Operation&, std::size_t&, std::size_t&, std::size_t&);
@@ -155,7 +156,9 @@ Transaction Runtime::prepare(const Command& command, Budget budget, std::optiona
     for (const auto& operation : command.operations_) {
       std::visit([&](const auto& op) {
         using T = std::decay_t<decltype(op)>;
-        if constexpr (std::is_same_v<T, RecordAward>) {
+        if constexpr (std::is_same_v<T, SetParty> || std::is_same_v<T, RemoveParty>) {
+            applyParty(*candidate, results, operation);
+        } else if constexpr (std::is_same_v<T, RecordAward>) {
             const auto& award = op.award;
             if (award.id.receipt.empty() || award.id.receipt.size() > Limits::receiptBytes ||
                 !std::all_of(award.id.receipt.begin(),award.id.receipt.end(),[](unsigned char c){return c >= 33 && c <= 126;}) ||
@@ -295,7 +298,7 @@ Transaction Runtime::prepare(const Command& command, Budget budget, std::optiona
           !std::holds_alternative<TacticalAction>(operation) && !std::holds_alternative<AcknowledgePresentation>(operation) && !std::holds_alternative<RecordAward>(operation))
           reconcileEncounter(*candidate, results, *catalog_, session_, effects, draws, work);
     }
-    if (results.created.size() + results.advancements.size() + results.inventories.size() + results.items.size() +
+    if (results.parties.size() + results.created.size() + results.advancements.size() + results.inventories.size() + results.items.size() +
         results.resources.size() + results.statuses.size() + results.abilities.size() + results.encounters.size() + results.cooldowns.size() + results.actions.size() + results.reactions.size() + results.presentations.size() + results.awards.size() > Limits::results)
         throw Error(ErrorCode::Limit, "Result record limit exceeded");
     candidate->producers.insert_or_assign(command.producer_, command.sequence_);

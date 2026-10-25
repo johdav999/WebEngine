@@ -8,9 +8,10 @@
 #include <utility>
 
 namespace engine::rpg {
-inline constexpr ModuleVersion apiVersion{1, 7, 0};
+inline constexpr ModuleVersion apiVersion{1, 8, 0};
 // API, content revision and snapshot wire version are independent.
 struct Limits {
+    static constexpr std::size_t parties = 64, partyMembers = 64, teams = 16;
     static constexpr std::size_t awards = 16384, receiptBytes = 257;
     static constexpr std::size_t pathPoints = 256, reactions = 256, reactionDepth = 8;
     static constexpr std::size_t participants = 64, encounterWork = 4096, cooldowns = 64;
@@ -28,7 +29,7 @@ enum class ErrorCode {
     InvalidSession, ExhaustedIdentity, InvalidDefinition, MissingDefinition,
     InvalidAmount, Overflow, StaleCommand, InvalidSequence, Reentrant,
     MissingEntity, MissingValue, InvalidModifier, BudgetExceeded, RejectedUnlock,
-    ConsumedTransaction, MissingInventory, MissingItem, InvalidQuantity, Capacity, InvalidSlot, InvalidOwnership, IncompatibleStack, RejectedEffect, InvalidTarget, InvalidStatus, StalePhase, InvalidEncounter, StaleTurn, RejectedEncounter, InvalidSpatial, StaleWorld, InvalidAction, PresentationPending, StalePresentation, InvalidAward, DuplicateAward, InvalidSnapshot
+    ConsumedTransaction, MissingInventory, MissingItem, InvalidQuantity, Capacity, InvalidSlot, InvalidOwnership, IncompatibleStack, RejectedEffect, InvalidTarget, InvalidStatus, StalePhase, InvalidEncounter, StaleTurn, RejectedEncounter, InvalidSpatial, StaleWorld, InvalidAction, PresentationPending, StalePresentation, InvalidAward, DuplicateAward, InvalidSnapshot, InvalidParty, InvalidTeam
 };
 class Error : public std::invalid_argument {
 public:

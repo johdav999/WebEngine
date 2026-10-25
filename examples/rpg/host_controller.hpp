@@ -35,6 +35,7 @@ class Controller {
     void initialize(){
         auto player=apply({r::CreateCharacter{r::ContentId("example.scholar")}}).created[0];
         auto partner=apply({r::CreateCharacter{r::ContentId("example.scholar")}}).created[0];
+        apply({r::SetParty{r::ContentId("example.party"),{2,1,{{player,true,r::ControlMode::Player},{partner,false,r::ControlMode::Player}},player}}});
         auto bag=apply({r::CreateInventory{r::ContentId("example.pack"),player}}).inventories[0];
         apply({r::AddItem{bag,r::ContentId("example.blade"),1},r::AddItem{bag,r::ContentId("example.tonic"),2},
                r::SetTacticalPosition{player,{-2,0,0}},r::SetTacticalPosition{partner,{2,0,0}}});
@@ -132,7 +133,7 @@ public:
         if(paused_||app_.suspended())throw std::invalid_argument("Resume to play");
         if(state().presentation)throw std::invalid_argument("Wait for presentation");
         switch(action){
-        case Action::Begin:{std::vector<r::EntityId> roster;for(auto&[id,c]:state().characters)roster.push_back(id);apply({r::BeginEncounter{{r::ContentId("example.turns"),1},roster}});break;}
+            case Action::Begin:{std::vector<r::EntityId> roster;for(auto&[id,c]:state().characters)roster.push_back(id);apply({r::BeginEncounter{{r::ContentId("example.turns"),1},roster,{{roster.front(),{r::ContentId("example.blue"),r::ControlMode::Player}},{roster.back(),{r::ContentId("example.red"),r::ControlMode::Player}}}}});break;}
         case Action::Move:tactical(true);break;
         case Action::Strike:tactical(false);break;
         case Action::EndTurn:{if(!state().encounter||!state().encounter->active)throw std::invalid_argument("No active turn");auto e=*state().encounter;apply({r::EndTurn{*e.active,e.epoch,e.turnEpoch}});break;}

@@ -70,7 +70,7 @@ acknowledgement. The example uses existing WaypointGraph navigation and host-own
 combined saves (localStorage / atomic DesktopFiles). No host dependency enters the
 RPG kernel. See [host contracts](docs/rpg-hosts.md) and [R9 evidence](docs/rpg-r9-validation.md).
 R10 adds a complete alternate standalone ruleset and the [release audit](docs/rpg-release-1.md).
-API 1.7.0 / wire 1 remain unchanged; L1 closes the RPG rendered CI gates with
+L1 retained API 1.7.0 / wire 1 and closed the RPG rendered CI gates with
 separate WARP/SwiftShader and Intel hardware evidence.
 Library stabilization L1 adds explicit `WEBENGINE_D3D12_WARP=1` diagnostic
 rendering for software-only Windows CI; default hardware selection remains strict.
@@ -83,6 +83,15 @@ to exercise batches; instance-buffer binding and lifetime remain unchanged.
 Linux software WebGPU acceptance uses full Chromium under Xvfb with Vulkan
 shared-image presentation and retains real frame/input/storage assertions and
 the normal GPU watchdog. See [L1 evidence](docs/rpg-l1-validation.md).
+
+Library milestone L2 adds persistent parties (active/reserve members, leader,
+control metadata) and explicit encounter teams to the portable RPG kernel.
+Party changes use atomic commands outside encounters; encounter team assignments
+are immutable and complete when supplied. Hosts own recruitment, AI, targeting and
+victory policy. API 1.8.0 supports v1 snapshots and a v2 party/team extension,
+while preserving v1 output for states without L2 data. Both rendered hosts use the
+shared party/team sample. See [L2 contracts](docs/rpg-parties.md) and
+[validation status](docs/rpg-l2-validation.md).
 Third-person camera policy, Lattice abilities, balance, factions and campaign/world state stay
 in RPGGame. Existing engine core, Quests and hosts never depend on RPG.
 

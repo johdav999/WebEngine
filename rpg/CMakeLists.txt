@@ -20,7 +20,7 @@ if(NOT TARGET WebEngine::Modules)
 endif()
 webengine_add_module(engine_rpg ALIAS WebEngine::RPG
   PUBLIC_INCLUDE_DIR "${CMAKE_CURRENT_LIST_DIR}/../include"
-  SOURCES ../src/rpg/snapshot.cpp ../src/rpg/snapshot_validation.cpp ../src/rpg/foundation.cpp ../src/rpg/characters.cpp ../src/rpg/runtime.cpp ../src/rpg/inventory.cpp ../src/rpg/random.cpp ../src/rpg/abilities.cpp ../src/rpg/encounters.cpp ../src/rpg/tactics.cpp
+  SOURCES ../src/rpg/parties.cpp ../src/rpg/snapshot.cpp ../src/rpg/snapshot_validation.cpp ../src/rpg/foundation.cpp ../src/rpg/characters.cpp ../src/rpg/runtime.cpp ../src/rpg/inventory.cpp ../src/rpg/random.cpp ../src/rpg/abilities.cpp ../src/rpg/encounters.cpp ../src/rpg/tactics.cpp
   PUBLIC_DEPENDENCIES WebEngine::Modules)
 if(WEBENGINE_BUILD_RPG_QUESTS)
   if(NOT TARGET WebEngine::Quests)
@@ -33,6 +33,13 @@ if(WEBENGINE_BUILD_RPG_QUESTS)
 endif()
 if(WEBENGINE_BUILD_RPG_TESTS)
   enable_testing()
+  add_executable(rpg_party_tests ../tests/rpg_party_tests.cpp)
+  target_link_libraries(rpg_party_tests PRIVATE WebEngine::RPG)
+  if(EMSCRIPTEN)
+    set_target_properties(rpg_party_tests PROPERTIES SUFFIX ".js")
+    target_link_options(rpg_party_tests PRIVATE -sENVIRONMENT=node -sEXIT_RUNTIME=1 -sALLOW_MEMORY_GROWTH=1)
+  endif()
+  add_test(NAME rpg_parties COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} $<TARGET_FILE:rpg_party_tests>)
   add_executable(rpg_snapshot_tests ../tests/rpg_snapshot_tests.cpp)
   target_link_libraries(rpg_snapshot_tests PRIVATE WebEngine::RPG)
   if(EMSCRIPTEN)

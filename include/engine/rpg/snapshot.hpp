@@ -3,7 +3,7 @@
 #include "engine/rpg/state.hpp"
 
 namespace engine::rpg {
-inline constexpr std::uint64_t snapshotVersion = 1;
+inline constexpr std::uint64_t snapshotVersion = 2; // Latest runtime snapshot version; legacy/catalogue envelopes remain v1.
 inline constexpr std::size_t snapshotByteLimit = 16 * 1024 * 1024;
 struct Snapshot {
     SessionId session;

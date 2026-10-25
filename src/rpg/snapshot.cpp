@@ -4,6 +4,9 @@
 #include <limits>
 
 namespace engine::rpg::wire {
+template<> struct Fields<PartyMember> { static constexpr auto members=std::tuple{&PartyMember::entity,&PartyMember::active,&PartyMember::control}; };
+template<> struct Fields<PartyState> { static constexpr auto members=std::tuple{&PartyState::capacity,&PartyState::activeLimit,&PartyState::members,&PartyState::leader}; };
+template<> struct Fields<CombatMember> { static constexpr auto members=std::tuple{&CombatMember::team,&CombatMember::control}; };
 template<> struct Fields<EntityId> { static constexpr auto members=std::tuple{&EntityId::session,&EntityId::value}; };
 template<> struct Fields<ItemId> { static constexpr auto members=std::tuple{&ItemId::session,&ItemId::value}; };
 template<> struct Fields<Amount> { static constexpr auto members=std::tuple{&Amount::value,&Amount::unit,&Amount::scale}; };
@@ -65,12 +68,25 @@ std::shared_ptr<const Catalog> decodeCatalog(std::span<const std::uint8_t>b,Bind
     wire::need(std::ranges::equal(b,canonical),"Noncanonical catalogue");return c;
 }
 std::vector<std::uint8_t> encodeSnapshot(const Catalog&c,const Snapshot&s){
-    validateSnapshot(c,s);wire::Writer w;wire::blob(w,encodeCatalog(c));wire::put(w,s.session);wire::put(w,s.state);return wire::wrap(2,w.bytes);
+    validateSnapshot(c,s);wire::Writer w;wire::blob(w,encodeCatalog(c));wire::put(w,s.session);wire::put(w,s.state);
+    const bool extended=!s.state.parties.empty()||(s.state.encounter&&!s.state.encounter->teams.empty());
+    if(extended){wire::put(w,s.state.parties);wire::put(w,s.state.encounter?s.state.encounter->teams:std::map<EntityId,CombatMember>{});}
+    return wire::wrap(2,w.bytes,extended?snapshotVersion:1);
 }
 Snapshot decodeSnapshot(const Catalog&c,std::span<const std::uint8_t>b){
-    auto r=wire::unwrap(b,2);auto catalog=wire::blob(r);auto expected=encodeCatalog(c);
+    wire::need(b.size()>=16,"Truncated snapshot version");wire::Reader header{b.subspan(8,8)};const auto version=header.number();
+    wire::need(version==1||version==snapshotVersion,"Unknown snapshot version");
+    auto r=wire::unwrap(b,2,version);auto catalog=wire::blob(r);auto expected=encodeCatalog(c);
     wire::need(std::ranges::equal(catalog,expected),"Catalogue/content/handler mismatch");
-    auto session=wire::get<SessionId>(r);auto state=wire::get<State>(r);r.end();
+    auto session=wire::get<SessionId>(r);auto state=wire::get<State>(r);
+    if(version==2){
+        state.parties=wire::get<decltype(state.parties)>(r);
+        auto teams=wire::get<std::map<EntityId,CombatMember>>(r);
+        wire::need(state.encounter||teams.empty(),"Teams without encounter");
+        if(state.encounter)state.encounter->teams=std::move(teams);
+        wire::need(!state.parties.empty()||(state.encounter&&!state.encounter->teams.empty()),"Empty v2 extension is noncanonical");
+    }
+    r.end();
     Snapshot s{session,std::move(state),std::vector<std::uint8_t>(catalog.begin(),catalog.end())};validateSnapshot(c,s);return s;
 }
 } // namespace engine::rpg

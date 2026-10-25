@@ -82,14 +82,14 @@ template<class T> struct Codec<std::set<T>> {
 inline std::uint64_t checksum(std::span<const std::uint8_t> bytes){std::uint64_t h=14695981039346656037ull;for(auto b:bytes){h^=b;h*=1099511628211ull;}return h;}
 inline void blob(Writer&w,std::span<const std::uint8_t>b){w.number(b.size());for(auto x:b)w.byte(x);}
 inline std::span<const std::uint8_t> blob(Reader&r){auto n=r.count(snapshotByteLimit);auto b=r.bytes.subspan(r.offset,n);r.offset+=n;return b;}
-inline std::vector<std::uint8_t> wrap(std::uint64_t tag,std::span<const std::uint8_t> payload){
+inline std::vector<std::uint8_t> wrap(std::uint64_t tag,std::span<const std::uint8_t> payload,std::uint64_t version=1){
     Writer w;for(auto b:std::string_view("WERPG\r\n\x1a",8))w.byte(static_cast<std::uint8_t>(b));
-    w.number(snapshotVersion);w.number(tag);blob(w,payload);w.number(checksum(w.bytes));return w.bytes;
+    w.number(version);w.number(tag);blob(w,payload);w.number(checksum(w.bytes));return w.bytes;
 }
-inline Reader unwrap(std::span<const std::uint8_t>b,std::uint64_t tag){
+inline Reader unwrap(std::span<const std::uint8_t>b,std::uint64_t tag,std::uint64_t version=1){
     need(b.size()>=40&&b.size()<=snapshotByteLimit,"Snapshot size");Reader r{b};
     for(auto c:std::string_view("WERPG\r\n\x1a",8))need(r.byte()==static_cast<std::uint8_t>(c),"Snapshot magic");
-    need(r.number()==snapshotVersion,"Snapshot version");need(r.number()==tag,"Snapshot tag");auto payload=blob(r);
+    need(r.number()==version,"Snapshot version");need(r.number()==tag,"Snapshot tag");auto payload=blob(r);
     need(r.number()==checksum(b.first(b.size()-8)),"Snapshot checksum");r.end();return Reader{payload};
 }
 } // namespace engine::rpg::wire
