@@ -27,7 +27,16 @@ Local Windows-hosted WebAssembly Release build passed all 15 CTest cases in
 and exact comparison of the 3,965-byte canonical fixture. The bridge-off build
 passed in 68.12 seconds; the disabled/invalid configuration matrix passed in
 96.77 seconds. Patch whitespace and 65 relative documentation links passed.
-Published Windows/Linux/Wasm CI results are pending.
+Published implementation: `8e6d28e166e8fc5351e6a7e1d4acafa2573d5935`.
+
+- [RPG library CI](https://github.com/johdav999/WebEngine/actions/runs/40202819123):
+  Windows/MSVC Release, Linux native and WebAssembly all passed, including the
+  exact 3,965-byte fixture comparison on each platform.
+- [Portable module SDK CI](https://github.com/johdav999/WebEngine/actions/runs/40202819117):
+  Windows, Linux and WebAssembly all passed.
+
+These results cover the RPG and portable module workflows, not the unrelated
+root renderer workflow.
 
 Existing engine-skill entry points and reference guides were updated and verified
 in WebEngine, RPGGame, CafeGame, the required Johan installation and CatGame mirror,
