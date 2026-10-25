@@ -16,6 +16,9 @@ struct State {
     std::uint64_t phaseEpoch = 0;
     std::uint64_t encounterEpoch = 0, turnEpoch = 0;
     std::optional<EncounterState> encounter;
+    std::map<EntityId, TacticalPosition> positions;
+    std::uint64_t actionEpoch = 0;
+    std::optional<PendingPresentation> presentation;
     std::map<EntityId, std::map<ContentId, CooldownState>> cooldowns;
 };
 struct AdvancementResult {
@@ -33,5 +36,8 @@ struct Results {
     std::vector<AbilityResult> abilities;
     std::vector<EncounterResult> encounters;
     std::vector<CooldownResult> cooldowns;
+    std::vector<TacticalResult> actions;
+    std::vector<ReactionResult> reactions;
+    std::vector<PresentationResult> presentations;
 };
 } // namespace engine::rpg

@@ -113,6 +113,8 @@ void Bindings::addEncounterHandler(ContentId id, EncounterHandler handler) {
     need(handler.version != 0, ErrorCode::InvalidVersion, "Invalid encounter handler version");
     need(handler.eligible && handler.initiative && handler.allowance && handler.decide,
         ErrorCode::MissingValidator, "Encounter policy requires every callback");
+    need(bool(handler.reactions) == bool(handler.react) && (!handler.reactions || handler.authorize),
+        ErrorCode::MissingValidator, "Reaction discovery/evaluation require tactical authorization");
     encounters_.emplace(std::move(id),std::move(handler));
 }
 const EncounterHandler* Bindings::findEncounter(const ContentId& id) const noexcept {

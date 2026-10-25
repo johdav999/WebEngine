@@ -1,6 +1,7 @@
 #pragma once
 #include "engine/rpg/abilities.hpp"
 #include <functional>
+#include "engine/rpg/tactics.hpp"
 
 namespace engine::rpg {
 enum class EncounterOutcome { Continue, Victory, Defeat, Escape, Stalemate };
@@ -28,6 +29,9 @@ struct EncounterHandler {
     std::function<std::int64_t(const EncounterContext&, EntityId)> initiative;
     std::function<TurnAllowance(const EncounterContext&, EntityId)> allowance;
     std::function<EncounterDecision(const EncounterContext&, EncounterCheck)> decide;
+    std::function<ActionPlan(const TacticalContext&)> authorize;
+    std::function<std::vector<ReactionToken>(const TacticalContext&, ReactionPhase, const std::optional<ReactionToken>&)> reactions;
+    std::function<EffectProposal(const ReactionContext&, Random&)> react;
 };
 struct BeginEncounter { HandlerReference policy; std::vector<EntityId> participants; };
 struct EndTurn { EntityId entity; std::uint64_t encounterEpoch, turnEpoch; };

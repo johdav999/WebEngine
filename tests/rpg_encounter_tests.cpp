@@ -84,8 +84,8 @@ void phasesAndFailures() {
     r::Budget budget;budget.encounterWork=0;reject(run,r::ErrorCode::BudgetExceeded,{end(run)},budget);
     budget={};budget.effects=0;reject(run,r::ErrorCode::BudgetExceeded,{end(run)},budget);
     budget={};budget.encounterWork=r::Limits::encounterWork+1;reject(run,r::ErrorCode::Limit,{end(run)},budget);
-    // First ability draws RNG, second fails; neither cost/effect/RNG nor encounter state publishes.
-    reject(run,r::ErrorCode::InvalidAmount,{r::UseAbility{b,id("example.strike"),{b},{}},delta(b,-100)});
+    // R6 requires the tactical wrapper for combat abilities; raw operations cannot bypass it.
+    reject(run,r::ErrorCode::InvalidAction,{r::UseAbility{b,id("example.strike"),{b},{}},delta(b,-100)});
     // OwnerEnd failure after a successful RNG action also rolls back the entire command.
     apply(run,{r::ApplyStatus{b,id("example.focused"),id("test.second")}});
     reject(run,r::ErrorCode::InvalidAmount,{delta(b,-19)});

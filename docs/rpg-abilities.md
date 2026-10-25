@@ -178,3 +178,12 @@ transaction or render-time progression.
 R5 integration is now delivered in [encounter contracts](rpg-encounters.md).
 Encounter-owned phases restrict round hooks to the roster and reject external
 AdvancePhase until exit; cooldowns run before each character's statuses.
+
+## R6 integration update
+
+[R6 tactical contracts](rpg-tactics.md) supersede the earlier handoff: combat
+UseAbility must now use a standalone TacticalAction with a retained spatial quote
+and tactical authorization. Raw UseAbility remains exploration-only. Pending
+presentation blocks mutation until a matching standalone acknowledgement, which
+does not run phases or outcome callbacks. Trusted administrative operations remain
+host-owned; never expose them as arbitrary player actions.

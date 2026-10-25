@@ -148,6 +148,14 @@ void phase(State& state, Results& results, const Catalog& catalog, const Advance
     state.phaseEpoch = op.epoch;
 }
 }
+void applyTacticalEffect(State& state, Results& results, const Catalog& catalog, const Effect& effect, std::size_t& budget) {
+    std::visit([&](const auto& value) {
+        using T = std::decay_t<decltype(value)>;
+        if constexpr (std::is_same_v<T, ResourceEffect>) resource(state,results,catalog,value,budget);
+        else if constexpr (std::is_same_v<T, ApplyStatus>) status(state,results,catalog,value,budget);
+        else dispel(state,results,catalog,value,budget);
+    },effect);
+}
 void Bindings::addAbilityHandler(ContentId id, AbilityHandler handler) {
     need(!handlers_.contains(id) && !advancement_.contains(id) && !abilities_.contains(id) && !encounters_.contains(id), ErrorCode::DuplicateHandler, "Duplicate RPG handler");
     need(size() < Limits::handlers, ErrorCode::Limit, "Too many RPG handlers");

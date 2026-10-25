@@ -1,4 +1,4 @@
-# Optional RPG library (R1-R5)
+# Optional RPG library (R1-R6)
 
 R1 implements `engine_rpg` / `WebEngine::RPG`: a standard-C++20 static library
 depending only on [Modules](modules.md). It supplies typed identities, validated
@@ -7,6 +7,7 @@ R2 adds [characters, modifiers, progression and shared transactions](rpg-charact
 R3 adds [inventory, durable items and equipment transactions](rpg-inventory.md).
 R4 adds [abilities, statuses and deterministic randomness](rpg-abilities.md).
 R5 adds [encounters, initiative, turn allowances and cooldowns](rpg-encounters.md).
+R6 adds [tactical actions, spatial quotes, reactions and presentation gates](rpg-tactics.md).
 Quest bridge, full snapshots, scene integration, scheduler and renderer
 remain outside the delivered library. Those remain later milestones
 in the [architecture](rpg-library-architecture.md) and
@@ -54,7 +55,7 @@ Headers are `engine/rpg/types.hpp`, `bindings.hpp`, `catalog.hpp` and `runtime.h
   underscore or hyphen within nonempty segments. Leading/trailing/repeated dots,
   uppercase, whitespace and non-ASCII bytes reject.
 - `ContentRevision` is an explicitly constructed positive uint64 selected by the
-  application. It is independent of `apiVersion` (currently 1.4.0).
+  application. It is independent of `apiVersion` (currently 1.5.0).
 - `SessionId` is a nonzero uint64 durable namespace chosen by the host. The host
   must ensure uniqueness between distinct persistent sessions. No global ID
   registry, random namespace generator or save restore is supplied.

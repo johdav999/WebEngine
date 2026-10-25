@@ -1934,3 +1934,7 @@ provides random damage, item-consuming healing and non-damage resource effects.
 RPG R5: [encounter lifecycle, initiative, turn budgets and cooldown phases](docs/rpg-encounters.md);
 [Windows/Linux/Wasm validation](docs/rpg-r5-validation.md). Tactical actions and rendered
 hosts remain later milestones.
+
+RPG R6: [tactical actions, immutable spatial quotes, bounded reactions and
+presentation recovery](docs/rpg-tactics.md); [validation](docs/rpg-r6-validation.md).
+Host route reservation and frozen-writer requirements are documented for R9.

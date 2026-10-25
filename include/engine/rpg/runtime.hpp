@@ -12,8 +12,8 @@ struct RemoveModifiers { EntityId entity; ContentId source; };
 struct AddExperience { EntityId entity; Amount amount; };
 using Operation = std::variant<CreateCharacter, SetAttributeBase, AdjustResource,
                                SetModifiers, RemoveModifiers, AddExperience, CreateInventory, AddItem, RemoveItem,
-                               SplitItem, MergeItems, TransferItem, EquipItem, UnequipItem, UseAbility, ApplyStatus, DispelStatus, AdvancePhase, BeginEncounter, EndTurn, FinishEncounter, ExitEncounter, SetCooldown>;
-struct Budget { std::size_t operations = 256, advancements = 256, effects = 256, randomDraws = 4096, encounterWork = 4096; };
+                               SplitItem, MergeItems, TransferItem, EquipItem, UnequipItem, UseAbility, ApplyStatus, DispelStatus, AdvancePhase, BeginEncounter, EndTurn, FinishEncounter, ExitEncounter, SetCooldown, SetTacticalPosition, TacticalAction, AcknowledgePresentation>;
+struct Budget { std::size_t operations = 256, advancements = 256, effects = 256, randomDraws = 4096, encounterWork = 4096, reactions = 256, reactionDepth = 8; };
 class Command {
 public:
     std::uint64_t generation() const noexcept { return generation_; }
@@ -46,6 +46,7 @@ private:
     std::shared_ptr<const State> state_;
     Results results_;
     bool consumed_ = false;
+    std::optional<WorldStamp> world_;
 };
 // Single owner thread. No concurrent access, IO, clock or implicit command queue.
 class Runtime {
@@ -61,9 +62,10 @@ public:
     std::uint64_t nextEntity() const noexcept { return state_->nextEntity; }
     EntityId allocateEntityId(); // R1 compatibility: reserved ID, no character; invalidates candidates.
     Command command(ContentId producer, std::uint64_t sequence, std::vector<Operation>) const;
-    Transaction prepare(const Command&, Budget = {});
-    bool canCommit(const Transaction&) const noexcept;
-    bool commit(Transaction&&) noexcept;
+    std::shared_ptr<const SpatialQuote> spatialQuote(EntityId, SpatialSnapshot, std::optional<PathQuote> = {}) const;
+    Transaction prepare(const Command&, Budget = {}, std::optional<WorldStamp> = {});
+    bool canCommit(const Transaction&, std::optional<WorldStamp> = {}) const noexcept;
+    bool commit(Transaction&&, std::optional<WorldStamp> = {}) noexcept;
     void invalidateCommands(); // Explicit host lifecycle boundary, no progression reset.
 private:
     std::shared_ptr<const Catalog> catalog_;

@@ -130,3 +130,12 @@ No simultaneous turns, mid-round summons, delay-turn, tactical positions, moveme
 cost application, reaction system, pending-animation state or snapshot wire format
 is delivered here. Browser/Windows rendered integration remains R9. RPGGame's pin
 is unchanged pending explicit adoption.
+
+## R6 integration update
+
+[R6 tactical contracts](rpg-tactics.md) supersede the earlier handoff: combat
+UseAbility must now use a standalone TacticalAction with a retained spatial quote
+and tactical authorization. Raw UseAbility remains exploration-only. Pending
+presentation blocks mutation until a matching standalone acknowledgement, which
+does not run phases or outcome callbacks. Trusted administrative operations remain
+host-owned; never expose them as arbitrary player actions.

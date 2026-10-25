@@ -20,10 +20,17 @@ if(NOT TARGET WebEngine::Modules)
 endif()
 webengine_add_module(engine_rpg ALIAS WebEngine::RPG
   PUBLIC_INCLUDE_DIR "${CMAKE_CURRENT_LIST_DIR}/../include"
-  SOURCES ../src/rpg/foundation.cpp ../src/rpg/characters.cpp ../src/rpg/runtime.cpp ../src/rpg/inventory.cpp ../src/rpg/random.cpp ../src/rpg/abilities.cpp ../src/rpg/encounters.cpp
+  SOURCES ../src/rpg/foundation.cpp ../src/rpg/characters.cpp ../src/rpg/runtime.cpp ../src/rpg/inventory.cpp ../src/rpg/random.cpp ../src/rpg/abilities.cpp ../src/rpg/encounters.cpp ../src/rpg/tactics.cpp
   PUBLIC_DEPENDENCIES WebEngine::Modules)
 if(WEBENGINE_BUILD_RPG_TESTS)
   enable_testing()
+  add_executable(rpg_tactical_tests ../tests/rpg_tactical_tests.cpp)
+  target_link_libraries(rpg_tactical_tests PRIVATE WebEngine::RPG)
+  if(EMSCRIPTEN)
+    set_target_properties(rpg_tactical_tests PROPERTIES SUFFIX ".js")
+    target_link_options(rpg_tactical_tests PRIVATE -sENVIRONMENT=node -sEXIT_RUNTIME=1 -sALLOW_MEMORY_GROWTH=1)
+  endif()
+  add_test(NAME rpg_tactics COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} $<TARGET_FILE:rpg_tactical_tests>)
   add_executable(rpg_encounter_tests ../tests/rpg_encounter_tests.cpp)
   target_link_libraries(rpg_encounter_tests PRIVATE WebEngine::RPG)
   if(EMSCRIPTEN)

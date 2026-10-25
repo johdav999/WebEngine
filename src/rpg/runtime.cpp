@@ -8,6 +8,7 @@ void applyInventory(State&, Results&, const Catalog&, SessionId, const Operation
 void applyAbilities(State&, Results&, const Catalog&, SessionId, const Operation&, std::size_t&, std::size_t&);
 void applyEncounter(State&, Results&, const Catalog&, SessionId, const Operation&, std::size_t&, std::size_t&, std::size_t&);
 void reconcileEncounter(State&, Results&, const Catalog&, SessionId, std::size_t&, std::size_t&, std::size_t&);
+void applyTactics(State&, Results&, const Catalog&, SessionId, const TacticalAction&, Budget, std::size_t&, std::size_t&, std::size_t&);
 namespace {
 std::int64_t add(std::int64_t a, std::int64_t b) {
     if ((b > 0 && a > std::numeric_limits<std::int64_t>::max() - b) ||
@@ -106,7 +107,7 @@ Command Runtime::command(ContentId producer, std::uint64_t sequence, std::vector
         throw Error(ErrorCode::Limit, "Command requires 1-256 operations");
     return Command(owner_, state_->generation, state_->revision, std::move(producer), sequence, std::move(operations));
 }
-Transaction Runtime::prepare(const Command& command, Budget budget) {
+Transaction Runtime::prepare(const Command& command, Budget budget, std::optional<WorldStamp> world) {
     Guard guard(busy_);
     if (command.owner_ != owner_ || command.generation_ != state_->generation || command.revision_ != state_->revision)
         throw Error(ErrorCode::StaleCommand, "Foreign or stale command");
@@ -116,10 +117,17 @@ Transaction Runtime::prepare(const Command& command, Budget budget) {
     if (watermark == state_->producers.end() && state_->producers.size() >= Limits::producers)
         throw Error(ErrorCode::Limit, "Too many command producers");
     if (budget.operations > Limits::operations || budget.advancements > Limits::advancements ||
-        budget.effects > Limits::effects || budget.randomDraws > Limits::randomDraws || budget.encounterWork > Limits::encounterWork)
+        budget.effects > Limits::effects || budget.randomDraws > Limits::randomDraws || budget.encounterWork > Limits::encounterWork || budget.reactions > Limits::reactions || budget.reactionDepth > Limits::reactionDepth)
         throw Error(ErrorCode::Limit, "Budget exceeds hard limit");
     if (command.operations_.size() > budget.operations)
         throw Error(ErrorCode::BudgetExceeded, "Operation budget exhausted");
+    for (const auto& op : command.operations_) {
+        const bool ack = std::holds_alternative<AcknowledgePresentation>(op);
+        const bool action = std::holds_alternative<TacticalAction>(op);
+        if ((ack || action) && command.operations_.size() != 1)
+            throw Error(ErrorCode::InvalidAction, "Tactical actions/acknowledgements must be standalone commands");
+        if (state_->presentation && !ack) throw Error(ErrorCode::PresentationPending, "Recover or finish presentation before mutation");
+    }
     auto candidate = std::make_shared<State>(*state_);
     candidate->revision = increment(state_->revision);
     Transaction transaction;
@@ -129,7 +137,28 @@ Transaction Runtime::prepare(const Command& command, Budget budget) {
     for (const auto& operation : command.operations_) {
       std::visit([&](const auto& op) {
         using T = std::decay_t<decltype(op)>;
-        if constexpr (std::is_same_v<T, BeginEncounter> || std::is_same_v<T, EndTurn> ||
+        if constexpr (std::is_same_v<T, TacticalAction>) {
+            const auto& quote = op.spatial;
+            if (!quote || quote->owner_ != owner_ || quote->generation_ != state_->generation ||
+                quote->revision_ != state_->revision || quote->actor_ != op.actor ||
+                quote->encounter_ != op.encounterEpoch || quote->turn_ != op.turnEpoch)
+                throw Error(ErrorCode::InvalidSpatial, "Missing, foreign or stale spatial quote");
+            if (!world || *world != quote->snapshot_.world) throw Error(ErrorCode::StaleWorld, "Spatial world revision changed");
+            transaction.world_ = world;
+            applyTactics(*candidate, results, *catalog_, session_, op, budget, effects, draws, work);
+        } else if constexpr (std::is_same_v<T, AcknowledgePresentation>) {
+            const auto& pending = candidate->presentation;
+            if (!pending || op.actionEpoch != pending->actionEpoch || op.encounterEpoch != pending->encounterEpoch || op.turnEpoch != pending->turnEpoch)
+                throw Error(ErrorCode::StalePresentation, "Missing or stale presentation acknowledgement");
+            if (op.completion != PresentationCompletion::Completed && op.completion != PresentationCompletion::Skipped && op.completion != PresentationCompletion::Recovered)
+                throw Error(ErrorCode::InvalidAction, "Invalid presentation completion");
+            results.presentations.push_back({op.actionEpoch,op.completion});
+            candidate->presentation.reset();
+        } else if constexpr (std::is_same_v<T, SetTacticalPosition>) {
+            if (candidate->encounter) throw Error(ErrorCode::InvalidAction, "Encounter positions change only through tactical moves");
+            if (!candidate->characters.contains(op.entity)) throw Error(ErrorCode::MissingEntity, "Unknown tactical actor");
+            candidate->positions.insert_or_assign(op.entity,op.position);
+        } else if constexpr (std::is_same_v<T, BeginEncounter> || std::is_same_v<T, EndTurn> ||
             std::is_same_v<T, FinishEncounter> || std::is_same_v<T, ExitEncounter> || std::is_same_v<T, SetCooldown>) {
             applyEncounter(*candidate, results, *catalog_, session_, operation, effects, draws, work);
         } else if constexpr (std::is_same_v<T, CreateCharacter>) {
@@ -149,6 +178,8 @@ Transaction Runtime::prepare(const Command& command, Budget budget) {
             applyInventory(*candidate, results, *catalog_, session_, operation);
         } else if constexpr (std::is_same_v<T, UseAbility> || std::is_same_v<T, ApplyStatus> ||
             std::is_same_v<T, DispelStatus> || std::is_same_v<T, AdvancePhase>) {
+            if constexpr (std::is_same_v<T, UseAbility>)
+                if (candidate->encounter) throw Error(ErrorCode::InvalidAction, "Use TacticalAction for encounter abilities/items");
             if constexpr (std::is_same_v<T, AdvancePhase>)
                 if (candidate->encounter) throw Error(ErrorCode::InvalidEncounter, "Encounter owns phase advancement until exit");
             applyAbilities(*candidate, results, *catalog_, session_, operation, effects, draws);
@@ -233,28 +264,30 @@ Transaction Runtime::prepare(const Command& command, Budget budget) {
     }, operation);
       // Lifecycle operations reconcile internally; other mutations check outcomes and active eligibility.
       if (!std::holds_alternative<BeginEncounter>(operation) && !std::holds_alternative<EndTurn>(operation) &&
-          !std::holds_alternative<FinishEncounter>(operation) && !std::holds_alternative<ExitEncounter>(operation))
+          !std::holds_alternative<FinishEncounter>(operation) && !std::holds_alternative<ExitEncounter>(operation) &&
+          !std::holds_alternative<TacticalAction>(operation) && !std::holds_alternative<AcknowledgePresentation>(operation))
           reconcileEncounter(*candidate, results, *catalog_, session_, effects, draws, work);
     }
     if (results.created.size() + results.advancements.size() + results.inventories.size() + results.items.size() +
-        results.resources.size() + results.statuses.size() + results.abilities.size() + results.encounters.size() + results.cooldowns.size() > Limits::results)
+        results.resources.size() + results.statuses.size() + results.abilities.size() + results.encounters.size() + results.cooldowns.size() + results.actions.size() + results.reactions.size() + results.presentations.size() > Limits::results)
         throw Error(ErrorCode::Limit, "Result record limit exceeded");
     candidate->producers.insert_or_assign(command.producer_, command.sequence_);
     transaction.state_ = std::move(candidate);
     return transaction;
 }
-bool Runtime::canCommit(const Transaction& transaction) const noexcept {
-    return !busy_ && !transaction.consumed_ && transaction.state_ && transaction.owner_ == owner_ &&
+bool Runtime::canCommit(const Transaction& transaction, std::optional<WorldStamp> world) const noexcept {
+    return (!transaction.world_ || (world && *world == *transaction.world_)) && !busy_ && !transaction.consumed_ && transaction.state_ && transaction.owner_ == owner_ &&
         transaction.generation_ == state_->generation && transaction.revision_ == state_->revision;
 }
-bool Runtime::commit(Transaction&& transaction) noexcept {
-    if (!canCommit(transaction)) return false;
+bool Runtime::commit(Transaction&& transaction, std::optional<WorldStamp> world) noexcept {
+    if (!canCommit(transaction, world)) return false;
     state_.swap(transaction.state_); // Retire old state with the transaction, outside publication.
     transaction.consumed_ = true;
     return true;
 }
 EntityId Runtime::allocateEntityId() {
     Guard guard(busy_);
+    if (state_->presentation) throw Error(ErrorCode::PresentationPending, "Presentation is pending");
     auto candidate = std::make_shared<State>(*state_);
     candidate->revision = increment(state_->revision);
     auto id = allocate(*candidate, session_);
