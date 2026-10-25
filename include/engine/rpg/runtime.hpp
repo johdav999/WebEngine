@@ -3,8 +3,13 @@
 #include "engine/rpg/state.hpp"
 #include "engine/rpg/snapshot.hpp"
 #include <variant>
+#include <stop_token>
 
 namespace engine::rpg {
+struct CombatOption;
+struct CombatScoreContext;
+struct CombatAiBudget;
+class CombatPlan;
 struct RecordAward { AwardRecord award; };
 struct CreateCharacter { ContentId definition; };
 struct SetAttributeBase { EntityId entity; ContentId attribute; Amount amount; };
@@ -49,6 +54,7 @@ private:
     Results results_;
     bool consumed_ = false;
     std::optional<WorldStamp> world_;
+    std::stop_token stop_;
 };
 // Single owner thread. No concurrent access, IO, clock or implicit command queue.
 class Runtime {
@@ -66,6 +72,11 @@ public:
     Command command(ContentId producer, std::uint64_t sequence, std::vector<Operation>) const;
     std::shared_ptr<const SpatialQuote> spatialQuote(EntityId, SpatialSnapshot, std::optional<PathQuote> = {}) const;
     Transaction prepare(const Command&, Budget = {}, std::optional<WorldStamp> = {});
+    CombatPlan planCombat(ContentId producer, std::uint64_t sequence, EntityId actor,
+        std::span<const CombatOption>,
+        const std::function<std::optional<std::int64_t>(const CombatScoreContext&)>&,
+        const CombatAiBudget&, WorldStamp, std::stop_token = {});
+    Transaction prepareCombat(const CombatPlan&, WorldStamp, Budget = {});
     bool canCommit(const Transaction&, std::optional<WorldStamp> = {}) const noexcept;
     bool commit(Transaction&&, std::optional<WorldStamp> = {}) noexcept;
     void invalidateCommands(); // Explicit host lifecycle boundary, no progression reset.
@@ -74,6 +85,7 @@ public:
     void restore(std::span<const std::uint8_t>);
 private:
     std::shared_ptr<const Catalog> catalog_;
+    Transaction prepareUnlocked(const Command&, Budget, std::optional<WorldStamp>);
     SessionId session_;
     std::shared_ptr<const void> owner_ = std::make_shared<int>(0);
     std::shared_ptr<const State> state_;

@@ -131,6 +131,9 @@ Command Runtime::command(ContentId producer, std::uint64_t sequence, std::vector
 }
 Transaction Runtime::prepare(const Command& command, Budget budget, std::optional<WorldStamp> world) {
     Guard guard(busy_);
+    return prepareUnlocked(command,budget,world);
+}
+Transaction Runtime::prepareUnlocked(const Command& command, Budget budget, std::optional<WorldStamp> world) {
     if (command.owner_ != owner_ || command.generation_ != state_->generation || command.revision_ != state_->revision)
         throw Error(ErrorCode::StaleCommand, "Foreign or stale command");
     const auto watermark = state_->producers.find(command.producer_);
@@ -314,7 +317,7 @@ Transaction Runtime::prepare(const Command& command, Budget budget, std::optiona
     return transaction;
 }
 bool Runtime::canCommit(const Transaction& transaction, std::optional<WorldStamp> world) const noexcept {
-    return (!transaction.world_ || (world && *world == *transaction.world_)) && !busy_ && !transaction.consumed_ && transaction.state_ && transaction.owner_ == owner_ &&
+    return !transaction.stop_.stop_requested() && (!transaction.world_ || (world && *world == *transaction.world_)) && !busy_ && !transaction.consumed_ && transaction.state_ && transaction.owner_ == owner_ &&
         transaction.generation_ == state_->generation && transaction.revision_ == state_->revision;
 }
 bool Runtime::commit(Transaction&& transaction, std::optional<WorldStamp> world) noexcept {

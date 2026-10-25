@@ -95,6 +95,16 @@ shared party/team sample. See [L2 contracts](docs/rpg-parties.md) and
 Third-person camera policy, Lattice abilities, balance, factions and campaign/world state stay
 in RPGGame. Existing engine core, Quests and hosts never depend on RPG.
 
+Library milestone L5 adds synchronous bounded combat planning: hosts enumerate
+stamped tactical candidates, the ordinary transaction pipeline filters legality,
+and pure game scorers select with stable ID tie-breaking. Validated EndTurn is
+the explicit fallback. Stop tokens and runtime/turn/world stamps protect deferred
+execution; planning never publishes state or RNG. The RPGQuests coordinator
+forwards planning without exposing its kernels. Both sample hosts expose AI step;
+automatic scheduling, navigation and enemy policy remain game-owned. API 1.11.0
+retains L4 snapshot formats. See [contracts](docs/rpg-combat-ai.md) and
+[validation](docs/rpg-l5-validation.md).
+
 Library milestone L4 adds optional vitality over existing character resources,
 typed damage/healing/defeat/revival effects, incapacitated actor gates and
 nonempty-team defeat queries. Rulesets own formulas, resistance, revival costs,

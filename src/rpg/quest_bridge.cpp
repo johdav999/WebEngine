@@ -121,6 +121,15 @@ RpgTransaction Coordinator::prepareRpg(ContentId id,std::uint64_t sequence,std::
 bool Coordinator::canCommitRpg(const RpgTransaction& tx,std::optional<WorldStamp> world) const noexcept {
     return !busy_ && tx.owner_==owner_ && kernels_->rpg.canCommit(tx.tx_,world);
 }
+CombatPlan Coordinator::planCombat(ContentId id,std::uint64_t sequence,EntityId actor,
+    std::span<const CombatOption> options,const CombatScorer& score,const CombatAiBudget& budget,WorldStamp world,std::stop_token stop){
+    Guard guard(busy_);
+    need(id!=producer(),ErrorCode::InvalidAward,"Bridge award producer is reserved");
+    return kernels_->rpg.planCombat(std::move(id),sequence,actor,options,score,budget,world,stop);
+}
+RpgTransaction Coordinator::prepareCombat(const CombatPlan& plan,WorldStamp world,Budget budget){
+    Guard guard(busy_);return RpgTransaction(owner_,kernels_->rpg.prepareCombat(plan,world,budget));
+}
 bool Coordinator::commitRpg(RpgTransaction&& tx,std::optional<WorldStamp> world) noexcept {
     if(!canCommitRpg(tx,world))return false;
     return kernels_->rpg.commit(std::move(tx.tx_),world);

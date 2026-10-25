@@ -1,5 +1,6 @@
 #pragma once
 #include "engine/rpg/runtime.hpp"
+#include "engine/rpg/combat_ai.hpp"
 #include "engine/quests/runtime.hpp"
 
 namespace engine::rpg::quest_bridge {
@@ -78,6 +79,9 @@ public:
     RpgTransaction prepareRpg(ContentId producer, std::uint64_t sequence, std::vector<Operation>,
                               Budget = {}, std::optional<WorldStamp> = {});
     bool canCommitRpg(const RpgTransaction&, std::optional<WorldStamp> = {}) const noexcept;
+    CombatPlan planCombat(ContentId producer, std::uint64_t sequence, EntityId,
+        std::span<const CombatOption>, const CombatScorer&, const CombatAiBudget&, WorldStamp, std::stop_token = {});
+    RpgTransaction prepareCombat(const CombatPlan&, WorldStamp, Budget = {});
     bool commitRpg(RpgTransaction&&, std::optional<WorldStamp> = {}) noexcept;
     Results applyRpg(ContentId producer, std::uint64_t sequence, std::vector<Operation>,
                      Budget = {}, std::optional<WorldStamp> = {});

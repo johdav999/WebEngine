@@ -125,4 +125,20 @@ void spatialAndPending() {
     auto quest=f.game.prepare(f.game.command());check(f.game.commit(std::move(quest)),"quest work after recovery");
 }
 }
-int main(){try{atomicRewards();rejectedCompound();staleness();projectionsAndReplay();callbacksAndLedger();spatialAndPending();std::cout<<"R7 quest bridge checks: "<<checks<<'\n';return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+void combatPlanning(){
+    Fixture f;f.apply({r::SetTacticalPosition{f.actor,{0,0,0}},r::BeginEncounter{{id("example.turns"),1},{f.actor}}});
+    const r::WorldStamp world{9,1};r::SpatialSnapshot spatial{world,{{f.actor,{0,0,0},true}},{f.actor}};
+    auto quote=f.game.spatialQuote(f.actor,spatial,r::PathQuote{{0,0,0},{1,0,0},1,{{0,0,0},{1,0,0}},true,true,true});
+    const auto&e=*f.game.rpgState().encounter;
+    std::vector<r::CombatOption> options{{id("test.move"),{f.actor,e.epoch,e.turnEpoch,r::MoveAction{},quote}}};
+    r::CombatScorer scorer=[](const auto&)->std::optional<std::int64_t>{return 1;};
+    auto before=f.game.save();
+    rejects(r::ErrorCode::InvalidAward,[&]{f.game.planCombat(id("webengine.quest-awards"),1,f.actor,options,scorer,{},world);});
+    rejects(r::ErrorCode::Reentrant,[&]{f.game.planCombat(id("test.ai"),1,f.actor,options,[&](const auto&)->std::optional<std::int64_t>{f.game.invalidateRpgCommands();return 1;},{},world);});
+    auto plan=f.game.planCombat(id("test.ai"),1,f.actor,options,scorer,{},world);
+    check(plan.selected()==id("test.move")&&f.game.save()==before,"Bridge planner mutated kernels");
+    auto tx=f.game.prepareCombat(plan,world);check(!f.game.commitRpg(std::move(tx),r::WorldStamp{9,2}),"Bridge AI stale world");
+    check(f.game.commitRpg(std::move(tx),world)&&f.game.rpgState().positions.at(f.actor).x==1,"Bridge AI publication");
+    check(f.game.questState().receipts.empty()&&f.game.pending()==0,"AI changed quest kernel");
+}
+int main(){try{atomicRewards();rejectedCompound();staleness();projectionsAndReplay();callbacksAndLedger();spatialAndPending();combatPlanning();std::cout<<"R7 quest bridge checks: "<<checks<<'\n';return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

@@ -325,6 +325,16 @@ recruitment, AI, targeting and victory policy. Runtime snapshots retain v1
 compatibility and add a v2 party/team extension. Both hosts share the updated
 sample. See [contracts](rpg-parties.md) and [validation](rpg-l2-validation.md).
 
+## Library milestone L5 (implemented)
+
+API 1.11.0 provides bounded combat candidate evaluation through ordinary tactical
+transactions, pure game utility scoring, stable ID ties, validated end-turn
+fallback and stop-token cancellation through final publication. Plans retain
+private command identity and revalidate before execution. The optional quest
+coordinator and both sample hosts use the same implementation. No scheduler,
+navigation or enemy-specific policy enters the kernel; wire formats are unchanged.
+See [contracts](rpg-combat-ai.md) and [validation](rpg-l5-validation.md).
+
 ## Library milestone L4 (implemented)
 
 API 1.10.0 adds optional vitality profiles over existing resources, typed

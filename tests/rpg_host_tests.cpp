@@ -36,6 +36,8 @@ int main(){try{
  c.execute(Action::EndTurn);check(c.state().turnEpoch>turn,"End turn failed");c.execute(Action::Move);c.cancelInput();tick();check(!c.reserved()&&!c.state().presentation,"Focus recovery failed");
  auto suspended=c.state().revision;app.setSuspended(true);for(int i=0;i<5;++i)tick();check(c.state().revision==suspended,"Suspension advanced gameplay");app.setSuspended(false);
  c.execute(Action::Move);for(int i=0;i<12;++i)tick();check(!c.reserved()&&!c.state().presentation,"Playback did not complete");
+ c.execute(Action::EndTurn);c.execute(Action::AiStep);check(c.state().presentation.has_value(),"AI strike missing");c.execute(Action::Recover);
+ auto aiTurn=c.state().turnEpoch;c.execute(Action::AiStep);check(c.state().turnEpoch>aiTurn&&!c.state().presentation,"AI fallback missing");
  c.execute(Action::Finish);check(!c.state().encounter,"Exit failed");app.shutdown();check(app.loadedSceneCount()==0,"Shutdown retained scene");
  std::cout<<"R9 host checks: "<<checks<<'\n';return 0;
 }catch(const std::exception&e){std::cerr<<e.what()<<'\n';return 1;}}

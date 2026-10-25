@@ -6,8 +6,8 @@
 
 namespace rpg_example {
 namespace q=engine::quests;
-enum class Action { Begin, Move, Strike, EndTurn, Equip, Deliver, Pause, Travel, Save, Load, Recover, Finish };
-inline constexpr const char* actionNames[]={"Begin encounter","Move one tile","Strike","End turn","Equip / unequip","Deliver parcel","Pause / resume","Travel","Save","Load","Recover view","Finish / exit"};
+enum class Action { Begin, Move, Strike, EndTurn, Equip, Deliver, Pause, Travel, Save, Load, Recover, Finish, AiStep };
+inline constexpr const char* actionNames[]={"Begin encounter","Move one tile","Strike","End turn","Equip / unequip","Deliver parcel","Pause / resume","Travel","Save","Load","Recover view","Finish / exit","AI step"};
 struct Storage {
     std::function<std::optional<std::vector<std::uint8_t>>()> read;
     std::function<void(std::span<const std::uint8_t>)> write;
@@ -90,6 +90,25 @@ class Controller {
         catch(...){reservation_.reset();throw;}
         project();
     }
+    void aiStep(){
+        if(reservation_||!state().encounter||!state().encounter->active)throw std::invalid_argument("No available combat turn");
+        const auto&e=*state().encounter;const auto actor=*e.active;auto snapshot=spatial(actor);
+        auto quote=game_->game().spatialQuote(actor,snapshot);std::vector<r::CombatOption> options;
+        for(std::size_t i=0;i<e.roster.size();++i){auto target=e.roster[i];
+            if(target!=actor&&r::canAct(state(),target)&&(e.teams.empty()||r::teamRelation(state(),actor,target)==r::TeamRelation::Opponent))
+                options.push_back({r::ContentId("example.strike."+std::to_string(i)),{actor,e.epoch,e.turnEpoch,r::UseAbility{actor,r::ContentId("example.strike"),{target},{}},quote}});
+        }
+        // Authored sample policy prefers actual damage; no legal strike ends the turn.
+        auto plan=game_->game().planCombat(producer(),sequence(),actor,options,[](const r::CombatScoreContext& c)->std::optional<std::int64_t>{
+            std::int64_t value=0;for(const auto& effect:c.results.resources)
+                if(effect.entity!=c.option.action.actor&&effect.resource==r::ContentId("example.reserve")&&effect.delta.value<0)value-=effect.delta.value;
+            return value>0?std::optional<std::int64_t>(value):std::nullopt;
+        },{},r::WorldStamp{world_,1});
+        if(plan.status()!=r::CombatPlanStatus::Ready)throw std::invalid_argument("No AI action available");
+        auto tx=game_->game().prepareCombat(plan,r::WorldStamp{world_,1});
+        if(!plan.endTurn()){auto p=point(state().positions.at(actor));reservation_.emplace(Reservation{actor,{p,p},0});}
+        if(!game_->game().commitRpg(std::move(tx),r::WorldStamp{world_,1})){reservation_.reset();throw std::runtime_error("AI plan became stale");}
+    }
 public:
     std::string message="Ready";
     std::size_t saves=0,loads=0,discarded=0;
@@ -141,6 +160,7 @@ public:
             case Action::Begin:{std::vector<r::EntityId> roster;for(auto&[id,c]:state().characters)roster.push_back(id);apply({r::BeginEncounter{{r::ContentId("example.turns"),1},roster,{{roster.front(),{r::ContentId("example.blue"),r::ControlMode::Player}},{roster.back(),{r::ContentId("example.red"),r::ControlMode::Player}}}}});break;}
         case Action::Move:tactical(true);break;
         case Action::Strike:tactical(false);break;
+        case Action::AiStep:aiStep();break;
         case Action::EndTurn:{if(!state().encounter||!state().encounter->active)throw std::invalid_argument("No active turn");auto e=*state().encounter;apply({r::EndTurn{*e.active,e.epoch,e.turnEpoch}});break;}
         case Action::Equip:{for(auto&[id,item]:state().items)if(item.definition==r::ContentId("example.blade")){if(item.slot)apply({r::UnequipItem{item.inventory,id}});else apply({r::EquipItem{item.inventory,id,r::ContentId("example.hand")}});break;}break;}
         case Action::Deliver:{auto&g=game_->game();if(g.questState().quests.at("example.delivery").earned)throw std::invalid_argument("Parcel already rewarded");if(!g.pending())g.post(g.event({"example.delivery","example.delivery","example.delivery",1,{{"item",std::string("parcel")}}}));auto tx=g.prepare(g.command());if(!g.commit(std::move(tx)))throw std::runtime_error("Reward rejected");break;}

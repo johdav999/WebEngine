@@ -29,7 +29,7 @@ void frame(){try{
  }catch(const std::exception&e){controller->message=std::string("Host failed: ")+e.what();app.pause();publish();}}
 }
 extern "C" {
-EMSCRIPTEN_KEEPALIVE void rpg_command(int n){if(controller&&n>=0&&n<12)controller->enqueue(rpg_example::Action(n));}
+EMSCRIPTEN_KEEPALIVE void rpg_command(int n){if(controller&&n>=0&&n<int(std::size(rpg_example::actionNames)))controller->enqueue(rpg_example::Action(n));}
 EMSCRIPTEN_KEEPALIVE void rpg_orbit(float yaw,float elevation,float zoom){if(controller)controller->orbit(yaw,elevation,zoom);}
 EMSCRIPTEN_KEEPALIVE void rpg_focus(int hidden){if(controller){controller->cancelInput();app.setSuspended(hidden!=0);}}
 EMSCRIPTEN_KEEPALIVE void rpg_shutdown(){emscripten_cancel_main_loop();if(controller)controller->cancelInput();app.shutdown();controller.reset();renderer.reset();}
