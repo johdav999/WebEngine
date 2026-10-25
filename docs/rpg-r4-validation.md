@@ -37,6 +37,17 @@ configuration-matrix timeout while building omission consumers. The unchanged
 matrix passed on retry with the populated cache in 75.45 seconds; its timeout
 was not increased. The final run also includes the added targeting/proposal tests.
 
+## CI evidence
+
+Implementation commit `fb9ef17e1ae290ea8648d02b320679621c666b2f` passed the
+[RPG library workflow](https://github.com/johdav999/WebEngine/actions/runs/40196153668)
+on Ubuntu 24.04 native, Windows Server 2022/MSVC Release and pinned
+Emscripten/Node Release. All three jobs built and passed the eight CTest cases,
+including official PCG vectors, canonical RNG bytes and deterministic outcomes.
+The [Portable module SDK workflow](https://github.com/johdav999/WebEngine/actions/runs/40196153680)
+also passed all Linux, Windows and Wasm jobs. These results cover the portable
+RPG/module libraries and omission configurations, not rendered engine acceptance.
+
 ## Documentation synchronization
 
 Updated and verified SKILL.md and bundled engine references in the existing

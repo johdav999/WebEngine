@@ -1919,7 +1919,7 @@ and [validation evidence](docs/rpg-validation.md).
 
 R2 adds [characters, resources, modifiers, progression and atomic transactions](docs/rpg-characters.md),
 with [native/Wasm validation](docs/rpg-r2-validation.md).
-turn-based encounters, snapshots, RPGQuests and rendered hosts remain in the [release architecture](docs/rpg-library-architecture.md)
+Turn-based encounters, snapshots, RPGQuests and rendered hosts remain in the [release architecture](docs/rpg-library-architecture.md)
 and [ten implementation prompts](docs/rpg-library-release-1-prompts.md). RPGGame
 owns The Shattered Sea's rules, balance, world, story and third-person presentation.
 
