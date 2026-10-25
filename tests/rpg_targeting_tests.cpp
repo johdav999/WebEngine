@@ -76,6 +76,7 @@ void atomicArea(){
     reject(f.action(s,{f.actors[1]}),r::ErrorCode::InvalidTarget);
     reject(f.action(s,{f.actors[1],f.actors[2],f.actors[3]}),r::ErrorCode::InvalidTarget);
     reject(f.action(s,{f.actors[1],f.actors[1]}),r::ErrorCode::InvalidTarget);
+    reject(f.action(s,std::vector<r::EntityId>(r::Limits::targets+1,f.actors[1])),r::ErrorCode::Limit);
     auto action=f.action(s,expected);r::Budget budget;budget.effects=1;reject(action,r::ErrorCode::BudgetExceeded,budget);
     auto tx=prepare(f.run,{action},{},world);check(f.run.save()==original,"Area prepare published");
     check(!f.run.commit(std::move(tx),r::WorldStamp{10,2}),"Stale world accepted area");
@@ -85,6 +86,7 @@ void atomicArea(){
     check(f.run.state().characters.at(f.actors[1]).resources.at(resource).current<first&&f.run.state().characters.at(f.actors[2]).resources.at(resource).current<first,"Area missed a target");
     check(f.run.state().characters.at(f.actors[3]).resources.at(resource).current==first,"Area damaged ally");
     check(f.run.state().encounter->allowance.ap==1,"Area paid AP per target");
+    check(f.run.state().characters.at(f.actors[0]).resources.at(resource).current==first-1,"Area paid resource cost per target");
     auto p=*f.run.state().presentation;apply(f.run,{r::AcknowledgePresentation{p.actionEpoch,p.encounterEpoch,p.turnEpoch}});
     rejects(r::ErrorCode::InvalidSpatial,[&]{prepare(f.run,{action},{},world);});
     auto saved=f.run.save();f.run.restore(saved);check(f.run.state().encounter->teams.size()==f.actors.size(),"L3 altered durable team state");

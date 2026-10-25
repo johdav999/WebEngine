@@ -30,6 +30,7 @@ void spatial(const State& state,const TacticalAction& op) {
         need(!op.spatial->path(),ErrorCode::InvalidSpatial,"Ability quote must not carry a movement path");
         need(use->entity==op.actor,ErrorCode::InvalidAction,"Ability caster differs from active actor");
         if(snapshot.targeting){
+            need(use->targets.size()<=Limits::targets,ErrorCode::Limit,"Area target list exceeds bounds");
             auto selected=selectTargets(state,snapshot,op.actor,*snapshot.targeting);
             auto supplied=use->targets;std::sort(supplied.begin(),supplied.end());
             need(supplied==selected,ErrorCode::InvalidTarget,"Ability targets differ from complete area selection");

@@ -88,6 +88,7 @@ filters. Query presence alone does not identify an ability's intended shape.
 
 The shared Windows/browser host uses an opponent-only radius-one area query for
 its strike against the sparring partner. Its simple spatial facts retain the
+sample's legacy Any-team behavior when loading an unassigned encounter, and the
 sample's range policy; production games must supply actual obstacle/LOS queries.
 The dedicated tests apply an area ability to multiple targets and verify preview,
 boundaries, filters, rollback and stale-world rejection.

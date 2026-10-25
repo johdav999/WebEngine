@@ -76,7 +76,7 @@ class Controller {
         }else {
             route={point(start),point(start)};
             auto target=e.roster.front()==actor?e.roster.back():e.roster.front();
-            snapshot.targeting=r::TargetQuery{r::SphereTargets{state().positions.at(target),1},6,r::TargetTeam::Opponents,false,true};
+            snapshot.targeting=r::TargetQuery{r::SphereTargets{state().positions.at(target),1},6,e.teams.empty()?r::TargetTeam::Any:r::TargetTeam::Opponents,false,true};
         }
         auto quote=game_->game().spatialQuote(actor,std::move(snapshot),std::move(path));
         r::TacticalAction action{actor,e.epoch,e.turnEpoch,r::MoveAction{},quote};

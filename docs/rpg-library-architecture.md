@@ -324,3 +324,14 @@ Party replacement/removal use the existing transaction lifecycle. Hosts retain
 recruitment, AI, targeting and victory policy. Runtime snapshots retain v1
 compatibility and add a v2 party/team extension. Both hosts share the updated
 sample. See [contracts](rpg-parties.md) and [validation](rpg-l2-validation.md).
+
+## Library milestone L3 (implemented)
+
+API 1.9.0 adds bounded deterministic 3D single, sphere, 90-degree cone and line
+selection, cast range, explicit self/LOS filtering and L2 team relations. Pure
+previews share the selection implementation enforced by tactical preparation when
+a query is attached to the spatial quote. Existing transactions apply complete
+area effects/costs/RNG atomically and retain the presentation gate. Hosts own
+physics/LOS facts and ability-specific shape/friendly-fire/cover/falloff policy.
+Snapshots retain L2 wire compatibility. See [contracts](rpg-targeting.md) and
+[validation](rpg-l3-validation.md).

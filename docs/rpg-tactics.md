@@ -1,5 +1,9 @@
 # RPG tactical actions, spatial quotes and reactions (R6)
 
+L3 (API 1.9.0) adds optional exact-integer shape/team/LOS targeting to quoted
+spatial facts. Complete selection is rechecked during tactical resolution; see
+[targeting and area effects](rpg-targeting.md). Legacy quotes remain supported.
+
 Current release status: [R10 handoff](rpg-release-1.md), API 1.7.0 / wire 1.
 Milestone-specific “future” statements below describe that milestone’s original scope.
 
