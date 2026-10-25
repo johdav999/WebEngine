@@ -11,7 +11,7 @@ const fs=require('node:fs/promises'),path=require('node:path'),http=require('nod
  const hardware=process.env.RPG_HARDWARE==='1';
  // Linux WebGPU presentation needs Vulkan shared images as well as a Dawn adapter.
  const softwareArgs=process.platform==='linux'
-  ?['--enable-features=Vulkan,VulkanFromANGLE','--use-gl=angle','--use-angle=swiftshader','--use-vulkan=swiftshader','--disable-vulkan-surface','--use-webgpu-adapter=swiftshader']
+  ?['--enable-features=CDPScreenshotNewSurface,Vulkan,VulkanFromANGLE','--use-gl=angle','--use-angle=swiftshader','--use-vulkan=swiftshader','--disable-vulkan-surface','--use-webgpu-adapter=swiftshader']
   :['--use-angle=swiftshader'];
  const browser=await chromium.launch({headless:true,channel:process.env.BROWSER_EXECUTABLE?undefined:'chromium',executablePath:process.env.BROWSER_EXECUTABLE,args:hardware?['--enable-unsafe-webgpu']:['--enable-unsafe-webgpu','--enable-unsafe-swiftshader',...softwareArgs]});
  const report={browser:await browser.version(),mode:hardware?'headless, hardware requested':'headless, SwiftShader requested',results:[]};
