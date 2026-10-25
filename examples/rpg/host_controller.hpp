@@ -1,13 +1,14 @@
 #pragma once
 #include "host_scene.hpp"
+#include "builds.hpp"
 #include "engine/application.hpp"
 #include <deque>
 #include <limits>
 
 namespace rpg_example {
 namespace q=engine::quests;
-enum class Action { Begin, Move, Strike, EndTurn, Equip, Deliver, Pause, Travel, Save, Load, Recover, Finish, AiStep, Loot };
-inline constexpr const char* actionNames[]={"Begin encounter","Move one tile","Strike","End turn","Equip / unequip","Deliver parcel","Pause / resume","Travel","Save","Load","Recover view","Finish / exit","AI step","Collect loot"};
+enum class Action { Begin, Move, Strike, EndTurn, Equip, Deliver, Pause, Travel, Save, Load, Recover, Finish, AiStep, Loot, Mastery, Greatblade, Respec };
+inline constexpr const char* actionNames[]={"Begin encounter","Move one tile","Strike","End turn","Equip / unequip","Deliver parcel","Pause / resume","Travel","Save","Load","Recover view","Finish / exit","AI step","Collect loot","Choose mastery","Equip greatblade","Respec"};
 struct Storage {
     std::function<std::optional<std::vector<std::uint8_t>>()> read;
     std::function<void(std::span<const std::uint8_t>)> write;
@@ -16,7 +17,7 @@ class Controller {
     engine::Application& app_;
     Storage storage_;
     std::function<void(engine::SceneId,HostScene&)> registerView_;
-    std::shared_ptr<const r::Catalog> catalog_=example::encounterCatalog(example::tacticalRules());
+    std::shared_ptr<const r::Catalog> catalog_=example::encounterCatalog(example::tacticalRules(),example::buildDefinitions());
     std::shared_ptr<const q::Catalog> quests_=example::rewardQuests();
     std::unique_ptr<example::SavedGame> game_=fresh();
     std::shared_ptr<const engine::WaypointGraph> graph_=navigation();
@@ -38,7 +39,7 @@ class Controller {
         apply({r::ConfigureVitality{player,r::ContentId("example.reserve")},r::ConfigureVitality{partner,r::ContentId("example.reserve")}});
         apply({r::SetParty{r::ContentId("example.party"),{2,1,{{player,true,r::ControlMode::Player},{partner,false,r::ControlMode::Player}},player}}});
         auto bag=apply({r::CreateInventory{r::ContentId("example.pack"),player}}).inventories[0];
-        apply({r::AddItem{bag,r::ContentId("example.blade"),1},r::AddItem{bag,r::ContentId("example.tonic"),2},
+        apply({r::AddItem{bag,r::ContentId("example.blade"),1},r::AddItem{bag,r::ContentId("example.tonic"),2},r::AddItem{bag,r::ContentId("example.greatblade"),1},
                r::SetTacticalPosition{player,{-2,0,0}},r::SetTacticalPosition{partner,{2,0,0}}});
         auto c=game_->game().command();c.batch.commands.push_back({"example.delivery",q::CommandKind::Activate,0,{}});auto t=game_->game().prepare(c);if(!game_->game().commit(std::move(t)))throw std::runtime_error("Quest activation failed");
     }
@@ -121,6 +122,8 @@ public:
     bool paused()const{return paused_;}
     bool reserved()const{return reservation_.has_value();}
     std::size_t awards()const{return state().awards.size();}
+    std::uint64_t choicePoints()const{return r::remainingChoicePoints(*catalog_,state(),player());}
+    bool mastery()const{return state().characters.at(player()).unlocks.contains(r::ContentId("example.mastery"));}
     HostScene&scene(){auto*s=dynamic_cast<HostScene*>(app_.activeScene());if(!s)throw std::runtime_error("No RPG scene");return *s;}
     void start(){
         try{if(auto bytes=storage_.read()){auto candidate=fresh();candidate->load(*bytes);validateSample(*candidate);game_.swap(candidate);++loads;message="Loaded save";}}
@@ -161,6 +164,13 @@ public:
         case Action::Move:tactical(true);break;
         case Action::Strike:tactical(false);break;
         case Action::AiStep:aiStep();break;
+        case Action::Mastery:apply({r::SetProgressionChoices{player(),{r::ContentId("example.mastery")}}});break;
+        case Action::Greatblade:{for(auto&[id,item]:state().items)if(item.definition==r::ContentId("example.greatblade")){apply({r::EquipItem{item.inventory,id,r::ContentId("example.hand")}});break;}break;}
+        case Action::Respec:{
+            std::vector<r::Operation> ops;
+            for(auto&[id,item]:state().items)if(item.slot&&item.definition==r::ContentId("example.greatblade"))ops.emplace_back(r::UnequipItem{item.inventory,id});
+            ops.emplace_back(r::SetProgressionChoices{player(),{}});apply(std::move(ops));break;
+        }
         case Action::Loot:{
             if(state().encounter || !state().encounterEpoch)throw std::invalid_argument("Finish and exit an encounter first");
             const auto bag=state().inventories.begin()->first;

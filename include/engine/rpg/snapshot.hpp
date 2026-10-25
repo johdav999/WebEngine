@@ -3,7 +3,7 @@
 #include "engine/rpg/state.hpp"
 
 namespace engine::rpg {
-inline constexpr std::uint64_t snapshotVersion = 3; // Latest runtime version; states without extensions retain v1/v2 output.
+inline constexpr std::uint64_t snapshotVersion = 4; // Older output retained when its state extensions suffice.
 inline constexpr std::size_t snapshotByteLimit = 16 * 1024 * 1024;
 struct Snapshot {
     SessionId session;

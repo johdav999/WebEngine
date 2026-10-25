@@ -39,6 +39,10 @@ void validateCharacters(CatalogDefinition& catalog, const Bindings& bindings) {
     count(catalog.characters.size()); count(catalog.progressions.size());
     count(catalog.items.size()); count(catalog.inventories.size());
     count(catalog.abilities.size()); count(catalog.statuses.size());
+    count(catalog.equipmentRules.size()); count(catalog.choiceRules.size());
+    auto requirements=[&](const BuildRequirements& r){count(r.attributes.size());count(r.unlocks.size());};
+    for(const auto& r:catalog.equipmentRules){count(r.requiredSlots.size());requirements(r.requirements);}
+    for(const auto& r:catalog.choiceRules){count(r.choices.size());for(const auto& c:r.choices)requirements(c.requirements);}
     for (const auto& a : catalog.abilities) { count(a.parameters.size()); count(a.costs.size()); }
     for (const auto& s : catalog.statuses) { count(s.modifiers.size()); count(s.tickEffects.size()); }
     for (const auto& item : catalog.items) { count(item.slots.size()); count(item.modifiers.size()); }

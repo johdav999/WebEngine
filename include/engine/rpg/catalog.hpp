@@ -1,6 +1,7 @@
 #pragma once
 #include "engine/rpg/bindings.hpp"
 #include "engine/rpg/inventory.hpp"
+#include "engine/rpg/builds.hpp"
 #include <memory>
 #include <span>
 #include <vector>
@@ -16,6 +17,8 @@ struct CatalogDefinition {
     std::vector<InventoryDefinition> inventories;
     std::vector<AbilityDefinition> abilities;
     std::vector<StatusDefinition> statuses;
+    std::vector<EquipmentRule> equipmentRules;
+    std::vector<ProgressionChoices> choiceRules;
 };
 class Catalog {
 public:

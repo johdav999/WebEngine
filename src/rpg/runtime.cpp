@@ -5,6 +5,8 @@
 
 namespace engine::rpg {
 std::vector<Operation> expandReward(State&, Results&, const Operation&, std::size_t&);
+void applyChoices(State&,Results&,const Catalog&,const SetProgressionChoices&);
+void validateBuildState(const Catalog&,const State&);
 void configureVitality(State&,Results&,const ConfigureVitality&);
 void reconcileVitality(State&,Results&,EntityId);
 void applyVitalEffect(State&,Results&,const Catalog&,const VitalEffect&,std::size_t&);
@@ -174,6 +176,8 @@ Transaction Runtime::prepareUnlocked(const Command& command, Budget budget, std:
         using T = std::decay_t<decltype(op)>;
         if constexpr (std::is_same_v<T, GrantReward> || std::is_same_v<T, RollLoot>) {
             // Expanded above, in order, through the ordinary command pipeline.
+        } else if constexpr (std::is_same_v<T, SetProgressionChoices>) {
+            applyChoices(*candidate,results,*catalog_,op);
         } else if constexpr (std::is_same_v<T, ConfigureVitality>) {
             configureVitality(*candidate,results,op);
         } else if constexpr (std::is_same_v<T, ApplyVitalEffect>) {
@@ -303,6 +307,9 @@ Transaction Runtime::prepareUnlocked(const Command& command, Budget budget, std:
                         throw Error(ErrorCode::RejectedUnlock, "Duplicate proposed unlock");
                     AdvancementResult result{op.entity, previous, previous + 1, {}};
                     for (const auto& unlock : proposal.unlocks) {
+                        if (const auto* choices = progressionChoices(*catalog_,progress.id))
+                            if (std::any_of(choices->choices.begin(),choices->choices.end(),[&](const auto& c){return c.id==unlock;}))
+                                throw Error(ErrorCode::RejectedUnlock,"Automatic advancement cannot grant selectable unlocks");
                         if (!std::binary_search(progress.allowedUnlocks.begin(), progress.allowedUnlocks.end(), unlock))
                             throw Error(ErrorCode::RejectedUnlock, "Undeclared unlock");
                         if (character.unlocks.insert(unlock).second) result.granted.push_back(unlock);
@@ -314,6 +321,7 @@ Transaction Runtime::prepareUnlocked(const Command& command, Budget budget, std:
             }
         }
     }, operation);
+      validateBuildState(*catalog_,*candidate);
       // Lifecycle operations reconcile internally; other mutations check outcomes and active eligibility.
       for(const auto&[entity,vitality]:candidate->vitality)reconcileVitality(*candidate,results,entity);
       if (!std::holds_alternative<BeginEncounter>(operation) && !std::holds_alternative<EndTurn>(operation) &&
@@ -321,7 +329,8 @@ Transaction Runtime::prepareUnlocked(const Command& command, Budget budget, std:
           !std::holds_alternative<TacticalAction>(operation) && !std::holds_alternative<AcknowledgePresentation>(operation) && !std::holds_alternative<RecordAward>(operation))
           reconcileEncounter(*candidate, results, *catalog_, session_, effects, draws, work);
     }
-    if (results.loot.size() + results.vitality.size() + results.parties.size() + results.created.size() + results.advancements.size() + results.inventories.size() + results.items.size() +
+
+    if (results.choices.size() + results.loot.size() + results.vitality.size() + results.parties.size() + results.created.size() + results.advancements.size() + results.inventories.size() + results.items.size() +
         results.resources.size() + results.statuses.size() + results.abilities.size() + results.encounters.size() + results.cooldowns.size() + results.actions.size() + results.reactions.size() + results.presentations.size() + results.awards.size() > Limits::results)
         throw Error(ErrorCode::Limit, "Result record limit exceeded");
     candidate->producers.insert_or_assign(command.producer_, command.sequence_);

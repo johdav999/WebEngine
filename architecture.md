@@ -124,6 +124,15 @@ and [validation status](docs/rpg-l3-validation.md).
 
 ## Current architecture
 
+Library milestone L7 adds optional equipment prerequisites, multi-slot occupancy
+and point-budgeted progression choices (API 1.13.0). Ordinary transactions validate
+every intermediate build before callbacks; respec requires explicit unequip first.
+Automatic and selected unlock ownership remain distinct. Catalogue v2 and runtime
+v4 extensions preserve older output when unused and validate build integrity on
+restore. Both hosts share mastery/equipment/respec controls. Game content, costs
+and specialization policy stay in consumers. See [contracts](docs/rpg-builds.md)
+and [validation](docs/rpg-l7-validation.md).
+
 Library milestone L6 adds bounded weighted loot and receipt-backed atomic reward
 bundles through the existing portable transaction pipeline (API 1.12.0).
 XP/items/status/resource grants, RNG and receipts publish together; full inventory

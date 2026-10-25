@@ -1,5 +1,10 @@
 # Optional RPG library: release 1 architecture
 
+L7 adds equipment requirements, multi-slot displacement, selectable unlocks and
+atomic respec through the ordinary transaction API. API 1.13.0; catalogue v2 /
+runtime v4 extensions retain legacy formats when unused. Both sample hosts use
+the same rules. See [contracts](rpg-builds.md) and [validation](rpg-l7-validation.md).
+
 L6 is implemented locally: API 1.12.0 adds bounded weighted loot and atomic
 receipt-backed reward bundles, including quest coordination and both shared host
 adapters. Existing snapshot formats remain sufficient. Game content and pending

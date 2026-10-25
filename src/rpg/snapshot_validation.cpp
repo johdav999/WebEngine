@@ -4,6 +4,7 @@
 
 namespace engine::rpg {
 void validateVitality(const State&);
+void validateBuildState(const Catalog&,const State&);
 void validateParties(const State&);
 void validateTeams(const State&, const EncounterState&);
 void recomputeEquipment(CharacterState&,const CharacterDefinition&);
@@ -49,7 +50,10 @@ void validateSnapshot(const Catalog&c,const Snapshot&snapshot){
         if(item.slot){
             need(item.quantity==1&&inv->second.character.has_value(),"Invalid equipped item");
             need(std::ranges::find(d->slots,*item.slot)!=d->slots.end()&&std::ranges::find(di->slots,*item.slot)!=di->slots.end(),"Incompatible equipment slot");
-            need(slots.emplace(item.inventory,*item.slot).second,"Occupied equipment slot");
+            for(const auto& slot:occupiedEquipmentSlots(c,item)) {
+                need(std::ranges::find(di->slots,slot)!=di->slots.end(),"Missing required equipment slot");
+                need(slots.emplace(item.inventory,slot).second,"Occupied equipment slot");
+            }
             if(!d->modifiers.empty())equipment[*inv->second.character].emplace(id,d->modifiers);
         }else need(++bags[item.inventory]<=di->capacity,"Inventory capacity exceeded");
     }
@@ -79,6 +83,7 @@ void validateSnapshot(const Catalog&c,const Snapshot&snapshot){
         for(auto&[key,v]:ch.attributes)need(derived.attributes.at(key).value==v.value,"Forged derived attribute");
         for(auto&[key,v]:ch.resources)need(derived.resources.at(key).maximum==v.maximum&&derived.resources.at(key).current==v.current,"Forged derived resource");
     }
+    try{validateBuildState(c,s);}catch(const Error& e){throw Error(ErrorCode::InvalidSnapshot,e.what());}
     for(auto&[id,sequence]:s.producers)need(sequence!=0,"Zero producer watermark");
     for(auto&[id,pos]:s.positions)need(s.characters.contains(id),"Unknown position owner");
     for(auto&[id,entries]:s.cooldowns){need(s.characters.contains(id)&&!entries.empty(),"Invalid cooldown owner");cap(entries,Limits::cooldowns);

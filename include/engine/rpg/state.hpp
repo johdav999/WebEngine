@@ -2,6 +2,7 @@
 #include "engine/rpg/inventory.hpp"
 #include "engine/rpg/abilities.hpp"
 #include "engine/rpg/encounters.hpp"
+#include "engine/rpg/builds.hpp"
 
 namespace engine::rpg {
 struct AwardId { ContentId source; std::string receipt; auto operator<=>(const AwardId&) const = default; };
@@ -27,6 +28,7 @@ struct State {
     std::map<EntityId, std::map<ContentId, CooldownState>> cooldowns;
     std::map<ContentId, PartyState> parties;
     std::map<EntityId, VitalityState> vitality;
+    std::map<EntityId, std::set<ContentId>> choices;
 };
 struct AdvancementResult {
     EntityId entity;
@@ -48,6 +50,7 @@ struct Results {
     std::vector<PresentationResult> presentations;
     std::vector<AwardRecord> awards;
     std::vector<LootResult> loot;
+    std::vector<ChoiceResult> choices;
     std::vector<PartyResult> parties;
     std::vector<VitalResult> vitality;
 };

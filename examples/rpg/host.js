@@ -1,9 +1,9 @@
 window.engineStatus=(text,error)=>{if(error){window.rpgHostError=text;console.error('Renderer:',text);}};window.engineStats=()=>{};window.enginePerformance=()=>{};
 var Module={canvas:document.getElementById('viewport')};
-const names=['Begin encounter','Move one tile','Strike','End turn','Equip / unequip','Deliver parcel','Pause / resume','Travel','Save','Load','Recover view','Finish / exit','AI step','Collect loot'];
+const names=['Begin encounter','Move one tile','Strike','End turn','Equip / unequip','Deliver parcel','Pause / resume','Travel','Save','Load','Recover view','Finish / exit','AI step','Collect loot','Choose mastery','Equip greatblade','Respec'];
 names.forEach((name,id)=>{let b=document.createElement('button');b.textContent=name;b.dataset.command=id;b.disabled=true;b.onclick=()=>Module._rpg_command(id);document.getElementById('actions').append(b);});
 window.refreshRpgUi=s=>{
- document.getElementById('values').textContent=`${s.location?'Practice garden':'Training court'} · ${s.paused?'Paused':'Ready'}\nActive actor ${s.active||'—'} · AP ${s.ap} · Turn ${s.turn}\nInventory: ${s.items} stacks · XP ${s.xp} · Reward receipts ${s.awards}${s.pending?' · Resolving…':''}`;
+ document.getElementById('values').textContent=`${s.location?'Practice garden':'Training court'} · ${s.paused?'Paused':'Ready'}\nActive actor ${s.active||'—'} · AP ${s.ap} · Turn ${s.turn}\nInventory: ${s.items} stacks · XP ${s.xp} · Reward receipts ${s.awards}\nChoice points ${s.choicePoints} · Mastery ${s.mastery?'learned':'unlearned'}${s.pending?' · Resolving…':''}`;
  document.getElementById('message').textContent=window.rpgHostError||s.message;document.querySelectorAll('button').forEach(b=>b.disabled=false);
 };
 const canvas=Module.canvas;let drag=null;

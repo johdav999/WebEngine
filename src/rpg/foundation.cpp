@@ -6,6 +6,7 @@
 namespace engine::rpg {
 void validateCharacters(CatalogDefinition&, const Bindings&);
 void validateInventory(CatalogDefinition&);
+void validateBuildDefinitions(CatalogDefinition&);
 void validateAbilities(CatalogDefinition&, const Bindings&);
 ContentId::ContentId(std::string value) : value_(std::move(value)) {
     if (value_.size() > Limits::keyBytes) throw Error(ErrorCode::Limit, "RPG key exceeds 128 bytes");
@@ -80,6 +81,7 @@ std::shared_ptr<const Catalog> Catalog::create(CatalogDefinition definition, Bin
     }
     validateCharacters(definition, bindings->registry());
     validateInventory(definition);
+    validateBuildDefinitions(definition);
     validateAbilities(definition, bindings->registry());
     for (const auto& entry : entries) bindings->registry().find(entry.handler)->validate(entry);
     for (const auto& ability : definition.abilities)

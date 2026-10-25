@@ -186,3 +186,7 @@ save codec. R3 now composes inventory transfers, equipment replacement and
 resulting character modifiers inside this existing private candidate and
 publication boundary. R4 extends that transaction for abilities, statuses and RNG;
 R5 must continue it for encounter/turn progression.
+
+L7 (API 1.13.0) adds equipment prerequisites, multi-slot equipment and selectable
+progression/respec. See [current build contracts](rpg-builds.md) for semantics
+and catalogue v2 / runtime v4 compatibility.

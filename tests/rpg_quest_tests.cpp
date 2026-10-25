@@ -1,4 +1,5 @@
 #include "../examples/rpg/quest_rewards.hpp"
+#include "../examples/rpg/builds.hpp"
 #include <iostream>
 #include <stdexcept>
 
@@ -157,4 +158,14 @@ void encounterRewards(){
     rejects(r::ErrorCode::DuplicateAward,[&]{f.apply({reward});});
     check(f.xp()==15&&f.tonics()==2,"Reload duplicated reward");
 }
-int main(){try{atomicRewards();rejectedCompound();staleness();projectionsAndReplay();callbacksAndLedger();spatialAndPending();combatPlanning();encounterRewards();std::cout<<"R7 quest bridge checks: "<<checks<<'\n';return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+void selectableBuilds(){
+    auto catalog=example::encounterCatalog(example::tacticalRules(),example::buildDefinitions());
+    b::Coordinator game(catalog,example::rewardQuests(),r::SessionId(1),id("example.quest-awards"),example::rewardPolicy());
+    auto actor=game.applyRpg(id("test.build"),1,{r::CreateCharacter{id("example.scholar")}}).created[0];
+    game.applyRpg(id("test.build"),2,{r::AddExperience{actor,{10,id("example.practice"),1}},r::SetProgressionChoices{actor,{id("example.mastery")}}});
+    auto bytes=game.save();auto stale=game.prepareRpg(id("test.build"),3,{r::SetProgressionChoices{actor,{}}});game.restore(bytes);
+    check(!game.commitRpg(std::move(stale))&&game.rpgState().choices.at(actor).contains(id("example.mastery")),"Combined choice restore/staleness");
+    game.applyRpg(id("test.build"),3,{r::SetProgressionChoices{actor,{}}});
+    check(game.rpgState().choices.empty()&&game.rpgState().characters.at(actor).unlocks.contains(id("example.first")),"Bridge respec removed automatic unlock");
+}
+int main(){try{atomicRewards();rejectedCompound();staleness();projectionsAndReplay();callbacksAndLedger();spatialAndPending();combatPlanning();encounterRewards();selectableBuilds();std::cout<<"R7 quest bridge checks: "<<checks<<'\n';return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

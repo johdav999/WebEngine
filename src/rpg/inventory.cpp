@@ -166,9 +166,17 @@ void applyInventory(State& state, Results& results, const Catalog& catalog, Sess
                 const auto& defined = catalog.inventory(inv.definition)->slots;
                 need(std::binary_search(allowed.begin(), allowed.end(), op.slot) &&
                     std::binary_search(defined.begin(), defined.end(), op.slot), ErrorCode::InvalidSlot, "Ineligible equipment slot");
-                for (auto& [id, displaced] : state.items)
-                    if (displaced.inventory == op.inventory && displaced.slot == op.slot) displaced.slot.reset();
                 value.slot = op.slot;
+                const auto occupied = occupiedEquipmentSlots(catalog, value);
+                for (const auto& slot : occupied)
+                    need(std::binary_search(defined.begin(), defined.end(), slot), ErrorCode::InvalidSlot, "Missing required equipment slot");
+                for (auto& [id, displaced] : state.items) {
+                    if (id == op.item || displaced.inventory != op.inventory || !displaced.slot) continue;
+                    const auto other = occupiedEquipmentSlots(catalog, displaced);
+                    if (std::any_of(other.begin(), other.end(), [&](const auto& slot) {
+                        return std::binary_search(occupied.begin(), occupied.end(), slot);
+                    })) displaced.slot.reset();
+                }
             } else {
                 need(value.slot.has_value(), ErrorCode::InvalidSlot, "Item is not equipped");
                 value.slot.reset();

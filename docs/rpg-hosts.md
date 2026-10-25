@@ -117,3 +117,7 @@ establish physical GPU coverage or sustained performance.
 
 L6 (API 1.12.0) extends these historical contracts with bounded loot and atomic
 reward bundles. See [current reward contracts](rpg-rewards.md).
+
+L7 (API 1.13.0) adds equipment prerequisites, multi-slot equipment and selectable
+progression/respec. See [current build contracts](rpg-builds.md) for semantics
+and catalogue v2 / runtime v4 compatibility.

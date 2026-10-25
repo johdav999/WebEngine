@@ -13,6 +13,9 @@ int main(){try{
  auto initial=c.state().revision;for(int i=0;i<10;++i)tick();check(c.state().revision==initial,"Idle advances gameplay");
  c.execute(Action::Equip);check(c.state().items.begin()->second.slot.has_value(),"Equip failed");c.execute(Action::Deliver);check(c.awards()==2,"Reward missing");auto xp=c.state().characters.at(c.player()).experience;
  rejects([&]{c.execute(Action::Deliver);});check(c.state().characters.at(c.player()).experience==xp,"Duplicate reward");
+ rejects([&]{c.execute(Action::Greatblade);});c.execute(Action::Mastery);c.execute(Action::Greatblade);
+ c.execute(Action::Save);c.execute(Action::Load);check(c.state().choices.at(c.player()).contains(r::ContentId("example.mastery")),"Choice lost on load");
+ c.execute(Action::Respec);check(c.state().choices.empty(),"Respec retained selection");c.execute(Action::Equip);
  c.execute(Action::Begin);auto turn=c.state().turnEpoch;
  check(c.state().vitality.size()==2&&r::canAct(c.state(),c.player()),"Sample vitality missing");
  check(c.state().parties.size()==1&&r::activePartyMembers(c.state(),r::ContentId("example.party"))==std::vector{c.player()},"Sample party missing");

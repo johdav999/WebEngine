@@ -4,6 +4,11 @@
 #include <limits>
 
 namespace engine::rpg::wire {
+template<> struct Fields<AttributeRequirement> { static constexpr auto members=std::tuple{&AttributeRequirement::attribute,&AttributeRequirement::minimum}; };
+template<> struct Fields<BuildRequirements> { static constexpr auto members=std::tuple{&BuildRequirements::minimumLevel,&BuildRequirements::attributes,&BuildRequirements::unlocks}; };
+template<> struct Fields<EquipmentRule> { static constexpr auto members=std::tuple{&EquipmentRule::item,&EquipmentRule::requirements,&EquipmentRule::requiredSlots}; };
+template<> struct Fields<UnlockChoice> { static constexpr auto members=std::tuple{&UnlockChoice::id,&UnlockChoice::cost,&UnlockChoice::requirements,&UnlockChoice::exclusiveGroup}; };
+template<> struct Fields<ProgressionChoices> { static constexpr auto members=std::tuple{&ProgressionChoices::progression,&ProgressionChoices::pointsPerLevel,&ProgressionChoices::choices}; };
 template<> struct Fields<VitalityState> { static constexpr auto members=std::tuple{&VitalityState::resource,&VitalityState::condition,&VitalityState::onZero}; };
 template<> struct Fields<PartyMember> { static constexpr auto members=std::tuple{&PartyMember::entity,&PartyMember::active,&PartyMember::control}; };
 template<> struct Fields<PartyState> { static constexpr auto members=std::tuple{&PartyState::capacity,&PartyState::activeLimit,&PartyState::members,&PartyState::leader}; };
@@ -59,22 +64,31 @@ std::map<ContentId,std::vector<std::uint32_t>> Bindings::compatibility() const {
     return m;
 }
 std::vector<std::uint8_t> encodeCatalog(const Catalog& c){
-    wire::Writer w;wire::put(w,c.definition());wire::put(w,c.bindings()->registry().compatibility());return wire::wrap(1,w.bytes);
+    wire::Writer w;wire::put(w,c.definition());wire::put(w,c.bindings()->registry().compatibility());
+    const bool builds=!c.definition().equipmentRules.empty()||!c.definition().choiceRules.empty();
+    if(builds){wire::put(w,c.definition().equipmentRules);wire::put(w,c.definition().choiceRules);}
+    return wire::wrap(1,w.bytes,builds?2:1);
 }
 std::shared_ptr<const Catalog> decodeCatalog(std::span<const std::uint8_t>b,BindingsHandle bindings){
-    auto r=wire::unwrap(b,1);auto d=wire::get<CatalogDefinition>(r);
-    auto manifest=wire::get<std::map<ContentId,std::vector<std::uint32_t>>>(r);r.end();
+    wire::need(b.size()>=16,"Truncated catalogue version");wire::Reader header{b.subspan(8,8)};const auto version=header.number();
+    wire::need(version==1||version==2,"Unknown catalogue version");
+    auto r=wire::unwrap(b,1,version);auto d=wire::get<CatalogDefinition>(r);
+    auto manifest=wire::get<std::map<ContentId,std::vector<std::uint32_t>>>(r);
+    if(version==2){d.equipmentRules=wire::get<decltype(d.equipmentRules)>(r);d.choiceRules=wire::get<decltype(d.choiceRules)>(r);}
+    r.end();
     wire::need(bindings && manifest==bindings->registry().compatibility(),"Handler compatibility mismatch");
     auto c=Catalog::create(std::move(d),std::move(bindings));auto canonical=encodeCatalog(*c);
     wire::need(std::ranges::equal(b,canonical),"Noncanonical catalogue");return c;
 }
 std::vector<std::uint8_t> encodeSnapshot(const Catalog&c,const Snapshot&s){
     validateSnapshot(c,s);wire::Writer w;wire::blob(w,encodeCatalog(c));wire::put(w,s.session);wire::put(w,s.state);
-    const bool vitality=!s.state.vitality.empty();
+    const bool choices=!s.state.choices.empty();
+    const bool vitality=choices||!s.state.vitality.empty();
     const bool extended=vitality||!s.state.parties.empty()||(s.state.encounter&&!s.state.encounter->teams.empty());
     if(extended){wire::put(w,s.state.parties);wire::put(w,s.state.encounter?s.state.encounter->teams:std::map<EntityId,CombatMember>{});}
     if(vitality)wire::put(w,s.state.vitality);
-    return wire::wrap(2,w.bytes,vitality?3:(extended?2:1));
+    if(choices)wire::put(w,s.state.choices);
+    return wire::wrap(2,w.bytes,choices?4:(vitality?3:(extended?2:1)));
 }
 Snapshot decodeSnapshot(const Catalog&c,std::span<const std::uint8_t>b){
     wire::need(b.size()>=16,"Truncated snapshot version");wire::Reader header{b.subspan(8,8)};const auto version=header.number();
@@ -89,7 +103,8 @@ Snapshot decodeSnapshot(const Catalog&c,std::span<const std::uint8_t>b){
         if(state.encounter)state.encounter->teams=std::move(teams);
         if(version==2)wire::need(!state.parties.empty()||(state.encounter&&!state.encounter->teams.empty()),"Empty v2 extension is noncanonical");
     }
-    if(version==3){state.vitality=wire::get<decltype(state.vitality)>(r);wire::need(!state.vitality.empty(),"Empty v3 extension is noncanonical");}
+    if(version>=3){state.vitality=wire::get<decltype(state.vitality)>(r);if(version==3)wire::need(!state.vitality.empty(),"Empty v3 extension is noncanonical");}
+    if(version==4){state.choices=wire::get<decltype(state.choices)>(r);wire::need(!state.choices.empty(),"Empty v4 extension is noncanonical");}
     r.end();
     Snapshot s{session,std::move(state),std::vector<std::uint8_t>(catalog.begin(),catalog.end())};validateSnapshot(c,s);return s;
 }

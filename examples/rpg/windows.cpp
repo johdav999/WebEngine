@@ -50,8 +50,8 @@ int main(int argc,char**argv){try{
     for(int row=0;row<int((std::size(actionNames)+1)/2);++row){auto&line=panel.add<Panel>();line.setSize({260,34});line.setLayout(HorizontalLayout{8});
         for(int column=0;column<2;++column){int i=row*2+column;if(i>=int(std::size(actionNames)))break;auto&button=line.add<Button>(actionNames[i]);button.setSize({126,34});button.onClick([&,i]{controller.enqueue(Action(i));});}}
     auto callbacks=controller.callbacks();auto present=callbacks.present;callbacks.present=[&](Scene&s,const ApplicationFrame&f){present(s,f);auto&e=controller.state().encounter;
-        panel.setSize({280,std::max(460.f,host.size().height-28)});
-        status.setText("XP "+std::to_string(controller.state().characters.at(controller.player()).experience)+" | Stacks "+std::to_string(controller.state().items.size())+"\nTurn "+std::to_string(controller.state().turnEpoch)+" | AP "+std::to_string(e?e->allowance.ap:0)+(controller.paused()?" | Paused":""));message.setText(controller.message);};
+        panel.setSize({280,std::max(520.f,host.size().height-28)});
+        status.setText("XP "+std::to_string(controller.state().characters.at(controller.player()).experience)+" | Stacks "+std::to_string(controller.state().items.size())+"\nTurn "+std::to_string(controller.state().turnEpoch)+" | AP "+std::to_string(e?e->allowance.ap:0)+(controller.paused()?" | Paused":"")+"\nChoice points "+std::to_string(controller.choicePoints())+(controller.mastery()?" | Mastery":""));message.setText(controller.message);};
     bool readyBefore=false;
     auto step=[&](){auto size=host.size();controller.aspect(size.width/std::max(1.f,size.height));bool ready=host.diagnostics().ready;if(readyBefore&&!ready)controller.cancelInput();readyBefore=ready;controller.drain();return host.step(callbacks);};
     if(!smoke){while(!host.closeRequested()&&step()){}return 0;}

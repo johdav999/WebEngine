@@ -20,7 +20,7 @@ void publish(){
  auto active=e&&e->active?e->active->value:0;auto ap=e?e->allowance.ap:0;
  EM_ASM({window.rpgState=({frames:$0,backend:$1,paused:!!$2,pending:!!$3,awards:$4,xp:$5,active:$6,ap:$7,turn:$8,scene:$9,sceneCount:$10,location:$11,items:$12,message:UTF8ToString($13),epoch:$14,saves:$15});},
  frames,renderer?int(renderer->capabilities().backend):-1,controller->paused(),bool(s.presentation),controller->awards(),double(p.experience),double(active),double(ap),double(s.turnEpoch),double(app.activeSceneId().value),app.loadedSceneCount(),controller->location(),s.items.size(),controller->message.c_str(),double(controller->epoch()),controller->saves);
- EM_ASM({window.rpgState.loads=$0;window.rpgState.yaw=$1;window.refreshRpgUi(window.rpgState);},controller->loads,controller->scene().orbit->yaw);
+ EM_ASM({window.rpgState.loads=$0;window.rpgState.yaw=$1;window.rpgState.choicePoints=$2;window.rpgState.mastery=!!$3;window.refreshRpgUi(window.rpgState);},controller->loads,controller->scene().orbit->yaw,double(controller->choicePoints()),controller->mastery());
 }
 void frame(){try{
  controller->aspect(float(EM_ASM_DOUBLE({return Module.canvas.clientWidth/Math.max(1,Module.canvas.clientHeight);} )));
