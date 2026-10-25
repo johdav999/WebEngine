@@ -43,13 +43,32 @@ ctest --test-dir build/rpg-r1-wasm --output-on-failure
 ```
 
 Build and all four CTest cases passed locally (77.88 seconds total), including
-the six configuration cases. Native CI evidence is recorded below after execution.
+the six configuration cases, 52 RPG foundation checks and 71 module checks.
 The toolchain warns about CMake 4.2.1 shared-library support; this
 consumer uses static libraries only.
 
 `.github/workflows/rpg.yml` runs Ubuntu 24.04, Windows 2022/MSVC and pinned
 Emscripten/Node builds with the same consumer and omission/failure matrix. The
 existing module SDK workflow remains unchanged for Modules/Quests regressions.
+
+Published implementation: `824de01b730805d7b74b3c164e77c331430fd7f5`.
+
+| Platform/check | Result | Evidence |
+| --- | --- | --- |
+| Ubuntu 24.04 native, standalone/configuration matrix | Passed, 4/4 CTest cases | [RPG workflow](https://github.com/johdav999/WebEngine/actions/runs/40191701796) |
+| Windows 2022/MSVC Release, standalone/configuration matrix | Passed, 4/4 CTest cases | [RPG workflow](https://github.com/johdav999/WebEngine/actions/runs/40191701796) |
+| Clean Emscripten 6.0.11/Node, standalone/configuration matrix | Passed, 4/4 CTest cases | [RPG workflow](https://github.com/johdav999/WebEngine/actions/runs/40191701796) |
+| Existing Modules/Quests consumers and omission checks | Passed on Linux, Windows and Wasm | [SDK workflow](https://github.com/johdav999/WebEngine/actions/runs/40191701819) |
+| Documentation | Local links, code fences and diff whitespace passed | Local check on 2026-10-25 |
+
+The broader core suite already failed `vehicle` and `spotlight` (94/96 passed)
+at the starting architecture commit `c1736b9`; see the
+[baseline run](https://github.com/johdav999/WebEngine/actions/runs/40187821879).
+The [general build on R1](https://github.com/johdav999/WebEngine/actions/runs/40191701931)
+was still running when this evidence was recorded; the focused successes above
+do not claim a green full-engine suite. This milestone changes no vehicle or
+spotlight implementation and does not attempt unrelated repairs.
+
 No graphics, input, physics, browser DOM or native window integration is introduced
 in R1. No rendered/GPU/mobile acceptance is claimed; rendered samples are R9.
 
