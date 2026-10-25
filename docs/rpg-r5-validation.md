@@ -38,8 +38,19 @@ seconds, including the six-case configuration matrix (89.75 seconds). R5 passed
 (5012), R2 (288), R1 (52), Modules (71) and both consumer executables passed.
 CMake's Emscripten shared-library warning does not affect these static targets.
 
-Windows/Linux/Wasm CI results for the published implementation are pending; links
-will be recorded after those checks complete. No local MSVC toolchain was available.
+Implementation commit `5a278455106be171d60ab52116d50711e92af608` passed the
+[RPG library workflow](https://github.com/johdav999/WebEngine/actions/runs/40197708322)
+on Ubuntu 24.04 native, Windows Server 2022/MSVC Release and pinned
+Emscripten/Node Release. All three jobs built and passed the nine CTest cases;
+each ran the identical literal R5 state/result trace assertion.
+The [Portable module SDK workflow](https://github.com/johdav999/WebEngine/actions/runs/40197708308)
+also passed every Linux, Windows and Wasm job, including existing module/quest
+consumers and omitted-feature configurations. No local MSVC toolchain was available;
+Windows evidence is the successful CI Release build/test, not a local GPU run.
+
+Documentation checks resolved 27 relative links across the R5 contracts/evidence,
+public RPG guide and roadmap. `git diff --check` passed. This evidence update
+changes documentation only; the implementation SHA above is the tested source.
 
 ## Documentation and limits
 
