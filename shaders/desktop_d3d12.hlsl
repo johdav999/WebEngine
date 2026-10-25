@@ -145,6 +145,17 @@ float3 directBrdf(float3 n,float3 v,float3 l,float3 base,float rough,float metal
     const float3 f=f0+(1-f0)*pow(saturate(1-vh),5),specular=d*g*f/max(4*nv*nl,.001);
     return ((1-f)*(1-metal)*base/3.14159265+specular)*nl;
 }
+// Non-layered unlit materials do not require the lighting/water shader graph.
+// Keep alpha, reflection clipping, emission and fog identical to meshPS.
+float4 unlitPS(MeshOutput input):SV_Target {
+    const float4 texel=sampleMap(baseImage,0,input.uv);
+    const float3 emission=emissionCutoff.xyz*sampleMap(emissiveImage,4,input.uv).rgb;
+    const float alpha=texel.a*input.instanceColor.a;
+    if(reflectionOptions.y>.5&&dot(reflectionPlane,float4(input.world,1))<.002)discard;
+    if(options.y==1&&alpha<emissionCutoff.w)discard;
+    const float3 display=surfaceFog(max(input.instanceColor.rgb*texel.rgb,0)+emission,input);
+    return float4(outputOptions.x>.5?display:srgb(display),options.y<2?1:alpha);
+}
 float4 meshPS(MeshOutput input,bool front:SV_IsFrontFace):SV_Target {
     const bool layered=maps.w>.5;LayerSurface layer=(LayerSurface)0;if(layered)layer=layerSurface(input);
     const float4 texel=layered?layer.color:sampleMap(baseImage,0,input.uv);

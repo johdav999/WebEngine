@@ -85,7 +85,7 @@ class D3D12Graphics final:public DesktopGraphics {
     ComPtr<ID3D12DescriptorHeap> rtvs_,dsv_;
     std::array<ComPtr<ID3D12Resource>,frameCount> targets_;
     ComPtr<ID3D12Resource> depth_,msaaColor_,shadowMaps_,hdrColor_,bloom_;ComPtr<ID3D12RootSignature> root_;
-    std::map<std::array<UINT,7>,ComPtr<ID3D12PipelineState>> meshPipelines_;
+    std::map<std::array<UINT,8>,ComPtr<ID3D12PipelineState>> meshPipelines_;
     ComPtr<ID3D12PipelineState> guiPipeline_;
     ComPtr<ID3D12PipelineState> bloomPipeline_,compositePipeline_;
     std::map<std::array<UINT,3>,ComPtr<ID3D12PipelineState>> skyPipelines_;

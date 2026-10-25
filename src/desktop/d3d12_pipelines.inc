@@ -47,7 +47,8 @@ ID3D12PipelineState* materialPipeline(const MeshDraw& draw,bool shadow,bool inst
     // uses SV_IsFrontFace to orient normals, including mirrored water surfaces.
     const UINT winding=(material.doubleSided?0u:1u)|((draw.mirrored!=reflectionPass_)?2u:0u);
     const bool skin=bool(draw.skinPose);
-    const std::array<UINT,7> key{blend,winding,shadow||reflectionPass_?1:sampleCount_,shadow?1u:hdr_?2u:0u,skin?1u:0u,reflectionPass_?1u:0u,instanced?1u:0u};
+    const bool unlit=material.shader==MaterialShader::Unlit&&!material.layers.enabled;
+    const std::array<UINT,8> key{blend,winding,shadow||reflectionPass_?1:sampleCount_,shadow?1u:hdr_?2u:0u,skin?1u:0u,reflectionPass_?1u:0u,instanced?1u:0u,unlit?1u:0u};
     if(auto it=meshPipelines_.find(key);it!=meshPipelines_.end())return it->second.Get();
     const D3D12_INPUT_ELEMENT_DESC input[]={
         {"POSITION",0,DXGI_FORMAT_R32G32B32_FLOAT,0,offsetof(Vertex,position),D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,0},
@@ -64,6 +65,7 @@ ID3D12PipelineState* materialPipeline(const MeshDraw& draw,bool shadow,bool inst
         if(skin)p.VS=shadow?D3D12_SHADER_BYTECODE{d3d12_shaders::instanceSkinShadowVS,sizeof(d3d12_shaders::instanceSkinShadowVS)}:D3D12_SHADER_BYTECODE{d3d12_shaders::instanceSkinVS,sizeof(d3d12_shaders::instanceSkinVS)};
     }
     p.PS=shadow?D3D12_SHADER_BYTECODE{d3d12_shaders::shadowPS,sizeof(d3d12_shaders::shadowPS)}:D3D12_SHADER_BYTECODE{d3d12_shaders::meshPS,sizeof(d3d12_shaders::meshPS)};
+    if(unlit&&!shadow)p.PS={d3d12_shaders::unlitPS,sizeof(d3d12_shaders::unlitPS)};
     p.RasterizerState.FillMode=D3D12_FILL_MODE_SOLID;p.RasterizerState.CullMode=(winding&1)?D3D12_CULL_MODE_BACK:D3D12_CULL_MODE_NONE;
     p.RasterizerState.FrontCounterClockwise=(winding&2)?FALSE:TRUE;p.RasterizerState.DepthClipEnable=TRUE;
     if(shadow){p.RasterizerState.DepthBias=1;p.RasterizerState.SlopeScaledDepthBias=1;}

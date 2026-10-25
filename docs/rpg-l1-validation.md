@@ -10,9 +10,14 @@ hardware. Adapter JSON reports `software:true` for WARP. Recovery recreates the
 selected mode; do not change this environment setting during a host's lifetime.
 
 Linux software browser tests explicitly initialize SwiftShader Vulkan and Vulkan
-compositing, with ANGLE Vulkan and headless surface presentation. The former
+compositing, with ANGLE SwiftShader and `VulkanFromANGLE`. WebGPU runs full Chromium
+in a windowed Xvfb session (`RPG_HEADED=1`); WebGL2 also passes headlessly. The former
 configuration acquired a WebGPU device but Chromium could not allocate the shared
 image for its canvas (`SharedImageBackingFactory` / `SharedImageStub` errors).
+Headless Chromium subsequently kept the device alive but captured a black canvas;
+windowed Xvfb resolves that presentation failure. Run [40219447124](https://github.com/johdav999/WebEngine/actions/runs/40219447124),
+source `f9c6c40`, passes both browser scenarios: WebGPU and WebGL2 each report eight
+quantized colors and 349636 visible pixels, plus complete input/save/load checks.
 The normal GPU watchdog remains enabled. The harness retains its five-minute
 deadline, pixel checks and complete input/save/load scenario, and records GPU
 errors/loss. See [Chromium's headless Vulkan guidance](https://developer.chrome.google.cn/blog/supercharge-web-ai-testing?hl=en).
