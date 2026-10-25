@@ -91,9 +91,16 @@ Transform decomposeTransform(const Mat4& matrix) {
     x=x*(1/value.scale.x);y=y*(1/value.scale.y);z=z*(1/value.scale.z);
     if(std::abs(dot(x,y))+std::abs(dot(y,z))+std::abs(dot(z,x))>0.0001f)
         throw std::invalid_argument("Sheared transforms cannot be represented as local TRS");
-    value.rotation.y=std::asin(std::clamp(-x.z,-1.0f,1.0f));
-    if(std::abs(std::cos(value.rotation.y))>0.00001f) {
-        value.rotation.x=std::atan2(y.z,z.z);value.rotation.z=std::atan2(x.y,x.x);
+    // asin loses the small cosine near +/-90 degrees when float sine rounds
+    // to one. Preserve it from the other two components of the normalized axis.
+    const float cosine=std::hypot(x.x,x.y);
+    value.rotation.y=std::atan2(-x.z,cosine);
+    if(cosine>0.00001f) {
+        value.rotation.z=std::atan2(x.y,x.x);
+        // Derive roll from the well-conditioned Y/Z plane after removing yaw.
+        // Independent ratios of tiny y.z/z.z amplify quaternion float noise.
+        const float sz=std::sin(value.rotation.z),cz=std::cos(value.rotation.z);
+        value.rotation.x=std::atan2(sz*z.x-cz*z.y,cz*y.y-sz*y.x);
     } else {
         value.rotation.x=0;value.rotation.z=std::atan2(-y.x,y.y);
     }
