@@ -135,3 +135,6 @@ meaning and storage/migration policy are sample choices, not engine defaults.
 
 R9 implements [browser/Windows storage and projection rebuilding](rpg-hosts.md) above this boundary.
 No disk atomicity, backup recovery, rendered UI or GPU acceptance is claimed here.
+
+L6 (API 1.12.0) extends these historical contracts with bounded loot and atomic
+reward bundles. See [current reward contracts](rpg-rewards.md).

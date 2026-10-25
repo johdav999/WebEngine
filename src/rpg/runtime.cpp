@@ -4,6 +4,7 @@
 #include <type_traits>
 
 namespace engine::rpg {
+std::vector<Operation> expandReward(State&, Results&, const Operation&, std::size_t&);
 void configureVitality(State&,Results&,const ConfigureVitality&);
 void reconcileVitality(State&,Results&,EntityId);
 void applyVitalEffect(State&,Results&,const Catalog&,const VitalEffect&,std::size_t&);
@@ -159,10 +160,21 @@ Transaction Runtime::prepareUnlocked(const Command& command, Budget budget, std:
     transaction.owner_ = owner_; transaction.generation_ = state_->generation; transaction.revision_ = state_->revision;
     auto& results = transaction.results_;
     std::size_t advancements = 0, effects = budget.effects, draws = budget.randomDraws, work = budget.encounterWork;
-    for (const auto& operation : command.operations_) {
+    auto operations = command.operations_;
+    for (std::size_t index = 0; index < operations.size(); ++index) {
+      const auto& operation = operations[index];
+      if (std::holds_alternative<GrantReward>(operation) || std::holds_alternative<RollLoot>(operation)) {
+          auto expanded = expandReward(*candidate, results, operation, draws);
+          if (expanded.size() > budget.operations - operations.size())
+              throw Error(ErrorCode::BudgetExceeded, "Expanded reward operation budget exhausted");
+          operations.insert(operations.begin() + index + 1, expanded.begin(), expanded.end());
+          continue;
+      }
       std::visit([&](const auto& op) {
         using T = std::decay_t<decltype(op)>;
-        if constexpr (std::is_same_v<T, ConfigureVitality>) {
+        if constexpr (std::is_same_v<T, GrantReward> || std::is_same_v<T, RollLoot>) {
+            // Expanded above, in order, through the ordinary command pipeline.
+        } else if constexpr (std::is_same_v<T, ConfigureVitality>) {
             configureVitality(*candidate,results,op);
         } else if constexpr (std::is_same_v<T, ApplyVitalEffect>) {
             applyVitalEffect(*candidate,results,*catalog_,op.effect,effects);
@@ -309,7 +321,7 @@ Transaction Runtime::prepareUnlocked(const Command& command, Budget budget, std:
           !std::holds_alternative<TacticalAction>(operation) && !std::holds_alternative<AcknowledgePresentation>(operation) && !std::holds_alternative<RecordAward>(operation))
           reconcileEncounter(*candidate, results, *catalog_, session_, effects, draws, work);
     }
-    if (results.vitality.size() + results.parties.size() + results.created.size() + results.advancements.size() + results.inventories.size() + results.items.size() +
+    if (results.loot.size() + results.vitality.size() + results.parties.size() + results.created.size() + results.advancements.size() + results.inventories.size() + results.items.size() +
         results.resources.size() + results.statuses.size() + results.abilities.size() + results.encounters.size() + results.cooldowns.size() + results.actions.size() + results.reactions.size() + results.presentations.size() + results.awards.size() > Limits::results)
         throw Error(ErrorCode::Limit, "Result record limit exceeded");
     candidate->producers.insert_or_assign(command.producer_, command.sequence_);

@@ -7,6 +7,7 @@ namespace engine::rpg {
 struct AwardId { ContentId source; std::string receipt; auto operator<=>(const AwardId&) const = default; };
 enum class AwardDisposition { Granted, ReplaySuppressed };
 struct AwardRecord { AwardId id; AwardDisposition disposition = AwardDisposition::Granted; };
+struct LootResult { ContentId table, entry; std::uint32_t roll; };
 // Read-only through Runtime/Transaction. This is NOT a wire/save schema.
 struct State {
     std::uint64_t generation = 1, revision = 0, nextEntity = 1;
@@ -46,6 +47,7 @@ struct Results {
     std::vector<ReactionResult> reactions;
     std::vector<PresentationResult> presentations;
     std::vector<AwardRecord> awards;
+    std::vector<LootResult> loot;
     std::vector<PartyResult> parties;
     std::vector<VitalResult> vitality;
 };

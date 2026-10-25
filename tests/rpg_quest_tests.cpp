@@ -30,6 +30,7 @@ void atomicRewards() {
     Fixture f;f.activate();f.post();auto cmd=f.game.command();auto tx=f.game.prepare(cmd);
     check(f.xp()==0 && f.tonics()==0 && f.game.pending()==1 && f.game.questState().receipts.empty(),"preview changed live state/queue");
     check(tx.rewards().awards.size()==2 && tx.effects().size()==2 && tx.questState().quests.at("example.delivery").earned,"compound candidate");
+    check(tx.rewards().loot.size()==1,"Quest loot was not staged");
     check(f.game.canCommit(tx) && f.game.commit(std::move(tx)),"atomic publish");
     check(f.xp()==10 && f.tonics()==1 && f.game.pending()==0 && f.game.questState().receipts.size()==2 && f.game.rpgState().awards.size()==2,"both rewards and receipts committed");
     check(!f.game.commit(std::move(tx)),"duplicate candidate committed");
@@ -141,4 +142,19 @@ void combatPlanning(){
     check(f.game.commitRpg(std::move(tx),world)&&f.game.rpgState().positions.at(f.actor).x==1,"Bridge AI publication");
     check(f.game.questState().receipts.empty()&&f.game.pending()==0,"AI changed quest kernel");
 }
-int main(){try{atomicRewards();rejectedCompound();staleness();projectionsAndReplay();callbacksAndLedger();spatialAndPending();combatPlanning();std::cout<<"R7 quest bridge checks: "<<checks<<'\n';return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+void encounterRewards(){
+    Fixture f;f.activate();f.post();auto before=f.game.save();auto random=f.game.rpgState().random;
+    r::Budget zero;zero.randomDraws=0;
+    rejects(r::ErrorCode::BudgetExceeded,[&]{f.game.prepare(f.game.command(),zero);});
+    check(f.game.save()==before&&f.game.pending()==1&&f.game.rpgState().random==random,"Quest loot exhaustion published");
+    r::GrantReward reward{{id("example.encounter-awards"),"encounter-1"},{r::AddExperience{f.actor,{5,id("example.practice"),1}}},
+        {{id("example.loot"),{{id("example.supplies"),1,{r::AddItem{f.bag,id("example.tonic"),1}}}},1}}};
+    auto forbidden=reward;forbidden.id.source=id("example.quest-awards");
+    rejects(r::ErrorCode::InvalidAward,[&]{f.apply({forbidden});});
+    f.apply({reward});auto tx=f.game.prepare(f.game.command());check(f.game.commit(std::move(tx)),"Quest alongside encounter reward");
+    check(f.xp()==15&&f.game.rpgState().awards.size()==3&&f.game.questState().receipts.size()==2,"Ledger namespaces mixed");
+    auto bytes=f.game.save();f.game.restore(bytes);
+    rejects(r::ErrorCode::DuplicateAward,[&]{f.apply({reward});});
+    check(f.xp()==15&&f.tonics()==2,"Reload duplicated reward");
+}
+int main(){try{atomicRewards();rejectedCompound();staleness();projectionsAndReplay();callbacksAndLedger();spatialAndPending();combatPlanning();encounterRewards();std::cout<<"R7 quest bridge checks: "<<checks<<'\n';return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

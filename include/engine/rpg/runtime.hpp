@@ -17,9 +17,14 @@ struct AdjustResource { EntityId entity; ContentId resource; Amount delta; };
 struct SetModifiers { EntityId entity; ContentId source; std::vector<Modifier> modifiers; };
 struct RemoveModifiers { EntityId entity; ContentId source; };
 struct AddExperience { EntityId entity; Amount amount; };
+// Flat, bounded authoring values. Empty loot entries represent an explicit no-drop.
+using RewardGrant = std::variant<AddExperience, AddItem, AdjustResource, ApplyStatus>;
+struct LootEntry { ContentId id; std::uint32_t weight; std::vector<RewardGrant> grants; };
+struct RollLoot { ContentId table; std::vector<LootEntry> entries; std::uint32_t rolls = 1; };
+struct GrantReward { AwardId id; std::vector<RewardGrant> grants; std::vector<RollLoot> loot; };
 using Operation = std::variant<CreateCharacter, SetAttributeBase, AdjustResource,
                                SetModifiers, RemoveModifiers, AddExperience, CreateInventory, AddItem, RemoveItem,
-                               SplitItem, MergeItems, TransferItem, EquipItem, UnequipItem, UseAbility, ApplyStatus, DispelStatus, AdvancePhase, BeginEncounter, EndTurn, FinishEncounter, ExitEncounter, SetCooldown, SetTacticalPosition, TacticalAction, AcknowledgePresentation, RecordAward, SetParty, RemoveParty, ConfigureVitality, ApplyVitalEffect>;
+                               SplitItem, MergeItems, TransferItem, EquipItem, UnequipItem, UseAbility, ApplyStatus, DispelStatus, AdvancePhase, BeginEncounter, EndTurn, FinishEncounter, ExitEncounter, SetCooldown, SetTacticalPosition, TacticalAction, AcknowledgePresentation, RecordAward, SetParty, RemoveParty, ConfigureVitality, ApplyVitalEffect, RollLoot, GrantReward>;
 struct Budget { std::size_t operations = 256, advancements = 256, effects = 256, randomDraws = 4096, encounterWork = 4096, reactions = 256, reactionDepth = 8; };
 class Command {
 public:

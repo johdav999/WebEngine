@@ -30,7 +30,7 @@ inline bridge::Policy rewardPolicy() {
         if(effect.type=="example.xp")return bridge::RewardProposal{true,{r::AddExperience{actor,{std::get<std::int64_t>(effect.payload.at("amount")),r::ContentId("example.practice"),1}}}};
         if(effect.type=="example.item") {
             for(const auto& [bag,value]:state.inventories)if(value.character==actor)
-                return bridge::RewardProposal{true,{r::AddItem{bag,r::ContentId("example.tonic"),std::get<std::int64_t>(effect.payload.at("quantity"))}}};
+                return bridge::RewardProposal{true,{r::RollLoot{r::ContentId("example.delivery-loot"),{{r::ContentId("example.supplies"),1,{r::AddItem{bag,r::ContentId("example.tonic"),std::get<std::int64_t>(effect.payload.at("quantity"))}}}},1}}};
         }
         return bridge::RewardProposal{false,{}};
     };

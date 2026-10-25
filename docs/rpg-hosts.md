@@ -114,3 +114,6 @@ The `RPG rendered hosts` workflow builds both hosts and uploads evidence. Actual
 results and device/software coverage are recorded in [R9 validation](rpg-r9-validation.md)
 and [L1 stabilization](rpg-l1-validation.md). Software-renderer acceptance does not
 establish physical GPU coverage or sustained performance.
+
+L6 (API 1.12.0) extends these historical contracts with bounded loot and atomic
+reward bundles. See [current reward contracts](rpg-rewards.md).

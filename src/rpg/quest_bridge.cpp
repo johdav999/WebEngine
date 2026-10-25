@@ -114,8 +114,11 @@ bool Coordinator::commit(Transaction&& tx) noexcept {
 RpgTransaction Coordinator::prepareRpg(ContentId id,std::uint64_t sequence,std::vector<Operation> operations,Budget budget,std::optional<WorldStamp> world) {
     Guard guard(busy_);
     need(id!=producer(),ErrorCode::InvalidAward,"Bridge award producer is reserved");
-    for(const auto& operation:operations)
+    for(const auto& operation:operations) {
         need(!std::holds_alternative<RecordAward>(operation),ErrorCode::InvalidAward,"Only coordinated quest publication may write this ledger");
+        if (const auto* reward=std::get_if<GrantReward>(&operation))
+            need(reward->id.source!=source_,ErrorCode::InvalidAward,"Quest award source is reserved");
+    }
     return RpgTransaction(owner_,kernels_->rpg.prepare(kernels_->rpg.command(std::move(id),sequence,std::move(operations)),budget,world));
 }
 bool Coordinator::canCommitRpg(const RpgTransaction& tx,std::optional<WorldStamp> world) const noexcept {

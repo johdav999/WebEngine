@@ -8,9 +8,10 @@
 #include <utility>
 
 namespace engine::rpg {
-inline constexpr ModuleVersion apiVersion{1, 11, 0};
+inline constexpr ModuleVersion apiVersion{1, 12, 0};
 // API, content revision and snapshot wire version are independent.
 struct Limits {
+    static constexpr std::size_t lootEntries = 64, lootRolls = 32, rewardTables = 16;
     static constexpr std::size_t parties = 64, partyMembers = 64, teams = 16;
     static constexpr std::size_t awards = 16384, receiptBytes = 257;
     static constexpr std::size_t pathPoints = 256, reactions = 256, reactionDepth = 8;

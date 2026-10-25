@@ -124,6 +124,15 @@ and [validation status](docs/rpg-l3-validation.md).
 
 ## Current architecture
 
+Library milestone L6 adds bounded weighted loot and receipt-backed atomic reward
+bundles through the existing portable transaction pipeline (API 1.12.0).
+XP/items/status/resource grants, RNG and receipts publish together; full inventory
+rejects the bundle for an explicit game-owned retry. RPGQuests accepts loot in
+coordinated rewards and reserves its receipt namespace. Existing snapshots persist
+all consequences. Both hosts share Collect loot and quest loot examples. Content,
+eligibility and pending claims remain game-owned. See
+[contracts](docs/rpg-rewards.md) and [validation](docs/rpg-l6-validation.md).
+
 ### Optional planetary terrain, stages 1 and 2 (2026-10-23)
 
 `engine_planet` / `WebEngine::Planet` layers above `engine_core` without changing

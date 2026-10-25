@@ -90,3 +90,6 @@ Wasm. Fixture text is test-only, not the future R8 wire format.
 R4 now extends Operation and the same candidate state for abilities, item use,
 statuses and candidate RNG; see [R4 contracts](rpg-abilities.md). It preserves these ownership and quantity rules;
 costs/effects must publish with inventory changes in the existing transaction.
+
+L6 (API 1.12.0) extends these historical contracts with bounded loot and atomic
+reward bundles. See [current reward contracts](rpg-rewards.md).

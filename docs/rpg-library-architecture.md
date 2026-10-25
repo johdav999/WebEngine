@@ -1,5 +1,11 @@
 # Optional RPG library: release 1 architecture
 
+L6 is implemented locally: API 1.12.0 adds bounded weighted loot and atomic
+receipt-backed reward bundles, including quest coordination and both shared host
+adapters. Existing snapshot formats remain sufficient. Game content and pending
+claim policy stay outside the engine. See [contracts](rpg-rewards.md) and
+[validation](rpg-l6-validation.md); publication is pending approval.
+
 Status: release architecture with R1 foundation, R2 characters/transactions,
 R3 inventory/equipment, R4 abilities/statuses/RNG, R5 encounters, R6 tactical actions,
 R7 quest bridge, R8 snapshots/restore, R9 shared sample hosts and R10 release handoff implemented.

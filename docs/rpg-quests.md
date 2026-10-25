@@ -168,3 +168,6 @@ R7 reward preparation/publication retains the proof above.
 Migrations, ledger compaction, storage and non-RPG campaign effects remain consumer
 policy. The R8 sample demonstrates an outer envelope and whole sample-state swap.
 R9 supplies [browser/Windows presentation and storage integration](rpg-hosts.md).
+
+L6 (API 1.12.0) extends these historical contracts with bounded loot and atomic
+reward bundles. See [current reward contracts](rpg-rewards.md).

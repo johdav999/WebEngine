@@ -5,7 +5,7 @@
 
 namespace engine::rpg::quest_bridge {
 // Explicit compiled mappings, not another quest evaluator or merged binding registry.
-using RewardOperation = std::variant<AddExperience, AddItem, AdjustResource, ApplyStatus>;
+using RewardOperation = std::variant<AddExperience, AddItem, AdjustResource, ApplyStatus, RollLoot>;
 struct RewardProposal { bool accepted = true; std::vector<RewardOperation> operations; };
 struct Policy {
     std::function<engine::quests::Fields(const State&)> facts;
