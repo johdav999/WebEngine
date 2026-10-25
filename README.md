@@ -1930,3 +1930,7 @@ The neutral inventory definitions cover weapon/consumable and tool/loadout polic
 R4 adds [abilities, statuses and candidate RNG](docs/rpg-abilities.md)
 with [native/Wasm evidence](docs/rpg-r4-validation.md). The ability sample
 provides random damage, item-consuming healing and non-damage resource effects.
+
+RPG R5: [encounter lifecycle, initiative, turn budgets and cooldown phases](docs/rpg-encounters.md);
+[Windows/Linux/Wasm validation](docs/rpg-r5-validation.md). Tactical actions and rendered
+hosts remain later milestones.

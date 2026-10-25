@@ -174,3 +174,7 @@ See [R4 validation](rpg-r4-validation.md). R5 receives explicit phase hooks, sta
 state, bounded effects and candidate RNG; it must implement encounter ownership,
 initiative, turn epochs, refresh policy and outcome evaluation without a second
 transaction or render-time progression.
+
+R5 integration is now delivered in [encounter contracts](rpg-encounters.md).
+Encounter-owned phases restrict round hooks to the roster and reject external
+AdvancePhase until exit; cooldowns run before each character's statuses.

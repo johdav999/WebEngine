@@ -19,7 +19,7 @@ template<class T> const T* lookup(const std::vector<T>& entries, const ContentId
 }
 }
 void Bindings::addAdvancementHandler(ContentId id, AdvancementHandler handler) {
-    if (handlers_.contains(id) || advancement_.contains(id) || abilities_.contains(id))
+    if (handlers_.contains(id) || advancement_.contains(id) || abilities_.contains(id) || encounters_.contains(id))
         throw Error(ErrorCode::DuplicateHandler, "Duplicate RPG handler");
     if (size() >= Limits::handlers) throw Error(ErrorCode::Limit, "Too many RPG handlers");
     if (!handler.version) throw Error(ErrorCode::InvalidVersion, "Handler version must be positive");

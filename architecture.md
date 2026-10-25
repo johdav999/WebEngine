@@ -6,7 +6,7 @@ WebEngine is a C++20 engine for games running in desktop and mobile browsers thr
 
 This document describes the implementation inspected on 2026-10-10 and the architectural boundaries for future work. The current architecture sections describe existing code. The evolution table describes intended additions and extensions, not delivered functionality. Keep these sections current when implementations change; source code and focused validation establish actual capability.
 
-## Optional RPG library R1-R4 and release plan (2026-10-25)
+## Optional RPG library R1-R5 and release plan (2026-10-25)
 
 `engine_rpg` / `WebEngine::RPG` now implements the optional standard-C++20 foundation
 above Modules: explicit content/session/entity identities, bounded metadata
@@ -40,7 +40,12 @@ R4 adds typed pure ability evaluators, atomic costs/item use and bounded resourc
 status proposals. Explicit owner/round phase commands drive status ticks and
 expiry. Candidate PCG32 state and draw budgets preserve randomness on rejection
 and preview. Commit remains a single no-throw publication. See [R4 contracts](docs/rpg-abilities.md)
-and [evidence](docs/rpg-r4-validation.md). Encounters, full snapshots, RPGQuests and
+and [evidence](docs/rpg-r4-validation.md). R5 adds explicit encounter begin/end/finish/exit,
+bounded initiative and turn epochs, policy allowances/outcomes and cooldown phases
+inside the same transaction. Encounter phases only affect its fixed roster; status
+failures roll back initiating actions. No clock advances combat. See
+[R5 contracts](docs/rpg-encounters.md) and [evidence](docs/rpg-r5-validation.md).
+Tactical costs/reactions/presentation gates, full snapshots, RPGQuests and
 rendered browser/Windows samples remain future work. Third-person
 camera policy, Lattice abilities, balance, factions and campaign/world state stay
 in RPGGame. Existing engine core, Quests and hosts never depend on RPG.

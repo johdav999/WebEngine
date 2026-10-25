@@ -113,6 +113,18 @@ void phase(State& state, Results& results, const Catalog& catalog, const Advance
     need(op.epoch > state.phaseEpoch, ErrorCode::StalePhase, "Duplicate or stale phase epoch");
     for (auto& [id, ch] : state.characters) {
         if (op.owner && *op.owner != id) continue;
+        if (state.encounter && !std::binary_search(state.encounter->roster.begin(), state.encounter->roster.end(), id)) continue;
+        auto cooldowns = state.cooldowns.find(id);
+        if (cooldowns != state.cooldowns.end()) {
+            for (auto it = cooldowns->second.begin(); it != cooldowns->second.end();) {
+                if (it->second.phase != op.phase) { ++it; continue; }
+                spend(budget);
+                const auto remaining = --it->second.remaining;
+                results.cooldowns.push_back({id, it->first, remaining});
+                if (!remaining) it = cooldowns->second.erase(it); else ++it;
+            }
+            if (cooldowns->second.empty()) state.cooldowns.erase(cooldowns);
+        }
         for (auto it = ch.statuses.begin(); it != ch.statuses.end();) {
             auto current = it++;
             auto& value = current->second;
@@ -137,7 +149,7 @@ void phase(State& state, Results& results, const Catalog& catalog, const Advance
 }
 }
 void Bindings::addAbilityHandler(ContentId id, AbilityHandler handler) {
-    need(!handlers_.contains(id) && !advancement_.contains(id) && !abilities_.contains(id), ErrorCode::DuplicateHandler, "Duplicate RPG handler");
+    need(!handlers_.contains(id) && !advancement_.contains(id) && !abilities_.contains(id) && !encounters_.contains(id), ErrorCode::DuplicateHandler, "Duplicate RPG handler");
     need(size() < Limits::handlers, ErrorCode::Limit, "Too many RPG handlers");
     need(handler.version && handler.schemaVersion, ErrorCode::InvalidVersion, "Invalid ability handler/schema version");
     need(bool(handler.validate) && bool(handler.evaluate), ErrorCode::MissingValidator, "Ability validator and evaluator required");

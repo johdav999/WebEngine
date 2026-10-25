@@ -8,9 +8,10 @@
 #include <utility>
 
 namespace engine::rpg {
-inline constexpr ModuleVersion apiVersion{1, 3, 0};
+inline constexpr ModuleVersion apiVersion{1, 4, 0};
 // R1 publishes no snapshot wire format. Content revisions are application-owned.
 struct Limits {
+    static constexpr std::size_t participants = 64, encounterWork = 4096, cooldowns = 64;
     static constexpr std::size_t keyBytes = 128, definitions = 4096, handlers = 256;
     static constexpr std::size_t characters = 1024, values = 64, modifierSources = 64,
         modifiers = 256, thresholds = 256, unlocks = 256, producers = 64,
@@ -25,7 +26,7 @@ enum class ErrorCode {
     InvalidSession, ExhaustedIdentity, InvalidDefinition, MissingDefinition,
     InvalidAmount, Overflow, StaleCommand, InvalidSequence, Reentrant,
     MissingEntity, MissingValue, InvalidModifier, BudgetExceeded, RejectedUnlock,
-    ConsumedTransaction, MissingInventory, MissingItem, InvalidQuantity, Capacity, InvalidSlot, InvalidOwnership, IncompatibleStack, RejectedEffect, InvalidTarget, InvalidStatus, StalePhase
+    ConsumedTransaction, MissingInventory, MissingItem, InvalidQuantity, Capacity, InvalidSlot, InvalidOwnership, IncompatibleStack, RejectedEffect, InvalidTarget, InvalidStatus, StalePhase, InvalidEncounter, StaleTurn, RejectedEncounter
 };
 class Error : public std::invalid_argument {
 public:

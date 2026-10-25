@@ -6,6 +6,8 @@
 namespace engine::rpg {
 void applyInventory(State&, Results&, const Catalog&, SessionId, const Operation&);
 void applyAbilities(State&, Results&, const Catalog&, SessionId, const Operation&, std::size_t&, std::size_t&);
+void applyEncounter(State&, Results&, const Catalog&, SessionId, const Operation&, std::size_t&, std::size_t&, std::size_t&);
+void reconcileEncounter(State&, Results&, const Catalog&, SessionId, std::size_t&, std::size_t&, std::size_t&);
 namespace {
 std::int64_t add(std::int64_t a, std::int64_t b) {
     if ((b > 0 && a > std::numeric_limits<std::int64_t>::max() - b) ||
@@ -114,7 +116,7 @@ Transaction Runtime::prepare(const Command& command, Budget budget) {
     if (watermark == state_->producers.end() && state_->producers.size() >= Limits::producers)
         throw Error(ErrorCode::Limit, "Too many command producers");
     if (budget.operations > Limits::operations || budget.advancements > Limits::advancements ||
-        budget.effects > Limits::effects || budget.randomDraws > Limits::randomDraws)
+        budget.effects > Limits::effects || budget.randomDraws > Limits::randomDraws || budget.encounterWork > Limits::encounterWork)
         throw Error(ErrorCode::Limit, "Budget exceeds hard limit");
     if (command.operations_.size() > budget.operations)
         throw Error(ErrorCode::BudgetExceeded, "Operation budget exhausted");
@@ -123,10 +125,14 @@ Transaction Runtime::prepare(const Command& command, Budget budget) {
     Transaction transaction;
     transaction.owner_ = owner_; transaction.generation_ = state_->generation; transaction.revision_ = state_->revision;
     auto& results = transaction.results_;
-    std::size_t advancements = 0, effects = budget.effects, draws = budget.randomDraws;
-    for (const auto& operation : command.operations_) std::visit([&](const auto& op) {
+    std::size_t advancements = 0, effects = budget.effects, draws = budget.randomDraws, work = budget.encounterWork;
+    for (const auto& operation : command.operations_) {
+      std::visit([&](const auto& op) {
         using T = std::decay_t<decltype(op)>;
-        if constexpr (std::is_same_v<T, CreateCharacter>) {
+        if constexpr (std::is_same_v<T, BeginEncounter> || std::is_same_v<T, EndTurn> ||
+            std::is_same_v<T, FinishEncounter> || std::is_same_v<T, ExitEncounter> || std::is_same_v<T, SetCooldown>) {
+            applyEncounter(*candidate, results, *catalog_, session_, operation, effects, draws, work);
+        } else if constexpr (std::is_same_v<T, CreateCharacter>) {
             const auto* def = catalog_->character(op.definition);
             if (!def) throw Error(ErrorCode::MissingDefinition, "Unknown character definition");
             if (candidate->characters.size() >= Limits::characters) throw Error(ErrorCode::Limit, "Character limit reached");
@@ -143,6 +149,8 @@ Transaction Runtime::prepare(const Command& command, Budget budget) {
             applyInventory(*candidate, results, *catalog_, session_, operation);
         } else if constexpr (std::is_same_v<T, UseAbility> || std::is_same_v<T, ApplyStatus> ||
             std::is_same_v<T, DispelStatus> || std::is_same_v<T, AdvancePhase>) {
+            if constexpr (std::is_same_v<T, AdvancePhase>)
+                if (candidate->encounter) throw Error(ErrorCode::InvalidEncounter, "Encounter owns phase advancement until exit");
             applyAbilities(*candidate, results, *catalog_, session_, operation, effects, draws);
         } else {
             const auto found = candidate->characters.find(op.entity);
@@ -223,8 +231,13 @@ Transaction Runtime::prepare(const Command& command, Budget budget) {
             }
         }
     }, operation);
+      // Lifecycle operations reconcile internally; other mutations check outcomes and active eligibility.
+      if (!std::holds_alternative<BeginEncounter>(operation) && !std::holds_alternative<EndTurn>(operation) &&
+          !std::holds_alternative<FinishEncounter>(operation) && !std::holds_alternative<ExitEncounter>(operation))
+          reconcileEncounter(*candidate, results, *catalog_, session_, effects, draws, work);
+    }
     if (results.created.size() + results.advancements.size() + results.inventories.size() + results.items.size() +
-        results.resources.size() + results.statuses.size() + results.abilities.size() > Limits::results)
+        results.resources.size() + results.statuses.size() + results.abilities.size() + results.encounters.size() + results.cooldowns.size() > Limits::results)
         throw Error(ErrorCode::Limit, "Result record limit exceeded");
     candidate->producers.insert_or_assign(command.producer_, command.sequence_);
     transaction.state_ = std::move(candidate);

@@ -1,6 +1,7 @@
 #pragma once
 #include "engine/rpg/inventory.hpp"
 #include "engine/rpg/abilities.hpp"
+#include "engine/rpg/encounters.hpp"
 
 namespace engine::rpg {
 // Read-only through Runtime/Transaction. This is NOT a wire/save schema.
@@ -13,6 +14,9 @@ struct State {
     std::map<ItemId, ItemState> items;
     RandomState random = seedRandom(0);
     std::uint64_t phaseEpoch = 0;
+    std::uint64_t encounterEpoch = 0, turnEpoch = 0;
+    std::optional<EncounterState> encounter;
+    std::map<EntityId, std::map<ContentId, CooldownState>> cooldowns;
 };
 struct AdvancementResult {
     EntityId entity;
@@ -27,5 +31,7 @@ struct Results {
     std::vector<ResourceEffect> resources;
     std::vector<StatusChange> statuses;
     std::vector<AbilityResult> abilities;
+    std::vector<EncounterResult> encounters;
+    std::vector<CooldownResult> cooldowns;
 };
 } // namespace engine::rpg

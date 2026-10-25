@@ -36,7 +36,7 @@ EntityId EntityIds::allocate() {
     return result;
 }
 void Bindings::addDefinitionHandler(ContentId id, DefinitionHandler handler) {
-    if (handlers_.contains(id) || advancement_.contains(id) || abilities_.contains(id)) throw Error(ErrorCode::DuplicateHandler, "Duplicate RPG handler: " + id.value());
+    if (handlers_.contains(id) || advancement_.contains(id) || abilities_.contains(id) || encounters_.contains(id)) throw Error(ErrorCode::DuplicateHandler, "Duplicate RPG handler: " + id.value());
     if (size() >= Limits::handlers) throw Error(ErrorCode::Limit, "Too many RPG handlers");
     if (!handler.version) throw Error(ErrorCode::InvalidVersion, "Handler version must be positive");
     if (!handler.validate) throw Error(ErrorCode::MissingValidator, "Missing RPG definition validator");

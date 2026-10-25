@@ -1,14 +1,15 @@
 # Optional RPG library: release 1 architecture
 
 Status: release architecture with R1 foundation, R2 characters/transactions,
-R3 inventory/equipment and R4 abilities/statuses/RNG implemented. Created
+R3 inventory/equipment, R4 abilities/statuses/RNG and R5 encounters implemented. Created
 2026-10-25 against WebEngine `56080eca124c9a62e15b146799a8004bdad5a9b2`.
 The delivered subset is documented in [rpg.md](rpg.md): optional RPG target,
 identities, metadata bindings/catalogue and runtime ownership, plus
 [R2 characters, modifiers, progression and transactions](rpg-characters.md).
 [R3 inventory and equipment](rpg-inventory.md) extend the same transaction.
 [R4 abilities, statuses and candidate randomness](rpg-abilities.md) are delivered.
-Encounters, quest bridge, full snapshots and hosts below remain proposed.
+[R5 encounters, initiative, allowances and cooldown phases](rpg-encounters.md) are delivered.
+Tactical actions/reactions, quest bridge, full snapshots and hosts below remain proposed.
 Use [validation](rpg-validation.md) for actual evidence. Existing
 [Modules](modules.md), [Quests](quests.md), [SDK composition](module-sdk.md),
 [Application](application-lifecycle.md) and [host contracts](consumer-hosts.md)
@@ -125,8 +126,8 @@ Avoid arbitrary expression graphs or multiplication chains in the first release.
 ## Transaction and extension contract
 
 Proposed flow is `prepare(command, context, budget)` then `commit(candidate)`.
-R2-R4 deliver prepare/commit for character, inventory/equipment, abilities, statuses
-and candidate RNG operations; spatial, encounter and
+R2-R5 deliver prepare/commit for character, inventory/equipment, abilities, statuses,
+candidate RNG, encounter lifecycle and cooldown operations; spatial and
 later-system integration below remain future work.
 
 1. Check command owner/generation/revision/turn and producer sequence.
@@ -155,7 +156,9 @@ preempt malicious compiled code: providers are trusted, reviewed application cod
 
 ## Turn-based encounters and movement
 
-Release 1 uses an explicit state machine: inactive, awaiting command, preparing
+R5 currently commits inactive/awaiting-command/finished states and AP/movement
+allowances; R6 adds tactical spending and presentation gates. The following describes
+the complete planned release. Release 1 uses an explicit state machine: inactive, awaiting command, preparing
 resolution, committed presentation pending, next turn, finished. Preparation is
 synchronous and private; the host observes only committed states. The encounter
 records a bounded roster, round, turn epoch, active participant, ordered initiative,

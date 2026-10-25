@@ -12,8 +12,8 @@ struct RemoveModifiers { EntityId entity; ContentId source; };
 struct AddExperience { EntityId entity; Amount amount; };
 using Operation = std::variant<CreateCharacter, SetAttributeBase, AdjustResource,
                                SetModifiers, RemoveModifiers, AddExperience, CreateInventory, AddItem, RemoveItem,
-                               SplitItem, MergeItems, TransferItem, EquipItem, UnequipItem, UseAbility, ApplyStatus, DispelStatus, AdvancePhase>;
-struct Budget { std::size_t operations = 256, advancements = 256, effects = 256, randomDraws = 4096; };
+                               SplitItem, MergeItems, TransferItem, EquipItem, UnequipItem, UseAbility, ApplyStatus, DispelStatus, AdvancePhase, BeginEncounter, EndTurn, FinishEncounter, ExitEncounter, SetCooldown>;
+struct Budget { std::size_t operations = 256, advancements = 256, effects = 256, randomDraws = 4096, encounterWork = 4096; };
 class Command {
 public:
     std::uint64_t generation() const noexcept { return generation_; }
