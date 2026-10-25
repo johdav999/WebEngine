@@ -20,7 +20,7 @@ ID3D12PipelineState* fxPipeline(bool ribbon,BlendMode blend){
     if(auto it=fxPipelines_.find(key);it!=fxPipelines_.end())return it->second.Get();
     std::array<D3D12_INPUT_ELEMENT_DESC,7> input{};
     for(UINT i=0;i<input.size();++i)input[i]={i==0?"POSITION":i==1?"COLOR":"TEXCOORD",i<2?0:i-2,DXGI_FORMAT_R32G32B32A32_FLOAT,0,i*16,ribbon?D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA:D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA,ribbon?0u:1u};
-    D3D12_GRAPHICS_PIPELINE_STATE_DESC p{};p.pRootSignature=root_.Get();p.InputLayout={input.data(),ribbon?3u:7u};p.SampleMask=UINT_MAX;
+    auto p=pipelineDescription();p.pRootSignature=root_.Get();p.InputLayout={input.data(),ribbon?3u:7u};p.SampleMask=UINT_MAX;
     p.VS=ribbon?D3D12_SHADER_BYTECODE{d3d12_shaders::ribbonVS,sizeof(d3d12_shaders::ribbonVS)}:D3D12_SHADER_BYTECODE{d3d12_shaders::particleVS,sizeof(d3d12_shaders::particleVS)};
     p.PS={d3d12_shaders::fxPS,sizeof(d3d12_shaders::fxPS)};
     p.RasterizerState.FillMode=D3D12_FILL_MODE_SOLID;p.RasterizerState.CullMode=D3D12_CULL_MODE_NONE;p.RasterizerState.DepthClipEnable=TRUE;

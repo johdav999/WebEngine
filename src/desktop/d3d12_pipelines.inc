@@ -32,7 +32,7 @@ void pipelines() {
     ComPtr<ID3DBlob> blob,errors;checked(D3D12SerializeRootSignature(&desc,D3D_ROOT_SIGNATURE_VERSION_1,&blob,&errors),"Serialize root signature");
     checked(device_->CreateRootSignature(0,blob->GetBufferPointer(),blob->GetBufferSize(),IID_PPV_ARGS(&root_)),"Create root signature");
     const D3D12_INPUT_ELEMENT_DESC input[]={{"POSITION",0,DXGI_FORMAT_R32G32_FLOAT,0,offsetof(GuiVertex,position),D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,0},{"TEXCOORD",0,DXGI_FORMAT_R32G32_FLOAT,0,offsetof(GuiVertex,uv),D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,0},{"COLOR",0,DXGI_FORMAT_R32G32B32A32_FLOAT,0,offsetof(GuiVertex,color),D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,0}};
-    D3D12_GRAPHICS_PIPELINE_STATE_DESC p{};p.pRootSignature=root_.Get();p.VS={d3d12_shaders::guiVS,sizeof(d3d12_shaders::guiVS)};p.PS={d3d12_shaders::guiPS,sizeof(d3d12_shaders::guiPS)};p.InputLayout={input,3};p.SampleMask=UINT_MAX;
+    auto p=pipelineDescription();p.pRootSignature=root_.Get();p.VS={d3d12_shaders::guiVS,sizeof(d3d12_shaders::guiVS)};p.PS={d3d12_shaders::guiPS,sizeof(d3d12_shaders::guiPS)};p.InputLayout={input,3};p.SampleMask=UINT_MAX;
     p.RasterizerState.FillMode=D3D12_FILL_MODE_SOLID;p.RasterizerState.CullMode=D3D12_CULL_MODE_NONE;p.RasterizerState.DepthClipEnable=TRUE;
     auto& blend=p.BlendState.RenderTarget[0];blend.BlendEnable=TRUE;blend.SrcBlend=blend.SrcBlendAlpha=D3D12_BLEND_ONE;blend.DestBlend=blend.DestBlendAlpha=D3D12_BLEND_INV_SRC_ALPHA;
     blend.BlendOp=blend.BlendOpAlpha=D3D12_BLEND_OP_ADD;blend.RenderTargetWriteMask=D3D12_COLOR_WRITE_ENABLE_ALL;
@@ -55,7 +55,7 @@ ID3D12PipelineState* materialPipeline(const MeshDraw& draw,bool shadow,bool inst
         {"TANGENT",0,DXGI_FORMAT_R32G32B32A32_FLOAT,0,offsetof(Vertex,tangent),D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,0},
         {"BLENDINDICES",0,DXGI_FORMAT_R32G32B32A32_UINT,1,offsetof(SkinVertex,joints),D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,0},
         {"BLENDWEIGHT",0,DXGI_FORMAT_R32G32B32A32_FLOAT,1,offsetof(SkinVertex,weights),D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,0}};
-    D3D12_GRAPHICS_PIPELINE_STATE_DESC p{};p.pRootSignature=root_.Get();p.InputLayout={input,skin?6u:4u};p.SampleMask=UINT_MAX;
+    auto p=pipelineDescription();p.pRootSignature=root_.Get();p.InputLayout={input,skin?6u:4u};p.SampleMask=UINT_MAX;
     p.VS=shadow?D3D12_SHADER_BYTECODE{d3d12_shaders::shadowVS,sizeof(d3d12_shaders::shadowVS)}:D3D12_SHADER_BYTECODE{d3d12_shaders::meshVS,sizeof(d3d12_shaders::meshVS)};
     if(skin)p.VS=shadow?D3D12_SHADER_BYTECODE{d3d12_shaders::skinShadowVS,sizeof(d3d12_shaders::skinShadowVS)}:D3D12_SHADER_BYTECODE{d3d12_shaders::skinVS,sizeof(d3d12_shaders::skinVS)};
     if(instanced){

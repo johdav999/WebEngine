@@ -27,6 +27,23 @@ void checked(HRESULT hr,const char* action) {
 }
 std::string jsonString(std::string value){std::string out="\"";for(unsigned char c:value){if(c=='"'||c=='\\'){out+='\\';out+=c;}else if(c<32)out+=' ';else out+=c;}return out+'"';}
 D3D12_HEAP_PROPERTIES heap(D3D12_HEAP_TYPE type){D3D12_HEAP_PROPERTIES p{};p.Type=type;p.CreationNodeMask=p.VisibleNodeMask=1;return p;}
+// Zero is not a valid blend, comparison or stencil-operation enum. Initialize
+// disabled state too: software drivers may compile it when creating a PSO.
+D3D12_GRAPHICS_PIPELINE_STATE_DESC pipelineDescription(){
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC p{};
+    p.DepthStencilState.DepthFunc=D3D12_COMPARISON_FUNC_LESS;
+    p.DepthStencilState.StencilReadMask=D3D12_DEFAULT_STENCIL_READ_MASK;
+    p.DepthStencilState.StencilWriteMask=D3D12_DEFAULT_STENCIL_WRITE_MASK;
+    p.DepthStencilState.FrontFace=p.DepthStencilState.BackFace={D3D12_STENCIL_OP_KEEP,D3D12_STENCIL_OP_KEEP,D3D12_STENCIL_OP_KEEP,D3D12_COMPARISON_FUNC_ALWAYS};
+    for(auto& b:p.BlendState.RenderTarget){
+        b.SrcBlend=b.SrcBlendAlpha=D3D12_BLEND_ONE;
+        b.DestBlend=b.DestBlendAlpha=D3D12_BLEND_ZERO;
+        b.BlendOp=b.BlendOpAlpha=D3D12_BLEND_OP_ADD;
+        b.LogicOp=D3D12_LOGIC_OP_NOOP;
+        b.RenderTargetWriteMask=D3D12_COLOR_WRITE_ENABLE_ALL;
+    }
+    return p;
+}
 D3D12_RESOURCE_DESC bufferDescription(std::uint64_t bytes){D3D12_RESOURCE_DESC d{};d.Dimension=D3D12_RESOURCE_DIMENSION_BUFFER;d.Width=bytes;d.Height=1;d.DepthOrArraySize=d.MipLevels=1;d.SampleDesc.Count=1;d.Layout=D3D12_TEXTURE_LAYOUT_ROW_MAJOR;return d;}
 void transition(ID3D12GraphicsCommandList& list,ID3D12Resource* resource,D3D12_RESOURCE_STATES from,D3D12_RESOURCE_STATES to){D3D12_RESOURCE_BARRIER b{};b.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;b.Transition={resource,D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,from,to};list.ResourceBarrier(1,&b);}
 using Float4=std::array<float,4>;
