@@ -8,8 +8,16 @@ import os
 executable = Path(sys.argv[1]).resolve()
 output = Path(sys.argv[2]).resolve()
 output.mkdir(parents=True, exist_ok=True)
-result = subprocess.run([str(executable), '--smoke', str(output)],
-                        cwd=executable.parent, capture_output=True, text=True, timeout=120)
+try:
+    result = subprocess.run([str(executable), '--smoke', str(output)],
+                            cwd=executable.parent, capture_output=True, text=True, timeout=120)
+except subprocess.TimeoutExpired as error:
+    def decoded(value):
+        return value.decode(errors='replace') if isinstance(value, bytes) else value or ''
+    diagnostics = 'Native smoke exceeded 120 seconds\n' + decoded(error.stdout) + '\n' + decoded(error.stderr)
+    (output / 'process.txt').write_text(diagnostics)
+    print(diagnostics)
+    sys.exit(1)
 diagnostics = f'exit_code={result.returncode} (0x{result.returncode & 0xffffffff:08x})\n{result.stdout}\n{result.stderr}'
 error = executable.parent / 'rpg-host-error.txt'
 if error.exists():

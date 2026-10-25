@@ -74,8 +74,10 @@ API 1.7.0 / wire 1 remain unchanged; rendered CI gates remain open.
 Library stabilization L1 adds explicit `WEBENGINE_D3D12_WARP=1` diagnostic
 rendering for software-only Windows CI; default hardware selection remains strict.
 Adapter enumeration failures are checked before dereferencing returned interfaces.
-Software browser acceptance disables Chromium's GPU watchdog and retains real
-frame/input/storage assertions. See [L1 evidence](docs/rpg-l1-validation.md).
+Native pipelines initialize valid disabled-state enums and check debug-layer
+errors before command submission. Linux software browser acceptance uses Vulkan
+shared-image presentation and retains real frame/input/storage assertions and
+the normal GPU watchdog. See [L1 evidence](docs/rpg-l1-validation.md).
 Third-person camera policy, Lattice abilities, balance, factions and campaign/world state stay
 in RPGGame. Existing engine core, Quests and hosts never depend on RPG.
 

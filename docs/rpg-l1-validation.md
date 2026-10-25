@@ -9,10 +9,20 @@ diagnostic/CI rendering. It is not a fallback: ordinary launches still require
 hardware. Adapter JSON reports `software:true` for WARP. Recovery recreates the
 selected mode; do not change this environment setting during a host's lifetime.
 
-Software browser tests disable Chromium's GPU watchdog while retaining the test's
-five-minute overall deadline, pixel checks and complete input/save/load scenario.
-The harness records uncaptured GPU errors and device-loss reasons to expose the
-first failure. Hardware runs retain normal watchdog settings.
+Linux software browser tests explicitly initialize SwiftShader Vulkan and Vulkan
+compositing, with ANGLE Vulkan and headless surface presentation. The former
+configuration acquired a WebGPU device but Chromium could not allocate the shared
+image for its canvas (`SharedImageBackingFactory` / `SharedImageStub` errors).
+The normal GPU watchdog remains enabled. The harness retains its five-minute
+deadline, pixel checks and complete input/save/load scenario, and records GPU
+errors/loss. See [Chromium's headless Vulkan guidance](https://developer.chrome.google.cn/blog/supercharge-web-ai-testing?hl=en).
+
+Native pipeline descriptions initialize valid comparison, stencil and blend
+enums even for disabled states, following the [Direct3D defaults](https://learn.microsoft.com/en-us/windows/win32/api/d3d12/ns-d3d12-d3d12_depth_stencil_desc).
+Debug-layer errors are checked before submission as well as during servicing.
+Validation of these corrections is pending; earlier WARP runs crashed inside
+`d3d10warp.dll`, after host/controller construction, with no reported validation
+error. Adapter enumeration alone did not resolve that crash.
 
 Native WARP and browser SwiftShader checks establish software-renderer acceptance,
 not physical GPU or performance coverage. Local hardware checks remain separate.

@@ -19,6 +19,7 @@ jobs:
         env:
           WEBENGINE_D3D12_WARP: '1'
           WEBENGINE_D3D12_VALIDATION: '1'
+          WEBENGINE_D3D12_GPU_VALIDATION: '1'
         run: python scripts/rpg-native-smoke.py build/rpg-host/Release/rpg_demo_windows.exe build/evidence/rpg-d3d12
       - name: Native diagnostics
         if: always()

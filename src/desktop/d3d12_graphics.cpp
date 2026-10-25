@@ -197,6 +197,10 @@ class D3D12Graphics final:public DesktopGraphics {
         wchar_t validation[4]{};
         if(GetEnvironmentVariableW(L"WEBENGINE_D3D12_VALIDATION",validation,4)&&validation[0]==L'1'){
             ComPtr<ID3D12Debug> debug;checked(D3D12GetDebugInterface(IID_PPV_ARGS(&debug)),"Requested D3D12 debug layer");debug->EnableDebugLayer();debug_=true;
+            wchar_t gpuValidation[4]{};
+            if(GetEnvironmentVariableW(L"WEBENGINE_D3D12_GPU_VALIDATION",gpuValidation,4)&&gpuValidation[0]==L'1'){
+                ComPtr<ID3D12Debug1> gpu;checked(debug.As(&gpu),"Requested D3D12 GPU validation");gpu->SetEnableGPUBasedValidation(TRUE);
+            }
         }
         checked(CreateDXGIFactory2(0,IID_PPV_ARGS(&factory_)),"Create DXGI factory");
         ComPtr<IDXGIAdapter1> adapter;

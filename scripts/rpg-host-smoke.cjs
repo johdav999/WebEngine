@@ -21,6 +21,8 @@ const fs=require('node:fs/promises'),path=require('node:path'),http=require('nod
    if(!globalThis.GPUAdapter)return;
    const request=GPUAdapter.prototype.requestDevice;
    GPUAdapter.prototype.requestDevice=async function(...args){
+    const info=this.info;
+    window.rpgGpuAdapter=info?{vendor:info.vendor,architecture:info.architecture,device:info.device,description:info.description,isFallbackAdapter:info.isFallbackAdapter??this.isFallbackAdapter}:null;
     const device=await request.apply(this,args);
     const destroy=device.destroy.bind(device);
     device.destroy=()=>{console.warn('GPU destroy requested:',new Error().stack);return destroy();};
@@ -51,7 +53,7 @@ const fs=require('node:fs/promises'),path=require('node:path'),http=require('nod
   await page.evaluate(()=>window.dispatchEvent(new Event('blur')));await wait(()=>!rpgState.pending);const turn=(await state()).turn;await page.waitForTimeout(150);assert.equal((await state()).turn,turn);await page.evaluate(()=>window.dispatchEvent(new Event('focus')));
   await page.screenshot({path:path.join(evidence,`${backend}-after.png`)});
   await page.reload();await wait(()=>window.rpgState?.frames>8);assert.equal((await state()).awards,2);assert.equal((await state()).turn,paused.turn);
-  assert.deepEqual(errors,[]);const final=await state();await page.evaluate(()=>Module._rpg_shutdown());report.results.push({backend,colors:colors.size,coloredPixels:colored,passed:true,final});await context.close();
+  assert.deepEqual(errors,[]);const final=await state();const adapter=await page.evaluate(()=>window.rpgGpuAdapter||null);await page.evaluate(()=>Module._rpg_shutdown());report.results.push({backend,adapter,colors:colors.size,coloredPixels:colored,passed:true,final});await context.close();
  }
  await fs.writeFile(path.join(evidence,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));
  }finally{server.closeAllConnections();await browser.close();await new Promise(resolve=>server.close(resolve));clearTimeout(deadline);}
