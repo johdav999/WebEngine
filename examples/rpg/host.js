@@ -4,7 +4,7 @@ const names=['Begin encounter','Move one tile','Strike','End turn','Equip / uneq
 names.forEach((name,id)=>{let b=document.createElement('button');b.textContent=name;b.dataset.command=id;b.disabled=true;b.onclick=()=>Module._rpg_command(id);document.getElementById('actions').append(b);});
 window.refreshRpgUi=s=>{
  document.getElementById('values').textContent=`${s.location?'Practice garden':'Training court'} · ${s.paused?'Paused':'Ready'}\nActive actor ${s.active||'—'} · AP ${s.ap} · Turn ${s.turn}\nInventory: ${s.items} stacks · XP ${s.xp} · Reward receipts ${s.awards}${s.pending?' · Resolving…':''}`;
- document.getElementById('message').textContent=s.message;document.querySelectorAll('button').forEach(b=>b.disabled=false);
+ document.getElementById('message').textContent=window.rpgHostError||s.message;document.querySelectorAll('button').forEach(b=>b.disabled=false);
 };
 const canvas=Module.canvas;let drag=null;
 canvas.addEventListener('pointerdown',e=>{if(!Module._rpg_orbit)return;canvas.focus();drag={id:e.pointerId,x:e.clientX,y:e.clientY};canvas.setPointerCapture(e.pointerId);});

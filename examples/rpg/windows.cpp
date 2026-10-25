@@ -43,6 +43,7 @@ int main(int argc,char**argv){try{
     std::filesystem::create_directories(output);auto require=[](bool b,const char*s){if(!b)throw std::runtime_error(s);};double deadline=host.nowSeconds()+90;
     auto tick=[&](){require(step(),"Host stopped");require(host.nowSeconds()<deadline,"Smoke timeout");};
     while(host.diagnostics().presentedFrames<10)tick();
+    std::ofstream(output/"device.json")<<host.diagnostics().renderState;
     auto capture=[&](const char*name){host.captureFrame(output/name);do{tick();}while(host.capturePending());require(host.captureError().empty(),"Capture failed");};
     auto act=[&](Action a){controller.execute(a);tick();};capture("before.ppm");
     act(Action::Equip);act(Action::Deliver);require(controller.awards()==2,"Reward missing");act(Action::Begin);act(Action::Move);

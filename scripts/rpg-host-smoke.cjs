@@ -3,6 +3,7 @@ const {chromium}=require('playwright');
 const {PNG}=require('pngjs');
 const fs=require('node:fs/promises'),path=require('node:path'),http=require('node:http'),assert=require('node:assert/strict');
 (async()=>{
+ const deadline=setTimeout(()=>{console.error('Browser acceptance exceeded five minutes');process.exit(1);},300000);deadline.unref();
  const site=path.resolve(process.env.RPG_SITE||'build/rpg-host/rpg-site');
  const evidence=path.resolve(process.env.EVIDENCE_DIR||'build/evidence/rpg-host');await fs.mkdir(evidence,{recursive:true});
  const server=http.createServer(async(req,res)=>{try{const name=decodeURIComponent(new URL(req.url,'http://localhost').pathname);const file=path.resolve(site,'.'+(name==='/'?'/index.html':name));if(!file.startsWith(site+path.sep))throw Error('Path');const data=await fs.readFile(file);res.setHeader('Content-Type',file.endsWith('.wasm')?'application/wasm':file.endsWith('.js')?'text/javascript':file.endsWith('.html')?'text/html':'application/octet-stream');res.end(data);}catch(e){res.statusCode=404;res.end();}});
@@ -35,5 +36,5 @@ const fs=require('node:fs/promises'),path=require('node:path'),http=require('nod
   assert.deepEqual(errors,[]);const final=await state();await page.evaluate(()=>Module._rpg_shutdown());report.results.push({backend,colors:colors.size,coloredPixels:colored,passed:true,final});await context.close();
  }
  await fs.writeFile(path.join(evidence,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));
- }finally{await browser.close();await new Promise(resolve=>server.close(resolve));}
+ }finally{server.closeAllConnections();await browser.close();await new Promise(resolve=>server.close(resolve));clearTimeout(deadline);}
 })().catch(e=>{console.error(e);process.exit(1);});
