@@ -16,11 +16,28 @@ jobs:
       - run: cmake --build build/rpg-host --config Release --target rpg_demo_windows rpg_host_tests --parallel 4
       - run: ctest --test-dir build/rpg-host -C Release -R rpg_host --output-on-failure
       - name: D3D12 rendered smoke
+        id: native-smoke
         env:
           WEBENGINE_D3D12_WARP: '1'
           WEBENGINE_D3D12_VALIDATION: '1'
           WEBENGINE_D3D12_GPU_VALIDATION: '1'
         run: python scripts/rpg-native-smoke.py build/rpg-host/Release/rpg_demo_windows.exe build/evidence/rpg-d3d12
+      - name: Isolate native scene rendering
+        if: failure() && steps.native-smoke.outcome == 'failure'
+        continue-on-error: true
+        env:
+          WEBENGINE_D3D12_WARP: '1'
+          WEBENGINE_D3D12_VALIDATION: '1'
+          RPG_SMOKE_LAYER: scene
+        run: python scripts/rpg-native-smoke.py build/rpg-host/Release/rpg_demo_windows.exe build/evidence/rpg-isolate-scene
+      - name: Isolate native GUI rendering
+        if: failure() && steps.native-smoke.outcome == 'failure'
+        continue-on-error: true
+        env:
+          WEBENGINE_D3D12_WARP: '1'
+          WEBENGINE_D3D12_VALIDATION: '1'
+          RPG_SMOKE_LAYER: gui
+        run: python scripts/rpg-native-smoke.py build/rpg-host/Release/rpg_demo_windows.exe build/evidence/rpg-isolate-gui
       - name: Native diagnostics
         if: always()
         run: if (Test-Path rpg-host-error.txt) { Get-Content rpg-host-error.txt }
@@ -31,6 +48,8 @@ jobs:
           name: rpg-windows-host
           path: |
             build/evidence/rpg-d3d12
+            build/evidence/rpg-isolate-scene
+            build/evidence/rpg-isolate-gui
             build/rpg-host/Release
             rpg-host-error.txt
   browser:
