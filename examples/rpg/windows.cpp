@@ -2,11 +2,7 @@
 #include "engine/desktop.hpp"
 #include <fstream>
 #include <iostream>
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <windows.h>
-#endif
+#include <SDL3/SDL.h>
 
 int main(int argc,char**argv){try{
     using namespace engine;using namespace rpg_example;
@@ -50,20 +46,17 @@ int main(int argc,char**argv){try{
     auto turn=controller.state().turnEpoch;act(Action::Pause);controller.orbit(.4f);for(int i=0;i<5;++i)tick();require(controller.state().turnEpoch==turn,"Pause advanced turn");
     act(Action::Recover);act(Action::Pause);act(Action::Save);auto saved=storage.read();require(saved.has_value(),"Save missing");
     failWrite=true;try{controller.execute(Action::Save);throw std::logic_error("Write should fail");}catch(const std::runtime_error&){}failWrite=false;require(storage.read()==saved,"Failed write replaced save");
-#ifdef _WIN32
-    // Exercise the native window event queue and DesktopHost control mapping.
-    HWND window=nullptr;
-    EnumWindows([](HWND candidate,LPARAM data)->BOOL{DWORD process=0;GetWindowThreadProcessId(candidate,&process);wchar_t title[128]{};GetWindowTextW(candidate,title,128);
-        if(process==GetCurrentProcessId()&&std::wstring_view(title)==L"RPG - Training Court"){*reinterpret_cast<HWND*>(data)=candidate;return FALSE;}return TRUE;},reinterpret_cast<LPARAM>(&window));
-    require(window!=nullptr,"Native sample window missing");
-    // Hidden smoke windows have no OS keyboard focus. Inject the focus event into
-    // this window's queue without taking focus from the user's foreground app.
-    require(PostMessageW(window,WM_SETFOCUS,0,0)!=0,"Native focus event failed");tick();
-    auto key=[&](WPARAM value){auto scan=MapVirtualKeyW(static_cast<UINT>(value),MAPVK_VK_TO_VSC);auto down=LPARAM(1)|(LPARAM(scan)<<16);
-        require(PostMessageW(window,WM_KEYDOWN,value,down)!=0,"Native key down failed");
-        require(PostMessageW(window,WM_KEYUP,value,down|LPARAM(0xc0000000u))!=0,"Native key up failed");};
-    key(VK_SPACE);for(int i=0;i<5;++i)tick();require(controller.state().turnEpoch==turn+1,"Native keyboard did not end exactly one turn");
-#endif
+    // Inject into SDL's native event queue: hidden tests never steal OS focus.
+    int count=0;auto windows=SDL_GetWindows(&count);require(windows&&count==1,"Native sample window missing");
+    auto window=SDL_GetWindowID(windows[0]);float scale=SDL_GetWindowDisplayScale(windows[0]);SDL_free(windows);
+    auto push=[&](SDL_Event event){require(SDL_PushEvent(&event),"Native event enqueue failed");};
+    SDL_Event focus{};focus.type=SDL_EVENT_WINDOW_FOCUS_GAINED;focus.window.windowID=window;push(focus);tick();
+    SDL_Event key{};key.type=SDL_EVENT_KEY_DOWN;key.key.windowID=window;key.key.scancode=SDL_SCANCODE_SPACE;key.key.key=SDLK_SPACE;key.key.down=true;push(key);
+    key.type=SDL_EVENT_KEY_UP;key.key.down=false;push(key);for(int i=0;i<5;++i)tick();require(controller.state().turnEpoch==turn+1,"Native keyboard did not end exactly one turn");
+    auto yaw=controller.scene().orbit->yaw;auto size=host.size();
+    SDL_Event pointer{};pointer.type=SDL_EVENT_MOUSE_BUTTON_DOWN;pointer.button.windowID=window;pointer.button.button=SDL_BUTTON_LEFT;pointer.button.down=true;pointer.button.x=size.width*.75f*scale;pointer.button.y=size.height*.5f*scale;push(pointer);
+    SDL_Event motion{};motion.type=SDL_EVENT_MOUSE_MOTION;motion.motion.windowID=window;motion.motion.state=SDL_BUTTON_LMASK;motion.motion.x=pointer.button.x+30*scale;motion.motion.y=pointer.button.y;push(motion);
+    pointer.type=SDL_EVENT_MOUSE_BUTTON_UP;pointer.button.down=false;pointer.button.x=motion.motion.x;push(pointer);tick();require(controller.scene().orbit->yaw!=yaw,"Native drag did not inspect camera");
     controller.enqueue(Action::Travel);controller.enqueue(Action::EndTurn);tick();require(controller.discarded>0,"Travel retained input");
     act(Action::Load);require(controller.awards()==2&&controller.state().turnEpoch==turn,"Reload changed receipts/turn");
     auto old=&controller.state();auto corrupt=*saved;corrupt.back()^=1;try{controller.load(corrupt,controller.epoch());throw std::logic_error("Corrupt load should fail");}catch(const std::invalid_argument&){}require(&controller.state()==old,"Corrupt load published");

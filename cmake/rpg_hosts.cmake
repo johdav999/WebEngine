@@ -23,7 +23,7 @@ if(EMSCRIPTEN)
     "${CMAKE_CURRENT_SOURCE_DIR}/examples/rpg/index.html" "${CMAKE_CURRENT_SOURCE_DIR}/examples/rpg/host.js" "${CMAKE_CURRENT_BINARY_DIR}/rpg-site")
 elseif(TARGET WebEngine::Desktop)
   add_executable(rpg_demo_windows examples/rpg/windows.cpp)
-  target_link_libraries(rpg_demo_windows PRIVATE rpg_host_sample WebEngine::Desktop WebEngine::WindowsRuntime)
+  target_link_libraries(rpg_demo_windows PRIVATE rpg_host_sample WebEngine::Desktop WebEngine::WindowsRuntime SDL3::SDL3)
   target_compile_options(rpg_demo_windows PRIVATE /utf-8)
   add_custom_command(TARGET rpg_demo_windows POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:rpg_demo_windows>/assets/fonts"
