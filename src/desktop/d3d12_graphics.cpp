@@ -182,11 +182,26 @@ class D3D12Graphics final:public DesktopGraphics {
         }
         checked(CreateDXGIFactory2(0,IID_PPV_ARGS(&factory_)),"Create DXGI factory");
         ComPtr<IDXGIAdapter1> adapter;
-        for(UINT i=0;;++i){ComPtr<IDXGIAdapter1> next;if(factory_->EnumAdapterByGpuPreference(i,DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,IID_PPV_ARGS(&next))==DXGI_ERROR_NOT_FOUND)break;DXGI_ADAPTER_DESC1 desc{};next->GetDesc1(&desc);if(desc.Flags&DXGI_ADAPTER_FLAG_SOFTWARE)continue;if(SUCCEEDED(D3D12CreateDevice(next.Get(),D3D_FEATURE_LEVEL_11_0,IID_PPV_ARGS(&device_)))){adapter=std::move(next);break;}}
+        // Explicit diagnostic selection, never an implicit fallback from hardware.
+        wchar_t warp[4]{};
+        const bool software=GetEnvironmentVariableW(L"WEBENGINE_D3D12_WARP",warp,4)&&warp[0]==L'1';
+        if(software){
+            checked(factory_->EnumWarpAdapter(IID_PPV_ARGS(&adapter)),"Enumerate WARP adapter");
+            checked(D3D12CreateDevice(adapter.Get(),D3D_FEATURE_LEVEL_11_0,IID_PPV_ARGS(&device_)),"Create WARP D3D12 device");
+        }else for(UINT i=0;;++i){
+            ComPtr<IDXGIAdapter1> next;
+            const auto result=factory_->EnumAdapterByGpuPreference(i,DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,IID_PPV_ARGS(&next));
+            if(result==DXGI_ERROR_NOT_FOUND)break;
+            checked(result,"Enumerate hardware adapter");
+            if(!next)throw std::runtime_error("DXGI returned a null hardware adapter");
+            DXGI_ADAPTER_DESC1 desc{};checked(next->GetDesc1(&desc),"Hardware adapter description");
+            if(desc.Flags&DXGI_ADAPTER_FLAG_SOFTWARE)continue;
+            if(SUCCEEDED(D3D12CreateDevice(next.Get(),D3D_FEATURE_LEVEL_11_0,IID_PPV_ARGS(&device_)))){adapter=std::move(next);break;}
+        }
         if(!device_)throw std::runtime_error("No hardware D3D12 adapter available; no implicit WARP/Dawn fallback");
         if(debug_)checked(device_.As(&debugQueue_),"D3D12 debug queue");
         DXGI_ADAPTER_DESC1 info{};checked(adapter->GetDesc1(&info),"Adapter description");char utf8[1024]{};WideCharToMultiByte(CP_UTF8,0,info.Description,-1,utf8,sizeof(utf8),nullptr,nullptr);
-        adapter_="{\"device\":"+jsonString(utf8)+",\"vendorId\":"+std::to_string(info.VendorId)+",\"deviceId\":"+std::to_string(info.DeviceId)+",\"backend\":\"D3D12\",\"software\":false}";
+        adapter_="{\"device\":"+jsonString(utf8)+",\"vendorId\":"+std::to_string(info.VendorId)+",\"deviceId\":"+std::to_string(info.DeviceId)+",\"backend\":\"D3D12\",\"software\":"+(software?"true":"false")+"}";
         D3D12_COMMAND_QUEUE_DESC q{};q.Type=D3D12_COMMAND_LIST_TYPE_DIRECT;checked(device_->CreateCommandQueue(&q,IID_PPV_ARGS(&queue_)),"Create command queue");
         checked(device_->CreateFence(0,D3D12_FENCE_FLAG_NONE,IID_PPV_ARGS(&fence_)),"Create fence");event_=CreateEventW(nullptr,FALSE,FALSE,nullptr);if(!event_)throw std::runtime_error("Create fence event failed");
         D3D12_DESCRIPTOR_HEAP_DESC hd{};hd.Type=D3D12_DESCRIPTOR_HEAP_TYPE_RTV;hd.NumDescriptors=frameCount+7;checked(device_->CreateDescriptorHeap(&hd,IID_PPV_ARGS(&rtvs_)),"Create RTV heap");hd.Type=D3D12_DESCRIPTOR_HEAP_TYPE_DSV;hd.NumDescriptors=6;checked(device_->CreateDescriptorHeap(&hd,IID_PPV_ARGS(&dsv_)),"Create DSV heap");

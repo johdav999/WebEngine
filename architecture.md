@@ -71,6 +71,11 @@ combined saves (localStorage / atomic DesktopFiles). No host dependency enters t
 RPG kernel. See [host contracts](docs/rpg-hosts.md) and [R9 evidence](docs/rpg-r9-validation.md).
 R10 adds a complete alternate standalone ruleset and the [release audit](docs/rpg-release-1.md).
 API 1.7.0 / wire 1 remain unchanged; rendered CI gates remain open.
+Library stabilization L1 adds explicit `WEBENGINE_D3D12_WARP=1` diagnostic
+rendering for software-only Windows CI; default hardware selection remains strict.
+Adapter enumeration failures are checked before dereferencing returned interfaces.
+Software browser acceptance disables Chromium's GPU watchdog and retains real
+frame/input/storage assertions. See [L1 evidence](docs/rpg-l1-validation.md).
 Third-person camera policy, Lattice abilities, balance, factions and campaign/world state stay
 in RPGGame. Existing engine core, Quests and hosts never depend on RPG.
 

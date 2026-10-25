@@ -9,10 +9,21 @@ const fs=require('node:fs/promises'),path=require('node:path'),http=require('nod
  const server=http.createServer(async(req,res)=>{try{const name=decodeURIComponent(new URL(req.url,'http://localhost').pathname);const file=path.resolve(site,'.'+(name==='/'?'/index.html':name));if(!file.startsWith(site+path.sep))throw Error('Path');const data=await fs.readFile(file);res.setHeader('Content-Type',file.endsWith('.wasm')?'application/wasm':file.endsWith('.js')?'text/javascript':file.endsWith('.html')?'text/html':'application/octet-stream');res.end(data);}catch(e){res.statusCode=404;res.end();}});
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const url=`http://127.0.0.1:${server.address().port}`;
  const hardware=process.env.RPG_HARDWARE==='1';
- const browser=await chromium.launch({headless:true,executablePath:process.env.BROWSER_EXECUTABLE,args:hardware?['--enable-unsafe-webgpu']:['--enable-unsafe-webgpu','--enable-unsafe-swiftshader','--use-angle=swiftshader','--use-webgpu-adapter=swiftshader']});
+ const browser=await chromium.launch({headless:true,executablePath:process.env.BROWSER_EXECUTABLE,args:hardware?['--enable-unsafe-webgpu']:['--enable-unsafe-webgpu','--enable-unsafe-swiftshader','--use-angle=swiftshader','--use-webgpu-adapter=swiftshader','--disable-gpu-watchdog']});
  const report={browser:await browser.version(),mode:hardware?'headless, hardware requested':'headless, SwiftShader requested',results:[]};
  try{for(const backend of (process.env.RPG_BACKENDS||'webgpu,webgl2').split(',')){
-  const context=await browser.newContext({viewport:{width:1200,height:800}});const page=await context.newPage();const errors=[];page.on('pageerror',e=>{errors.push(String(e));console.error(e);});page.on('console',m=>console.log(backend,m.type(),m.text()));
+  const context=await browser.newContext({viewport:{width:1200,height:800}});
+  await context.addInitScript(()=>{
+   if(!globalThis.GPUAdapter)return;
+   const request=GPUAdapter.prototype.requestDevice;
+   GPUAdapter.prototype.requestDevice=async function(...args){
+    const device=await request.apply(this,args);
+    device.addEventListener('uncapturederror',event=>console.error('GPU uncaptured:',event.error.message));
+    device.lost.then(info=>console.warn('GPU lost:',info.reason,info.message));
+    return device;
+   };
+  });
+  const page=await context.newPage();const errors=[];page.on('pageerror',e=>{errors.push(String(e));console.error(e);});page.on('console',m=>console.log(backend,m.type(),m.text()));
   const state=()=>page.evaluate(()=>window.rpgState);const wait=async fn=>{try{await page.waitForFunction(fn,null,{timeout:60000});}catch(e){console.error("Failed predicate",String(fn),await state());throw e;}};
   const click=id=>page.locator(`[data-command="${id}"]`).click();
   await page.goto(`${url}/?backend=${backend}`);await wait(()=>window.rpgState?.frames>8);assert.equal((await state()).backend,backend==='webgpu'?0:1);
