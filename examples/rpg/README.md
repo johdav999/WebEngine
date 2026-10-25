@@ -33,3 +33,10 @@ The neutral inventory definitions cover weapon/consumable and tool/loadout polic
 R4 adds [abilities, statuses and candidate RNG](../../docs/rpg-abilities.md)
 with [native/Wasm evidence](../../docs/rpg-r4-validation.md). The ability sample
 provides random damage, item-consuming healing and non-damage resource effects.
+
+
+R8 adds `save_game.hpp`, a headless example of consumer-owned checkpoint state
+and an outer envelope around coordinated RPG/quest snapshots. The sample prepares
+and validates a complete replacement before publishing it. See
+[snapshot contracts](../../docs/rpg-snapshots.md) for canonical formats, stable-save
+boundaries and R9 host responsibilities; no storage or rendered host is added here.

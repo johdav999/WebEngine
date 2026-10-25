@@ -65,9 +65,9 @@ public:
                 SessionId, ContentId awardSource, Policy, std::uint64_t seed = 0);
     Coordinator(const Coordinator&) = delete;
     Coordinator& operator=(const Coordinator&) = delete;
-    const State& rpgState() const noexcept { return rpg_.state(); }
-    const engine::quests::Snapshot& questState() const noexcept { return quests_.state(); }
-    std::size_t pending() const noexcept { return quests_.pending(); }
+    const State& rpgState() const noexcept { return kernels_->rpg.state(); }
+    const engine::quests::Snapshot& questState() const noexcept { return kernels_->quests.state(); }
+    std::size_t pending() const noexcept { return kernels_->quests.pending(); }
     Command command() const;
     engine::quests::Event event(ProjectedEvent) const;
     void post(engine::quests::Event);
@@ -83,11 +83,20 @@ public:
                      Budget = {}, std::optional<WorldStamp> = {});
     std::shared_ptr<const SpatialQuote> spatialQuote(EntityId, SpatialSnapshot, std::optional<PathQuote> = {}) const;
     void invalidateRpgCommands();
+    std::vector<std::uint8_t> save() const;
+    void restore(std::span<const std::uint8_t>); // Both kernels, one detached aggregate swap.
 private:
     Policy policy_; // Captures outlive the two runtimes.
     ContentId source_;
-    engine::rpg::Runtime rpg_;
-    engine::quests::Runtime quests_;
+    struct Kernels {
+        engine::rpg::Runtime rpg;
+        engine::quests::Runtime quests;
+        Kernels(std::shared_ptr<const Catalog> r, std::shared_ptr<const engine::quests::Catalog> q,
+                SessionId session, std::uint64_t seed):rpg(std::move(r),session,seed),quests(std::move(q)){}
+    };
+    std::shared_ptr<const Catalog> rpgCatalog_;
+    std::shared_ptr<const engine::quests::Catalog> questCatalog_;
+    std::unique_ptr<Kernels> kernels_;
     std::shared_ptr<const void> owner_ = std::make_shared<int>(0);
     std::uint64_t sequence_ = 0;
     bool busy_ = false;

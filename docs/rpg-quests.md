@@ -154,12 +154,14 @@ one command. First complete/recover the action, then project its committed resul
 and prepare coordinated quest rewards. This keeps external route reservations out
 of the nonspatial reward publication proof.
 
-## R8 handoff and limits
+## R8 persistence and remaining limits
 
-Both kernels' immutable catalogues, RPG durable state/award dispositions, quest
-snapshot receipts/earned flags/source sequences and bridge producer sequence are
-the inputs for R8. R7 exposes no independent restore that could split the ledger
-from quest progress. Full RPG snapshots, a coordinated save envelope, migrations,
-ledger compaction, storage and restore/rebase remain R8 or game policy. Non-RPG
-campaign rewards require an enclosing validated aggregate, not callback side effects.
-Rendered hosts remain R9; this bridge has no platform-specific renderer behavior.
+API 1.7.0 adds `Coordinator::save/restore` and retains both runtimes in a private
+owned aggregate. [R8 snapshots](rpg-snapshots.md) validate both candidates and
+receipt agreement before a single aggregate swap. Restore clears queued input,
+rebases generations and invalidates old owners without emitting rewards. Normal
+R7 reward preparation/publication retains the proof above.
+
+Migrations, ledger compaction, storage and non-RPG campaign effects remain consumer
+policy. The R8 sample demonstrates an outer envelope and whole sample-state swap.
+Browser/Windows presentation and storage integration remain R9.

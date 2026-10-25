@@ -31,6 +31,7 @@ public:
     const ItemDefinition* item(const ContentId&) const noexcept;
     const InventoryDefinition* inventory(const ContentId&) const noexcept;
     const BindingsHandle& bindings() const noexcept { return bindings_; }
+    const CatalogDefinition& definition() const noexcept { return definition_; }
 private:
     Catalog(CatalogDefinition definition, BindingsHandle bindings)
         : bindings_(std::move(bindings)), definition_(std::move(definition)) {}

@@ -1,6 +1,7 @@
 #pragma once
 #include "engine/rpg/catalog.hpp"
 #include "engine/rpg/state.hpp"
+#include "engine/rpg/snapshot.hpp"
 #include <variant>
 
 namespace engine::rpg {
@@ -68,6 +69,9 @@ public:
     bool canCommit(const Transaction&, std::optional<WorldStamp> = {}) const noexcept;
     bool commit(Transaction&&, std::optional<WorldStamp> = {}) noexcept;
     void invalidateCommands(); // Explicit host lifecycle boundary, no progression reset.
+    std::vector<std::uint8_t> save() const;
+    void restore(const Snapshot&); // Validated detached state; no effects, new generation.
+    void restore(std::span<const std::uint8_t>);
 private:
     std::shared_ptr<const Catalog> catalog_;
     SessionId session_;

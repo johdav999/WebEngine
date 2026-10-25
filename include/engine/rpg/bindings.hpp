@@ -36,6 +36,8 @@ public:
     const AdvancementHandler* findAdvancement(const ContentId&) const noexcept;
     void addEncounterHandler(ContentId, EncounterHandler);
     const EncounterHandler* findEncounter(const ContentId&) const noexcept;
+    // Kind, handler version and schema/features; no callbacks or provider pointers.
+    std::map<ContentId, std::vector<std::uint32_t>> compatibility() const;
 private:
     std::map<ContentId, EncounterHandler> encounters_;
     std::map<ContentId, DefinitionHandler> handlers_;

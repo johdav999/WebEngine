@@ -6,7 +6,7 @@ WebEngine is a C++20 engine for games running in desktop and mobile browsers thr
 
 This document describes the implementation inspected on 2026-10-10 and the architectural boundaries for future work. The current architecture sections describe existing code. The evolution table describes intended additions and extensions, not delivered functionality. Keep these sections current when implementations change; source code and focused validation establish actual capability.
 
-## Optional RPG library R1-R7 and release plan (2026-10-25)
+## Optional RPG library R1-R8 and release plan (2026-10-25)
 
 `engine_rpg` / `WebEngine::RPG` now implements the optional standard-C++20 foundation
 above Modules: explicit content/session/entity identities, bounded metadata
@@ -57,8 +57,12 @@ prepares quest progress, typed reward operations and bounded award receipts,
 preflights both kernels and publishes without callbacks/interleaving. Failed rewards
 preserve the quest queue. Replay records suppression without granting rewards. See
 [R7 contracts and publication proof](docs/rpg-quests.md) and [evidence](docs/rpg-r7-validation.md).
-Full snapshots and
-rendered browser/Windows samples remain future work. Third-person
+R8 adds canonical catalogue/snapshot bytes, strict compatibility and state validation,
+rebased standalone restore and one-swap combined RPG/quest restore. The sample outer
+envelope joins its checkpoint state to both kernels. No IO, migration, scene archive
+change or reward evaluation occurs during restore. See [R8 contracts](docs/rpg-snapshots.md)
+and [evidence](docs/rpg-r8-validation.md).
+Rendered browser/Windows samples remain future work. Third-person
 camera policy, Lattice abilities, balance, factions and campaign/world state stay
 in RPGGame. Existing engine core, Quests and hosts never depend on RPG.
 

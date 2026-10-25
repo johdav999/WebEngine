@@ -93,6 +93,24 @@ struct Guard {
 };
 }
 void recomputeEquipment(CharacterState& state, const CharacterDefinition& def) { recompute(state, def); }
+std::vector<std::uint8_t> Runtime::save() const {
+    if(busy_)throw Error(ErrorCode::Reentrant,"Save during preparation");
+    return encodeSnapshot(*catalog_,Snapshot{session_,*state_,encodeCatalog(*catalog_)});
+}
+void Runtime::restore(std::span<const std::uint8_t> bytes) {
+    if(busy_)throw Error(ErrorCode::Reentrant,"Restore during preparation");
+    restore(decodeSnapshot(*catalog_,bytes));
+}
+void Runtime::restore(const Snapshot& snapshot) {
+    Guard guard(busy_);
+    if(snapshot.session!=session_)throw Error(ErrorCode::InvalidSession,"Restore requires the same durable namespace");
+    validateSnapshot(*catalog_,snapshot);
+    auto candidate=std::make_shared<State>(snapshot.state);
+    candidate->generation=increment(std::max(state_->generation,snapshot.state.generation));
+    candidate->revision=increment(std::max(state_->revision,snapshot.state.revision));
+    std::shared_ptr<const State> published=std::move(candidate);
+    state_.swap(published);
+}
 const State& Transaction::state() const {
     if (consumed_ || !state_) throw Error(ErrorCode::ConsumedTransaction, "Transaction is consumed or moved from");
     return *state_;
