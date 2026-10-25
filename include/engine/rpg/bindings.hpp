@@ -1,5 +1,5 @@
 #pragma once
-#include "engine/rpg/characters.hpp"
+#include "engine/rpg/abilities.hpp"
 #include <functional>
 #include <map>
 
@@ -18,17 +18,25 @@ struct AdvancementHandler {
     std::uint32_t version = 1;
     std::function<UnlockProposal(const Advancement&)> evaluate;
 };
+struct AbilityHandler {
+    std::uint32_t version = 1, schemaVersion = 1;
+    std::function<void(const AbilityDefinition&)> validate;
+    std::function<EffectProposal(const AbilityContext&, Random&)> evaluate;
+};
 class Bindings {
 public:
     // Installation-only mutation. Published ModuleSnapshot exposes const access.
     void addDefinitionHandler(ContentId id, DefinitionHandler handler);
     const DefinitionHandler* find(const ContentId& id) const noexcept;
-    std::size_t size() const noexcept { return handlers_.size() + advancement_.size(); }
+    std::size_t size() const noexcept { return handlers_.size() + advancement_.size() + abilities_.size(); }
+    void addAbilityHandler(ContentId, AbilityHandler);
+    const AbilityHandler* findAbility(const ContentId&) const noexcept;
     void addAdvancementHandler(ContentId, AdvancementHandler);
     const AdvancementHandler* findAdvancement(const ContentId&) const noexcept;
 private:
     std::map<ContentId, DefinitionHandler> handlers_;
     std::map<ContentId, AdvancementHandler> advancement_;
+    std::map<ContentId, AbilityHandler> abilities_;
 };
 using Composition = ModuleComposition<Bindings>;
 using BindingsHandle = Composition::Handle;

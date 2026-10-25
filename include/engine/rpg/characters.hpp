@@ -35,6 +35,12 @@ enum class ModifierTarget { Attribute, ResourceMaximum };
 struct Modifier { ModifierTarget kind; ContentId target; Amount delta; };
 struct AttributeState { std::int64_t base = 0, value = 0; };
 struct ResourceState { std::int64_t baseMaximum = 0, maximum = 0, current = 0; };
+struct StatusState {
+    ContentId definition;
+    std::uint32_t stacks = 1, remaining = 1;
+    bool skipNext = false;
+    std::vector<Modifier> modifiers; // Immutable per-stack definition copy.
+};
 struct CharacterState {
     ContentId definition;
     std::map<ContentId, AttributeState> attributes;
@@ -45,6 +51,7 @@ struct CharacterState {
     std::set<ContentId> unlocks;
     // Derived from equipped instances; inaccessible through Set/RemoveModifiers.
     std::map<ItemId, std::vector<Modifier>> equipmentModifiers;
+    std::map<ContentId, StatusState> statuses;
 };
 struct Advancement {
     EntityId entity;

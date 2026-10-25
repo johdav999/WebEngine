@@ -6,6 +6,7 @@
 namespace engine::rpg {
 void validateCharacters(CatalogDefinition&, const Bindings&);
 void validateInventory(CatalogDefinition&);
+void validateAbilities(CatalogDefinition&, const Bindings&);
 ContentId::ContentId(std::string value) : value_(std::move(value)) {
     if (value_.size() > Limits::keyBytes) throw Error(ErrorCode::Limit, "RPG key exceeds 128 bytes");
     bool dot = false, segment = false;
@@ -35,7 +36,7 @@ EntityId EntityIds::allocate() {
     return result;
 }
 void Bindings::addDefinitionHandler(ContentId id, DefinitionHandler handler) {
-    if (handlers_.contains(id) || advancement_.contains(id)) throw Error(ErrorCode::DuplicateHandler, "Duplicate RPG handler: " + id.value());
+    if (handlers_.contains(id) || advancement_.contains(id) || abilities_.contains(id)) throw Error(ErrorCode::DuplicateHandler, "Duplicate RPG handler: " + id.value());
     if (size() >= Limits::handlers) throw Error(ErrorCode::Limit, "Too many RPG handlers");
     if (!handler.version) throw Error(ErrorCode::InvalidVersion, "Handler version must be positive");
     if (!handler.validate) throw Error(ErrorCode::MissingValidator, "Missing RPG definition validator");
@@ -79,7 +80,10 @@ std::shared_ptr<const Catalog> Catalog::create(CatalogDefinition definition, Bin
     }
     validateCharacters(definition, bindings->registry());
     validateInventory(definition);
+    validateAbilities(definition, bindings->registry());
     for (const auto& entry : entries) bindings->registry().find(entry.handler)->validate(entry);
+    for (const auto& ability : definition.abilities)
+        bindings->registry().findAbility(ability.handler.id)->validate(ability);
     return std::shared_ptr<const Catalog>(new Catalog(std::move(definition), std::move(bindings)));
 }
 const Definition* Catalog::find(const ContentId& id) const noexcept {

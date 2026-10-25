@@ -1,12 +1,14 @@
 # Optional RPG library: release 1 architecture
 
-Status: release architecture with R1 foundation, R2 characters/transactions and R3 inventory/equipment implemented. Created
+Status: release architecture with R1 foundation, R2 characters/transactions,
+R3 inventory/equipment and R4 abilities/statuses/RNG implemented. Created
 2026-10-25 against WebEngine `56080eca124c9a62e15b146799a8004bdad5a9b2`.
 The delivered subset is documented in [rpg.md](rpg.md): optional RPG target,
 identities, metadata bindings/catalogue and runtime ownership, plus
 [R2 characters, modifiers, progression and transactions](rpg-characters.md).
 [R3 inventory and equipment](rpg-inventory.md) extend the same transaction.
-Combat, quest bridge, serialization and hosts below remain proposed.
+[R4 abilities, statuses and candidate randomness](rpg-abilities.md) are delivered.
+Encounters, quest bridge, full snapshots and hosts below remain proposed.
 Use [validation](rpg-validation.md) for actual evidence. Existing
 [Modules](modules.md), [Quests](quests.md), [SDK composition](module-sdk.md),
 [Application](application-lifecycle.md) and [host contracts](consumer-hosts.md)
@@ -123,7 +125,8 @@ Avoid arbitrary expression graphs or multiplication chains in the first release.
 ## Transaction and extension contract
 
 Proposed flow is `prepare(command, context, budget)` then `commit(candidate)`.
-R2-R3 deliver prepare/commit for character and inventory/equipment operations; spatial, encounter, RNG and
+R2-R4 deliver prepare/commit for character, inventory/equipment, abilities, statuses
+and candidate RNG operations; spatial, encounter and
 later-system integration below remain future work.
 
 1. Check command owner/generation/revision/turn and producer sequence.

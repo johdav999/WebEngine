@@ -29,3 +29,7 @@ engine-core, physics, GUI and dependency-download setup. See
 R3 delivers [inventory and equipment transactions](../../docs/rpg-inventory.md),
 with [cross-platform validation](../../docs/rpg-r3-validation.md).
 The neutral inventory definitions cover weapon/consumable and tool/loadout policies.
+
+R4 adds [abilities, statuses and candidate RNG](../../docs/rpg-abilities.md)
+with [native/Wasm evidence](../../docs/rpg-r4-validation.md). The ability sample
+provides random damage, item-consuming healing and non-damage resource effects.

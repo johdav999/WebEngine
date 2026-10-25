@@ -5,6 +5,7 @@
 
 namespace engine::rpg {
 void applyInventory(State&, Results&, const Catalog&, SessionId, const Operation&);
+void applyAbilities(State&, Results&, const Catalog&, SessionId, const Operation&, std::size_t&, std::size_t&);
 namespace {
 std::int64_t add(std::int64_t a, std::int64_t b) {
     if ((b > 0 && a > std::numeric_limits<std::int64_t>::max() - b) ||
@@ -36,6 +37,11 @@ EntityId allocate(State& state, SessionId session) {
     return result;
 }
 void recompute(CharacterState& state, const CharacterDefinition& def) {
+    std::size_t total = 0;
+    for (const auto& [source, mods] : state.modifiers) total += mods.size();
+    for (const auto& [source, mods] : state.equipmentModifiers) total += mods.size();
+    for (const auto& [source, status] : state.statuses) total += status.modifiers.size() * status.stacks;
+    if (total > Limits::modifiers) throw Error(ErrorCode::Limit, "Combined modifier limit exceeded");
     for (const auto& value : def.attributes) {
         auto& result = state.attributes.at(value.id);
         auto sum = result.base;
@@ -47,6 +53,11 @@ void recompute(CharacterState& state, const CharacterDefinition& def) {
             for (const auto& modifier : modifiers)
                 if (modifier.kind == ModifierTarget::Attribute && modifier.target == value.id)
                     sum = add(sum, modifier.delta.value);
+        for (const auto& [source, status] : state.statuses)
+            for (std::uint32_t stack = 0; stack < status.stacks; ++stack)
+                for (const auto& modifier : status.modifiers)
+                    if (modifier.kind == ModifierTarget::Attribute && modifier.target == value.id)
+                        sum = add(sum, modifier.delta.value);
         result.value = std::clamp(sum, value.minimum, value.maximum);
     }
     for (const auto& value : def.resources) {
@@ -60,6 +71,11 @@ void recompute(CharacterState& state, const CharacterDefinition& def) {
             for (const auto& modifier : modifiers)
                 if (modifier.kind == ModifierTarget::ResourceMaximum && modifier.target == value.id)
                     sum = add(sum, modifier.delta.value);
+        for (const auto& [source, status] : state.statuses)
+            for (std::uint32_t stack = 0; stack < status.stacks; ++stack)
+                for (const auto& modifier : status.modifiers)
+                    if (modifier.kind == ModifierTarget::ResourceMaximum && modifier.target == value.id)
+                        sum = add(sum, modifier.delta.value);
         result.maximum = std::clamp(sum, value.minimumMaximum, value.maximumMaximum);
         result.current = std::min(result.current, result.maximum);
     }
@@ -78,9 +94,10 @@ const State& Transaction::state() const {
     if (consumed_ || !state_) throw Error(ErrorCode::ConsumedTransaction, "Transaction is consumed or moved from");
     return *state_;
 }
-Runtime::Runtime(std::shared_ptr<const Catalog> catalog, SessionId session)
+Runtime::Runtime(std::shared_ptr<const Catalog> catalog, SessionId session, std::uint64_t seed)
     : catalog_(std::move(catalog)), session_(session) {
     if (!catalog_) throw Error(ErrorCode::MissingModule, "RPG runtime requires a catalogue");
+    auto initial = std::make_shared<State>(); initial->random = seedRandom(seed); state_ = std::move(initial);
 }
 Command Runtime::command(ContentId producer, std::uint64_t sequence, std::vector<Operation> operations) const {
     if (operations.empty() || operations.size() > Limits::operations)
@@ -96,7 +113,8 @@ Transaction Runtime::prepare(const Command& command, Budget budget) {
         throw Error(ErrorCode::InvalidSequence, "Duplicate or invalid producer sequence");
     if (watermark == state_->producers.end() && state_->producers.size() >= Limits::producers)
         throw Error(ErrorCode::Limit, "Too many command producers");
-    if (budget.operations > Limits::operations || budget.advancements > Limits::advancements)
+    if (budget.operations > Limits::operations || budget.advancements > Limits::advancements ||
+        budget.effects > Limits::effects || budget.randomDraws > Limits::randomDraws)
         throw Error(ErrorCode::Limit, "Budget exceeds hard limit");
     if (command.operations_.size() > budget.operations)
         throw Error(ErrorCode::BudgetExceeded, "Operation budget exhausted");
@@ -105,7 +123,7 @@ Transaction Runtime::prepare(const Command& command, Budget budget) {
     Transaction transaction;
     transaction.owner_ = owner_; transaction.generation_ = state_->generation; transaction.revision_ = state_->revision;
     auto& results = transaction.results_;
-    std::size_t advancements = 0;
+    std::size_t advancements = 0, effects = budget.effects, draws = budget.randomDraws;
     for (const auto& operation : command.operations_) std::visit([&](const auto& op) {
         using T = std::decay_t<decltype(op)>;
         if constexpr (std::is_same_v<T, CreateCharacter>) {
@@ -123,6 +141,9 @@ Transaction Runtime::prepare(const Command& command, Budget budget) {
             std::is_same_v<T, RemoveItem> || std::is_same_v<T, SplitItem> || std::is_same_v<T, MergeItems> ||
             std::is_same_v<T, TransferItem> || std::is_same_v<T, EquipItem> || std::is_same_v<T, UnequipItem>) {
             applyInventory(*candidate, results, *catalog_, session_, operation);
+        } else if constexpr (std::is_same_v<T, UseAbility> || std::is_same_v<T, ApplyStatus> ||
+            std::is_same_v<T, DispelStatus> || std::is_same_v<T, AdvancePhase>) {
+            applyAbilities(*candidate, results, *catalog_, session_, operation, effects, draws);
         } else {
             const auto found = candidate->characters.find(op.entity);
             if (found == candidate->characters.end()) throw Error(ErrorCode::MissingEntity, "Unknown or foreign character");
@@ -202,6 +223,9 @@ Transaction Runtime::prepare(const Command& command, Budget budget) {
             }
         }
     }, operation);
+    if (results.created.size() + results.advancements.size() + results.inventories.size() + results.items.size() +
+        results.resources.size() + results.statuses.size() + results.abilities.size() > Limits::results)
+        throw Error(ErrorCode::Limit, "Result record limit exceeded");
     candidate->producers.insert_or_assign(command.producer_, command.sequence_);
     transaction.state_ = std::move(candidate);
     return transaction;

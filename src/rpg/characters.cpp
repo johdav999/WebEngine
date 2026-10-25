@@ -19,7 +19,7 @@ template<class T> const T* lookup(const std::vector<T>& entries, const ContentId
 }
 }
 void Bindings::addAdvancementHandler(ContentId id, AdvancementHandler handler) {
-    if (handlers_.contains(id) || advancement_.contains(id))
+    if (handlers_.contains(id) || advancement_.contains(id) || abilities_.contains(id))
         throw Error(ErrorCode::DuplicateHandler, "Duplicate RPG handler");
     if (size() >= Limits::handlers) throw Error(ErrorCode::Limit, "Too many RPG handlers");
     if (!handler.version) throw Error(ErrorCode::InvalidVersion, "Handler version must be positive");
@@ -38,6 +38,9 @@ void validateCharacters(CatalogDefinition& catalog, const Bindings& bindings) {
     };
     count(catalog.characters.size()); count(catalog.progressions.size());
     count(catalog.items.size()); count(catalog.inventories.size());
+    count(catalog.abilities.size()); count(catalog.statuses.size());
+    for (const auto& a : catalog.abilities) { count(a.parameters.size()); count(a.costs.size()); }
+    for (const auto& s : catalog.statuses) { count(s.modifiers.size()); count(s.tickEffects.size()); }
     for (const auto& item : catalog.items) { count(item.slots.size()); count(item.modifiers.size()); }
     for (const auto& inventory : catalog.inventories) count(inventory.slots.size());
     sortUnique(catalog.characters); sortUnique(catalog.progressions);
@@ -48,6 +51,8 @@ void validateCharacters(CatalogDefinition& catalog, const Bindings& bindings) {
     for (const auto& def : catalog.definitions) insert(def.id);
     for (const auto& def : catalog.items) insert(def.id);
     for (const auto& def : catalog.inventories) insert(def.id);
+    for (const auto& def : catalog.abilities) insert(def.id);
+    for (const auto& def : catalog.statuses) insert(def.id);
     for (auto& def : catalog.progressions) {
         insert(def.id);
         if (def.thresholds.size() > Limits::thresholds || def.allowedUnlocks.size() > Limits::unlocks)

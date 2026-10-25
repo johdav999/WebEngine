@@ -12,8 +12,8 @@ struct RemoveModifiers { EntityId entity; ContentId source; };
 struct AddExperience { EntityId entity; Amount amount; };
 using Operation = std::variant<CreateCharacter, SetAttributeBase, AdjustResource,
                                SetModifiers, RemoveModifiers, AddExperience, CreateInventory, AddItem, RemoveItem,
-                               SplitItem, MergeItems, TransferItem, EquipItem, UnequipItem>;
-struct Budget { std::size_t operations = 256, advancements = 256; };
+                               SplitItem, MergeItems, TransferItem, EquipItem, UnequipItem, UseAbility, ApplyStatus, DispelStatus, AdvancePhase>;
+struct Budget { std::size_t operations = 256, advancements = 256, effects = 256, randomDraws = 4096; };
 class Command {
 public:
     std::uint64_t generation() const noexcept { return generation_; }
@@ -50,7 +50,7 @@ private:
 // Single owner thread. No concurrent access, IO, clock or implicit command queue.
 class Runtime {
 public:
-    Runtime(std::shared_ptr<const Catalog>, SessionId);
+    Runtime(std::shared_ptr<const Catalog>, SessionId, std::uint64_t seed = 0);
     Runtime(const Runtime&) = delete;
     Runtime& operator=(const Runtime&) = delete;
     Runtime(Runtime&&) = delete;
@@ -69,7 +69,7 @@ private:
     std::shared_ptr<const Catalog> catalog_;
     SessionId session_;
     std::shared_ptr<const void> owner_ = std::make_shared<int>(0);
-    std::shared_ptr<const State> state_ = std::make_shared<State>();
+    std::shared_ptr<const State> state_;
     bool busy_ = false;
 };
 } // namespace engine::rpg

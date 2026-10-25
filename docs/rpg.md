@@ -1,11 +1,12 @@
-# Optional RPG library (R1-R3)
+# Optional RPG library (R1-R4)
 
 R1 implements `engine_rpg` / `WebEngine::RPG`: a standard-C++20 static library
 depending only on [Modules](modules.md). It supplies typed identities, validated
 catalogue metadata, provider registration and independent runtime ownership.
 R2 adds [characters, modifiers, progression and shared transactions](rpg-characters.md).
 R3 adds [inventory, durable items and equipment transactions](rpg-inventory.md).
-Combat, quest bridge, snapshots, scene integration, scheduler and renderer
+R4 adds [abilities, statuses and deterministic randomness](rpg-abilities.md).
+Encounters, quest bridge, full snapshots, scene integration, scheduler and renderer
 remain outside the delivered library. Those remain later milestones
 in the [architecture](rpg-library-architecture.md) and
 [release prompts](rpg-library-release-1-prompts.md).
@@ -52,7 +53,7 @@ Headers are `engine/rpg/types.hpp`, `bindings.hpp`, `catalog.hpp` and `runtime.h
   underscore or hyphen within nonempty segments. Leading/trailing/repeated dots,
   uppercase, whitespace and non-ASCII bytes reject.
 - `ContentRevision` is an explicitly constructed positive uint64 selected by the
-  application. It is independent of `apiVersion` (currently 1.2.0).
+  application. It is independent of `apiVersion` (currently 1.3.0).
 - `SessionId` is a nonzero uint64 durable namespace chosen by the host. The host
   must ensure uniqueness between distinct persistent sessions. No global ID
   registry, random namespace generator or save restore is supplied.
@@ -75,7 +76,7 @@ and application content revision. Runtime IDs are not scene handles.
 
 ## Explicit composition and validation
 
-`moduleRegistration()` supplies `webengine.rpg`, API version 1.2.0, with no implicit
+`moduleRegistration()` supplies `webengine.rpg`, API version 1.3.0, with no implicit
 handlers or schema claims. Game modules declare a dependency on this registration
 and install typed `DefinitionHandler` entries into staging `Bindings`. A handler
 has a positive uint32 version and a required `void(const Definition&)` validator.
@@ -132,8 +133,8 @@ actor, character or entity record. `nextEntity` exposes the next cursor for
 diagnostics, not save bytes. Exhausted allocation throws without changing state.
 R2 adds character state and a shared transaction boundary; see
 [command, revision and lifetime contracts](rpg-characters.md). Allocation now
-advances revision and invalidates prepared commands/candidates. No RNG, event
-scheduler or wire snapshots are introduced.
+advances revision and invalidates prepared commands/candidates. R4 adds candidate
+RNG with a versioned state encoding; there is no event scheduler or full snapshot.
 
 Composition replacement/destruction does not invalidate retained sessions.
 Runtime state is destroyed before its catalogue. The catalogue retains immutable
@@ -142,7 +143,7 @@ before releasing installer captures in reverse dependency order. Other retained
 registrations/snapshots may extend those lifetimes; no dynamic code unload exists.
 
 R2 extends these types with character/resource state, owner/generation/revision
-stamps and producer sequencing. R3 must reuse that transaction boundary for
-inventory and equipment. Future snapshot versions remain separate. The [external consumer](../examples/rpg/consumer.cpp)
+stamps and producer sequencing. R3 reuses that boundary for inventory/equipment,
+and R4 for abilities/statuses/RNG. Future full snapshot versions remain separate. The [external consumer](../examples/rpg/consumer.cpp)
 proves isolated identity allocation and usable retained definitions. See
 [validation evidence](rpg-validation.md) for actual checks and limitations.

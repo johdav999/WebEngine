@@ -14,6 +14,8 @@ struct CatalogDefinition {
     std::vector<ProgressionDefinition> progressions;
     std::vector<ItemDefinition> items;
     std::vector<InventoryDefinition> inventories;
+    std::vector<AbilityDefinition> abilities;
+    std::vector<StatusDefinition> statuses;
 };
 class Catalog {
 public:
@@ -24,6 +26,8 @@ public:
     const Definition* find(const ContentId&) const noexcept;
     const CharacterDefinition* character(const ContentId&) const noexcept;
     const ProgressionDefinition* progression(const ContentId&) const noexcept;
+    const AbilityDefinition* ability(const ContentId&) const noexcept;
+    const StatusDefinition* status(const ContentId&) const noexcept;
     const ItemDefinition* item(const ContentId&) const noexcept;
     const InventoryDefinition* inventory(const ContentId&) const noexcept;
     const BindingsHandle& bindings() const noexcept { return bindings_; }

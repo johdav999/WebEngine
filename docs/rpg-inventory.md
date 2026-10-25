@@ -84,6 +84,6 @@ replacement at full capacity and deterministic generated valid/invalid sequences
 Two fixed canonical state fixtures run unchanged on native Windows, Linux and
 Wasm. Fixture text is test-only, not the future R8 wire format.
 
-R4 should extend Operation and the same candidate state for abilities, item use,
-statuses and candidate RNG. It must preserve these ownership and quantity rules;
+R4 now extends Operation and the same candidate state for abilities, item use,
+statuses and candidate RNG; see [R4 contracts](rpg-abilities.md). It preserves these ownership and quantity rules;
 costs/effects must publish with inventory changes in the existing transaction.

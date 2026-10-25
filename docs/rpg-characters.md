@@ -3,9 +3,9 @@
 R2 extends the optional `WebEngine::RPG` library with immutable character/resource/
 progression definitions, session-owned character state, modifiers, XP advancement
 and a shared command transaction boundary. R2 introduced API 1.1.0; R3 extends it
-to 1.2.0 with [inventory/equipment](rpg-inventory.md). Content revision remains
-application-owned. No wire snapshot schema, combat,
-RNG, quest awards or host integration is added. See [foundation](rpg.md),
+to 1.2.0 with [inventory/equipment](rpg-inventory.md), and R4 to 1.3.0 with
+[abilities/statuses/RNG](rpg-abilities.md). Content revision remains application-owned.
+Full snapshots, encounters, quest awards and rendered integration remain future work. See [foundation](rpg.md),
 [architecture](rpg-library-architecture.md) and [evidence](rpg-r2-validation.md).
 
 ## Authored definitions
@@ -89,7 +89,7 @@ It then validates/applies all operations and advancement callbacks. Rejection,
 allocation failure, callback exception or budget exhaustion leaves the live state,
 identity cursor, revision and producer watermarks unchanged. The command remains
 available for retry when its stamps are still current. R2 has no internal queue
-or RNG; future systems must use this same transaction boundary.
+and R4 stages RNG inside this same transaction boundary.
 
 `Transaction` is move-only. `state()` exposes its immutable candidate before
 consumption; `results()` exposes created IDs and ordered advancement results.
@@ -126,7 +126,7 @@ A modifier source is a stable application ContentId, such as an equipment instan
 or temporary buff key. It contains up to one delta per `(target kind, target ID)`.
 Kinds are `Attribute` and `ResourceMaximum`; units/scales must match the target.
 At most 64 ordinary sources and 256 combined ordinary/equipment modifiers exist
-on one character. R3 supplies separate item-owned equipment contributions;
+plus per-stack status contributions on one character. R3 supplies separate item-owned equipment contributions;
 ordinary modifier operations cannot modify those sources. See the R3 contract.
 
 Sources are evaluated in lexical ID order, with each source sorted by target
@@ -181,4 +181,5 @@ The native/Wasm tests compare complete scripted state projections with
 `tests/rpg_r2_fixture.hpp`. This canonical text is a test fixture, not an endorsed
 save codec. R3 now composes inventory transfers, equipment replacement and
 resulting character modifiers inside this existing private candidate and
-publication boundary. R4 must extend the same transaction for abilities and RNG.
+publication boundary. R4 extends that transaction for abilities, statuses and RNG;
+R5 must continue it for encounter/turn progression.
