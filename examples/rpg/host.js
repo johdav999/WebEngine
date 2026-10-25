@@ -1,4 +1,4 @@
-window.engineStatus=(text,error)=>{if(error)window.rpgHostError=text;};window.engineStats=()=>{};window.enginePerformance=()=>{};
+window.engineStatus=(text,error)=>{if(error){window.rpgHostError=text;console.error('Renderer:',text);}};window.engineStats=()=>{};window.enginePerformance=()=>{};
 var Module={canvas:document.getElementById('viewport')};
 const names=['Begin encounter','Move one tile','Strike','End turn','Equip / unequip','Deliver parcel','Pause / resume','Travel','Save','Load','Recover view','Finish / exit'];
 names.forEach((name,id)=>{let b=document.createElement('button');b.textContent=name;b.dataset.command=id;b.disabled=true;b.onclick=()=>Module._rpg_command(id);document.getElementById('actions').append(b);});

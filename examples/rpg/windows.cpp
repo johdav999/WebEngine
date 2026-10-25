@@ -50,8 +50,8 @@ int main(int argc,char**argv){try{
 #ifdef _WIN32
     // Exercise the native window event queue and DesktopHost control mapping.
     HWND window=nullptr;
-    EnumWindows([](HWND candidate,LPARAM data)->BOOL{DWORD process=0;GetWindowThreadProcessId(candidate,&process);
-        if(process==GetCurrentProcessId()){*reinterpret_cast<HWND*>(data)=candidate;return FALSE;}return TRUE;},reinterpret_cast<LPARAM>(&window));
+    EnumWindows([](HWND candidate,LPARAM data)->BOOL{DWORD process=0;GetWindowThreadProcessId(candidate,&process);wchar_t title[128]{};GetWindowTextW(candidate,title,128);
+        if(process==GetCurrentProcessId()&&std::wstring_view(title)==L"RPG - Training Court"){*reinterpret_cast<HWND*>(data)=candidate;return FALSE;}return TRUE;},reinterpret_cast<LPARAM>(&window));
     require(window!=nullptr,"Native sample window missing");
     auto key=[&](WPARAM value){auto scan=MapVirtualKeyW(static_cast<UINT>(value),MAPVK_VK_TO_VSC);auto down=LPARAM(1)|(LPARAM(scan)<<16);
         require(PostMessageW(window,WM_KEYDOWN,value,down)!=0,"Native key down failed");
@@ -63,4 +63,4 @@ int main(int argc,char**argv){try{
     auto old=&controller.state();auto corrupt=*saved;corrupt.back()^=1;try{controller.load(corrupt,controller.epoch());throw std::logic_error("Corrupt load should fail");}catch(const std::invalid_argument&){}require(&controller.state()==old,"Corrupt load published");
     capture("after.ppm");std::ofstream report(output/"report.json");report<<"{\"passed\":true,\"backend\":\"D3D12\",\"frames\":"<<host.diagnostics().presentedFrames<<",\"awards\":"<<controller.awards()<<"}\n";
     host.setEventHandler({});host.gui().clear();host.requestClose();host.step();require(host.application().loadedSceneCount()==0,"Shutdown retained scenes");std::cout<<"R9 D3D12 smoke passed\n";return 0;
-}catch(const std::exception&e){std::cerr<<e.what()<<'\n';return 1;}}
+}catch(const std::exception&e){std::ofstream("rpg-host-error.txt")<<e.what()<<'\n';std::cerr<<e.what()<<'\n';return 1;}}

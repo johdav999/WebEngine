@@ -17,6 +17,9 @@ jobs:
       - run: ctest --test-dir build/rpg-host -C Release -R rpg_host --output-on-failure
       - name: D3D12 rendered smoke
         run: build/rpg-host/Release/rpg_demo_windows.exe --smoke build/evidence/rpg-d3d12
+      - name: Native diagnostics
+        if: always()
+        run: if (Test-Path rpg-host-error.txt) { Get-Content rpg-host-error.txt }
       - run: python scripts/rpg-check-frames.py build/evidence/rpg-d3d12
       - uses: actions/upload-artifact@v4
         if: always()
@@ -25,6 +28,7 @@ jobs:
           path: |
             build/evidence/rpg-d3d12
             build/rpg-host/Release
+            rpg-host-error.txt
   browser:
     runs-on: ubuntu-24.04
     timeout-minutes: 30

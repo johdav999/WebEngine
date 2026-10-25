@@ -32,7 +32,7 @@ extern "C" {
 EMSCRIPTEN_KEEPALIVE void rpg_command(int n){if(controller&&n>=0&&n<12)controller->enqueue(rpg_example::Action(n));}
 EMSCRIPTEN_KEEPALIVE void rpg_orbit(float yaw,float elevation,float zoom){if(controller)controller->orbit(yaw,elevation,zoom);}
 EMSCRIPTEN_KEEPALIVE void rpg_focus(int hidden){if(controller){controller->cancelInput();app.setSuspended(hidden!=0);}}
-EMSCRIPTEN_KEEPALIVE void rpg_shutdown(){emscripten_cancel_main_loop();if(controller)controller->cancelInput();app.shutdown();app.setSceneBinding({});controller.reset();renderer.reset();}
+EMSCRIPTEN_KEEPALIVE void rpg_shutdown(){emscripten_cancel_main_loop();if(controller)controller->cancelInput();app.shutdown();controller.reset();renderer.reset();}
 }
 int main(){
  int backend=EM_ASM_INT({return new URLSearchParams(location.search).get('backend')==='webgl2'?1:0;});

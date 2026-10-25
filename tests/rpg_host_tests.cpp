@@ -13,7 +13,12 @@ int main(){try{
  auto initial=c.state().revision;for(int i=0;i<10;++i)tick();check(c.state().revision==initial,"Idle advances gameplay");
  c.execute(Action::Equip);check(c.state().items.begin()->second.slot.has_value(),"Equip failed");c.execute(Action::Deliver);check(c.awards()==2,"Reward missing");auto xp=c.state().characters.at(c.player()).experience;
  rejects([&]{c.execute(Action::Deliver);});check(c.state().characters.at(c.player()).experience==xp,"Duplicate reward");
- c.execute(Action::Begin);auto turn=c.state().turnEpoch;c.execute(Action::Move);check(c.reserved()&&c.state().presentation.has_value(),"No presentation reservation");
+ c.execute(Action::Begin);auto turn=c.state().turnEpoch;
+ auto resources=[&]{std::vector<std::int64_t> values;for(auto&[id,ch]:c.state().characters)for(auto&[key,r]:ch.resources)values.push_back(r.current);return values;};
+ auto beforeStrike=resources();auto strikeAp=c.state().encounter->allowance.ap;c.execute(Action::Strike);
+ check(resources()!=beforeStrike&&c.state().encounter->allowance.ap==strikeAp-1,"Strike did not apply effect/cost");
+ c.execute(Action::Recover);auto afterStrike=resources();c.execute(Action::Recover);check(resources()==afterStrike,"Recovery repeated strike");
+ c.execute(Action::Move);check(c.reserved()&&c.state().presentation.has_value(),"No presentation reservation");
  auto action=c.state().actionEpoch;auto pos=c.state().positions.at(*c.state().encounter->active);auto ap=c.state().encounter->allowance.ap;
  rejects([&]{c.execute(Action::Move);});rejects([&]{c.execute(Action::Save);});
  c.execute(Action::Pause);tick();auto rev=c.state().revision;auto yaw=c.scene().orbit->yaw;c.orbit(.5f);for(int i=0;i<6;++i)tick();check(c.state().revision==rev&&c.state().turnEpoch==turn&&c.scene().orbit->yaw!=yaw,"Paused camera advanced gameplay");
