@@ -1907,3 +1907,14 @@ Shared game hosts can consume [WebEngine::Browser and the desktop integration se
 The [compiled module SDK handoff](docs/module-sdk.md) covers reusable non-quest
 plugins, an independent custom quest-binding consumer, native/Wasm CTest and
 feature-omission builds. These consumers configure without renderer downloads.
+
+## Planned optional RPG library
+
+The [RPG release-1 architecture](docs/rpg-library-architecture.md) separates generic
+character, inventory, ability, turn-based encounter and snapshot mechanisms from
+game-specific rules and content. It builds on the existing Modules/Quests pattern,
+with standalone portable consumers and browser/Windows integration gates.
+`WebEngine::RPG` and `WebEngine::RPGQuests` are proposed, not delivered targets.
+Use the [ten sequential implementation prompts](docs/rpg-library-release-1-prompts.md)
+to implement the first release. RPGGame owns The Shattered Sea's Lattice rules,
+balance, world, story, third-person camera and presentation.

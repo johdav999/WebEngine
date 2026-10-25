@@ -6,6 +6,26 @@ WebEngine is a C++20 engine for games running in desktop and mobile browsers thr
 
 This document describes the implementation inspected on 2026-10-10 and the architectural boundaries for future work. The current architecture sections describe existing code. The evolution table describes intended additions and extensions, not delivered functionality. Keep these sections current when implementations change; source code and focused validation establish actual capability.
 
+## Planned optional RPG library (2026-10-25)
+
+The [RPG library architecture](docs/rpg-library-architecture.md) proposes
+`engine_rpg` / `WebEngine::RPG`, a standard-C++20 library above Modules, plus a
+separately optional `WebEngine::RPGQuests` bridge to the existing quest kernel.
+It follows the puzzle-game module extraction: reusable mechanisms in optional
+libraries, authored game rules/content and host policy in consumers. No RPG target
+or API is implemented by this architecture change.
+
+Release 1 covers character/resources, progression, inventory/equipment, bounded
+ability/status transactions, turn-based encounters and canonical snapshots.
+Immutable catalogues retain providers; application-owned runtimes own state;
+owner-thread preparation and no-throw publication preserve rejected state/RNG.
+Scene, physics, renderer and platform ownership stay outside the kernel. Browser
+and native Windows samples and standalone native/Wasm consumers are release gates.
+Third-person camera policy, Lattice abilities, factions and world/campaign state
+remain in RPGGame. The [ten implementation prompts](docs/rpg-library-release-1-prompts.md)
+define the sequential delivery and validation plan. Existing Quests, engine core
+and host targets gain no dependency on RPG.
+
 ## Current architecture
 
 ### Optional planetary terrain, stages 1 and 2 (2026-10-23)
@@ -1798,7 +1818,7 @@ Selection, history and runtime handles stay out of persisted scene files. See
 
 ## Architectural boundaries for all future work
 
-1. **Keep engine mechanisms generic and game rules in applications.** Public engine types and services must not depend on cats, puzzle levels, quests, combat rules, inventories, score or unlock progression. Games compose reusable mechanisms and supply policy/configuration. Example implementations belong with application/demo code.
+1. **Keep engine mechanisms generic and game policy in applications.** Engine core and platform services must not depend on game-specific content or genre policy. Optional domain libraries may provide reusable quest, inventory, progression and combat mechanisms above the core boundary, as the existing Quests library and planned RPG library demonstrate. Games supply definitions, balance, story, outcomes and presentation; engine core never depends on those optional libraries. Example rulesets belong with application/demo code.
 2. **Controllers consume commands, not device events.** Movement receives desired movement/actions; cameras receive targets and parameters. Keyboard, touch, AI, replay or network adapters can produce the same command contract. Portable controller code must not read DOM events or hard-code physical keys.
 3. **Use generic targets and explicit interfaces.** Cameras track transforms/handles; interactions expose actions on generic targets; emitters follow nodes. Reuse the scene's handle/ownership conventions rather than adding game-specific globals or competing object registries.
 4. **Make systems optional and composable.** Character, grid, flying and vehicle movement can be separate modules. Games should not initialize physics, audio or character logic merely to use input, UI or scene data. Prefer small working contracts and useful defaults over a framework for hypothetical genres.
