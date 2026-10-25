@@ -8,13 +8,14 @@
 #include <utility>
 
 namespace engine::rpg {
-inline constexpr ModuleVersion apiVersion{1, 1, 0};
+inline constexpr ModuleVersion apiVersion{1, 2, 0};
 // R1 publishes no snapshot wire format. Content revisions are application-owned.
 struct Limits {
     static constexpr std::size_t keyBytes = 128, definitions = 4096, handlers = 256;
     static constexpr std::size_t characters = 1024, values = 64, modifierSources = 64,
         modifiers = 256, thresholds = 256, unlocks = 256, producers = 64,
         operations = 256, advancements = 256;
+    static constexpr std::size_t inventories = 1024, items = 16384, inventorySlots = 256, equipmentSlots = 32;
 };
 enum class ErrorCode {
     InvalidId, Limit, InvalidVersion, DuplicateDefinition, DuplicateHandler,
@@ -22,7 +23,7 @@ enum class ErrorCode {
     InvalidSession, ExhaustedIdentity, InvalidDefinition, MissingDefinition,
     InvalidAmount, Overflow, StaleCommand, InvalidSequence, Reentrant,
     MissingEntity, MissingValue, InvalidModifier, BudgetExceeded, RejectedUnlock,
-    ConsumedTransaction
+    ConsumedTransaction, MissingInventory, MissingItem, InvalidQuantity, Capacity, InvalidSlot, InvalidOwnership, IncompatibleStack
 };
 class Error : public std::invalid_argument {
 public:
@@ -62,6 +63,12 @@ struct EntityId {
     SessionId session;
     std::uint64_t value;
     auto operator<=>(const EntityId&) const = default;
+};
+
+struct ItemId {
+    SessionId session;
+    std::uint64_t value;
+    auto operator<=>(const ItemId&) const = default;
 };
 
 // Host chooses a unique durable namespace. Zero next means exhausted, not wrapped.

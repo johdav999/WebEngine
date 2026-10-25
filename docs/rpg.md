@@ -1,10 +1,11 @@
-# Optional RPG library (R1-R2)
+# Optional RPG library (R1-R3)
 
 R1 implements `engine_rpg` / `WebEngine::RPG`: a standard-C++20 static library
 depending only on [Modules](modules.md). It supplies typed identities, validated
 catalogue metadata, provider registration and independent runtime ownership.
 R2 adds [characters, modifiers, progression and shared transactions](rpg-characters.md).
-Inventory, combat, quest bridge, snapshots, scene integration, scheduler and renderer
+R3 adds [inventory, durable items and equipment transactions](rpg-inventory.md).
+Combat, quest bridge, snapshots, scene integration, scheduler and renderer
 remain outside the delivered library. Those remain later milestones
 in the [architecture](rpg-library-architecture.md) and
 [release prompts](rpg-library-release-1-prompts.md).
@@ -51,7 +52,7 @@ Headers are `engine/rpg/types.hpp`, `bindings.hpp`, `catalog.hpp` and `runtime.h
   underscore or hyphen within nonempty segments. Leading/trailing/repeated dots,
   uppercase, whitespace and non-ASCII bytes reject.
 - `ContentRevision` is an explicitly constructed positive uint64 selected by the
-  application. It is independent of `apiVersion` (currently 1.1.0).
+  application. It is independent of `apiVersion` (currently 1.2.0).
 - `SessionId` is a nonzero uint64 durable namespace chosen by the host. The host
   must ensure uniqueness between distinct persistent sessions. No global ID
   registry, random namespace generator or save restore is supplied.
@@ -74,7 +75,7 @@ and application content revision. Runtime IDs are not scene handles.
 
 ## Explicit composition and validation
 
-`moduleRegistration()` supplies `webengine.rpg`, API version 1.1.0, with no implicit
+`moduleRegistration()` supplies `webengine.rpg`, API version 1.2.0, with no implicit
 handlers or schema claims. Game modules declare a dependency on this registration
 and install typed `DefinitionHandler` entries into staging `Bindings`. A handler
 has a positive uint32 version and a required `void(const Definition&)` validator.

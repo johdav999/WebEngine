@@ -2,8 +2,9 @@
 
 R2 extends the optional `WebEngine::RPG` library with immutable character/resource/
 progression definitions, session-owned character state, modifiers, XP advancement
-and a shared command transaction boundary. The module API is now 1.1.0; content
-revision remains application-owned. No wire snapshot schema, inventory, combat,
+and a shared command transaction boundary. R2 introduced API 1.1.0; R3 extends it
+to 1.2.0 with [inventory/equipment](rpg-inventory.md). Content revision remains
+application-owned. No wire snapshot schema, combat,
 RNG, quest awards or host integration is added. See [foundation](rpg.md),
 [architecture](rpg-library-architecture.md) and [evidence](rpg-r2-validation.md).
 
@@ -124,8 +125,9 @@ once and then becomes exhausted, never reusing an ID. Save/load remains R8.
 A modifier source is a stable application ContentId, such as an equipment instance
 or temporary buff key. It contains up to one delta per `(target kind, target ID)`.
 Kinds are `Attribute` and `ResourceMaximum`; units/scales must match the target.
-At most 64 sources and 256 total modifiers exist on one character. R2 knows no
-inventory or equipment object: R3 will supply source ownership and transactions.
+At most 64 ordinary sources and 256 combined ordinary/equipment modifiers exist
+on one character. R3 supplies separate item-owned equipment contributions;
+ordinary modifier operations cannot modify those sources. See the R3 contract.
 
 Sources are evaluated in lexical ID order, with each source sorted by target
 kind/ID. Replacing a source does not stack its old deltas. Base values are preserved
@@ -177,6 +179,6 @@ with sample policy in `examples/rpg/characters.hpp`.
 
 The native/Wasm tests compare complete scripted state projections with
 `tests/rpg_r2_fixture.hpp`. This canonical text is a test fixture, not an endorsed
-save codec. R3 should compose inventory transfers, equipment-source replacement
-and resulting character modifiers inside this existing private candidate and
-publication boundary. No second transaction system or module registry is needed.
+save codec. R3 now composes inventory transfers, equipment replacement and
+resulting character modifiers inside this existing private candidate and
+publication boundary. R4 must extend the same transaction for abilities and RNG.

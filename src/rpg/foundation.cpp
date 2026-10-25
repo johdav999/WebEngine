@@ -5,6 +5,7 @@
 
 namespace engine::rpg {
 void validateCharacters(CatalogDefinition&, const Bindings&);
+void validateInventory(CatalogDefinition&);
 ContentId::ContentId(std::string value) : value_(std::move(value)) {
     if (value_.size() > Limits::keyBytes) throw Error(ErrorCode::Limit, "RPG key exceeds 128 bytes");
     bool dot = false, segment = false;
@@ -77,6 +78,7 @@ std::shared_ptr<const Catalog> Catalog::create(CatalogDefinition definition, Bin
             throw Error(ErrorCode::HandlerVersionMismatch, "RPG definition handler version mismatch");
     }
     validateCharacters(definition, bindings->registry());
+    validateInventory(definition);
     for (const auto& entry : entries) bindings->registry().find(entry.handler)->validate(entry);
     return std::shared_ptr<const Catalog>(new Catalog(std::move(definition), std::move(bindings)));
 }

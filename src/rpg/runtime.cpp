@@ -4,6 +4,7 @@
 #include <type_traits>
 
 namespace engine::rpg {
+void applyInventory(State&, Results&, const Catalog&, SessionId, const Operation&);
 namespace {
 std::int64_t add(std::int64_t a, std::int64_t b) {
     if ((b > 0 && a > std::numeric_limits<std::int64_t>::max() - b) ||
@@ -42,12 +43,20 @@ void recompute(CharacterState& state, const CharacterDefinition& def) {
             for (const auto& modifier : modifiers)
                 if (modifier.kind == ModifierTarget::Attribute && modifier.target == value.id)
                     sum = add(sum, modifier.delta.value);
+        for (const auto& [item, modifiers] : state.equipmentModifiers)
+            for (const auto& modifier : modifiers)
+                if (modifier.kind == ModifierTarget::Attribute && modifier.target == value.id)
+                    sum = add(sum, modifier.delta.value);
         result.value = std::clamp(sum, value.minimum, value.maximum);
     }
     for (const auto& value : def.resources) {
         auto& result = state.resources.at(value.id);
         auto sum = result.baseMaximum;
         for (const auto& [source, modifiers] : state.modifiers)
+            for (const auto& modifier : modifiers)
+                if (modifier.kind == ModifierTarget::ResourceMaximum && modifier.target == value.id)
+                    sum = add(sum, modifier.delta.value);
+        for (const auto& [item, modifiers] : state.equipmentModifiers)
             for (const auto& modifier : modifiers)
                 if (modifier.kind == ModifierTarget::ResourceMaximum && modifier.target == value.id)
                     sum = add(sum, modifier.delta.value);
@@ -64,6 +73,7 @@ struct Guard {
     ~Guard() { busy = false; }
 };
 }
+void recomputeEquipment(CharacterState& state, const CharacterDefinition& def) { recompute(state, def); }
 const State& Transaction::state() const {
     if (consumed_ || !state_) throw Error(ErrorCode::ConsumedTransaction, "Transaction is consumed or moved from");
     return *state_;
@@ -109,6 +119,10 @@ Transaction Runtime::prepare(const Command& command, Budget budget) {
             auto id = allocate(*candidate, session_);
             candidate->characters.emplace(id, std::move(value));
             results.created.push_back(id);
+        } else if constexpr (std::is_same_v<T, CreateInventory> || std::is_same_v<T, AddItem> ||
+            std::is_same_v<T, RemoveItem> || std::is_same_v<T, SplitItem> || std::is_same_v<T, MergeItems> ||
+            std::is_same_v<T, TransferItem> || std::is_same_v<T, EquipItem> || std::is_same_v<T, UnequipItem>) {
+            applyInventory(*candidate, results, *catalog_, session_, operation);
         } else {
             const auto found = candidate->characters.find(op.entity);
             if (found == candidate->characters.end()) throw Error(ErrorCode::MissingEntity, "Unknown or foreign character");
@@ -149,6 +163,7 @@ Transaction Runtime::prepare(const Command& command, Budget budget) {
                 character.modifiers.insert_or_assign(op.source, std::move(modifiers));
                 std::size_t total = 0;
                 for (const auto& [source, entries] : character.modifiers) total += entries.size();
+                for (const auto& [item, entries] : character.equipmentModifiers) total += entries.size();
                 if (total > Limits::modifiers) throw Error(ErrorCode::Limit, "Too many character modifiers");
                 recompute(character, def);
             } else if constexpr (std::is_same_v<T, RemoveModifiers>) {

@@ -37,12 +37,17 @@ void validateCharacters(CatalogDefinition& catalog, const Bindings& bindings) {
         total += size;
     };
     count(catalog.characters.size()); count(catalog.progressions.size());
+    count(catalog.items.size()); count(catalog.inventories.size());
+    for (const auto& item : catalog.items) { count(item.slots.size()); count(item.modifiers.size()); }
+    for (const auto& inventory : catalog.inventories) count(inventory.slots.size());
     sortUnique(catalog.characters); sortUnique(catalog.progressions);
     std::set<ContentId> global;
     auto insert = [&](const ContentId& id) {
         if (!global.insert(id).second) throw Error(ErrorCode::DuplicateDefinition, "Duplicate global definition ID");
     };
     for (const auto& def : catalog.definitions) insert(def.id);
+    for (const auto& def : catalog.items) insert(def.id);
+    for (const auto& def : catalog.inventories) insert(def.id);
     for (auto& def : catalog.progressions) {
         insert(def.id);
         if (def.thresholds.size() > Limits::thresholds || def.allowedUnlocks.size() > Limits::unlocks)

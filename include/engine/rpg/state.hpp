@@ -1,5 +1,5 @@
 #pragma once
-#include "engine/rpg/characters.hpp"
+#include "engine/rpg/inventory.hpp"
 
 namespace engine::rpg {
 // Read-only through Runtime/Transaction. This is NOT a wire/save schema.
@@ -7,6 +7,9 @@ struct State {
     std::uint64_t generation = 1, revision = 0, nextEntity = 1;
     std::map<EntityId, CharacterState> characters;
     std::map<ContentId, std::uint64_t> producers;
+    std::uint64_t nextItem = 1;
+    std::map<EntityId, InventoryState> inventories;
+    std::map<ItemId, ItemState> items;
 };
 struct AdvancementResult {
     EntityId entity;
@@ -16,5 +19,7 @@ struct AdvancementResult {
 struct Results {
     std::vector<EntityId> created;
     std::vector<AdvancementResult> advancements;
+    std::vector<EntityId> inventories;
+    std::vector<ItemId> items;
 };
 } // namespace engine::rpg

@@ -43,6 +43,8 @@ struct CharacterState {
     std::int64_t experience = 0;
     std::uint32_t level = 0;
     std::set<ContentId> unlocks;
+    // Derived from equipped instances; inaccessible through Set/RemoveModifiers.
+    std::map<ItemId, std::vector<Modifier>> equipmentModifiers;
 };
 struct Advancement {
     EntityId entity;

@@ -25,3 +25,7 @@ undelivered quest/demo switches. The configuration matrix checks for accidental
 engine-core, physics, GUI and dependency-download setup. See
 [full API/ownership contracts](../../docs/rpg.md) and
 [validation](../../docs/rpg-validation.md).
+
+R3 delivers [inventory and equipment transactions](../../docs/rpg-inventory.md),
+with [cross-platform validation](../../docs/rpg-r3-validation.md).
+The neutral inventory definitions cover weapon/consumable and tool/loadout policies.

@@ -1918,7 +1918,11 @@ downloads on native Windows/Linux and Wasm. See [API and ownership](docs/rpg.md)
 and [validation evidence](docs/rpg-validation.md).
 
 R2 adds [characters, resources, modifiers, progression and atomic transactions](docs/rpg-characters.md),
-with [native/Wasm validation](docs/rpg-r2-validation.md). Inventory, abilities,
+with [native/Wasm validation](docs/rpg-r2-validation.md). Abilities,
 turn-based encounters, snapshots, RPGQuests and rendered hosts remain in the [release architecture](docs/rpg-library-architecture.md)
 and [ten implementation prompts](docs/rpg-library-release-1-prompts.md). RPGGame
 owns The Shattered Sea's rules, balance, world, story and third-person presentation.
+
+R3 delivers [inventory and equipment transactions](docs/rpg-inventory.md),
+with [cross-platform validation](docs/rpg-r3-validation.md).
+The neutral inventory definitions cover weapon/consumable and tool/loadout policies.

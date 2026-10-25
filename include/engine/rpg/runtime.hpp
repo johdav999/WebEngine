@@ -11,7 +11,8 @@ struct SetModifiers { EntityId entity; ContentId source; std::vector<Modifier> m
 struct RemoveModifiers { EntityId entity; ContentId source; };
 struct AddExperience { EntityId entity; Amount amount; };
 using Operation = std::variant<CreateCharacter, SetAttributeBase, AdjustResource,
-                               SetModifiers, RemoveModifiers, AddExperience>;
+                               SetModifiers, RemoveModifiers, AddExperience, CreateInventory, AddItem, RemoveItem,
+                               SplitItem, MergeItems, TransferItem, EquipItem, UnequipItem>;
 struct Budget { std::size_t operations = 256, advancements = 256; };
 class Command {
 public:
