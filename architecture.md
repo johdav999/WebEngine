@@ -2916,3 +2916,12 @@ post-GUI notifications do not also reach gameplay input. Native water overrides
 feed the existing private DesktopGraphics interface for either backend, with
 null preserving the host simulation clock. Sessions borrow the host Application; the engine gains no game save
 or quest policy. See [consumer host contracts](docs/consumer-hosts.md).
+
+Library milestone L8 (API 1.14.0) adds exact resource payments, receipt-backed
+bounded item trades and crafting through the existing atomic command pipeline.
+Game code owns recipes, prices, participants, currency and order identity. The
+existing ledger/snapshots retain all consequences without a new wire format.
+Detached bounded exploration replay reports the first failed command and exports
+the successful prefix; it adds no scheduler, IO or world-query authority.
+Windows/browser hosts share buy/sell/craft controls. See [contracts](docs/rpg-economy.md)
+and [validation](docs/rpg-l8-validation.md). Game adoption remains G12.

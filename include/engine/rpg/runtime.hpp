@@ -22,9 +22,25 @@ using RewardGrant = std::variant<AddExperience, AddItem, AdjustResource, ApplySt
 struct LootEntry { ContentId id; std::uint32_t weight; std::vector<RewardGrant> grants; };
 struct RollLoot { ContentId table; std::vector<LootEntry> entries; std::uint32_t rolls = 1; };
 struct GrantReward { AwardId id; std::vector<RewardGrant> grants; std::vector<RollLoot> loot; };
+// Exact, conserved resource payment: rejects insufficient funds or receiver headroom.
+struct TransferResource { EntityId payer, payee; ContentId resource; Amount amount; };
+struct TradeItems {
+    AwardId id;
+    EntityId source, destination;
+    ItemId item;
+    std::int64_t quantity;
+    std::optional<TransferResource> payment;
+};
+// Game-authored recipe resolved to explicit input stacks and output destinations.
+struct CraftItems {
+    AwardId id;
+    std::vector<RemoveItem> ingredients;
+    std::vector<AddItem> products;
+    std::vector<TransferResource> payments;
+};
 using Operation = std::variant<CreateCharacter, SetAttributeBase, AdjustResource,
                                SetModifiers, RemoveModifiers, AddExperience, CreateInventory, AddItem, RemoveItem,
-                               SplitItem, MergeItems, TransferItem, EquipItem, UnequipItem, UseAbility, ApplyStatus, DispelStatus, AdvancePhase, BeginEncounter, EndTurn, FinishEncounter, ExitEncounter, SetCooldown, SetTacticalPosition, TacticalAction, AcknowledgePresentation, RecordAward, SetParty, RemoveParty, ConfigureVitality, ApplyVitalEffect, RollLoot, GrantReward, SetProgressionChoices>;
+                               SplitItem, MergeItems, TransferItem, EquipItem, UnequipItem, UseAbility, ApplyStatus, DispelStatus, AdvancePhase, BeginEncounter, EndTurn, FinishEncounter, ExitEncounter, SetCooldown, SetTacticalPosition, TacticalAction, AcknowledgePresentation, RecordAward, SetParty, RemoveParty, ConfigureVitality, ApplyVitalEffect, RollLoot, GrantReward, SetProgressionChoices, TransferResource, TradeItems, CraftItems>;
 struct Budget { std::size_t operations = 256, advancements = 256, effects = 256, randomDraws = 4096, encounterWork = 4096, reactions = 256, reactionDepth = 8; };
 class Command {
 public:

@@ -151,3 +151,6 @@ stamps and producer sequencing. R3 reuses that boundary for inventory/equipment,
 and R4 for abilities/statuses/RNG. Snapshot wire versions remain separate from API and content versions. The [external consumer](../examples/rpg/consumer.cpp)
 proves isolated identity allocation and usable retained definitions. See
 [validation evidence](rpg-validation.md) for actual checks and limitations.
+
+
+L8: API 1.14.0 adds [trading, crafting and diagnostic replay](rpg-economy.md).

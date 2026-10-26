@@ -5,6 +5,7 @@
 
 namespace engine::rpg {
 std::vector<Operation> expandReward(State&, Results&, const Operation&, std::size_t&);
+std::vector<Operation> expandEconomy(const State&, const Operation&);
 void applyChoices(State&,Results&,const Catalog&,const SetProgressionChoices&);
 void validateBuildState(const Catalog&,const State&);
 void configureVitality(State&,Results&,const ConfigureVitality&);
@@ -165,8 +166,9 @@ Transaction Runtime::prepareUnlocked(const Command& command, Budget budget, std:
     auto operations = command.operations_;
     for (std::size_t index = 0; index < operations.size(); ++index) {
       const auto& operation = operations[index];
-      if (std::holds_alternative<GrantReward>(operation) || std::holds_alternative<RollLoot>(operation)) {
-          auto expanded = expandReward(*candidate, results, operation, draws);
+      const bool economy = std::holds_alternative<TransferResource>(operation) || std::holds_alternative<TradeItems>(operation) || std::holds_alternative<CraftItems>(operation);
+      if (economy || std::holds_alternative<GrantReward>(operation) || std::holds_alternative<RollLoot>(operation)) {
+          auto expanded = economy ? expandEconomy(*candidate, operation) : expandReward(*candidate, results, operation, draws);
           if (expanded.size() > budget.operations - operations.size())
               throw Error(ErrorCode::BudgetExceeded, "Expanded reward operation budget exhausted");
           operations.insert(operations.begin() + index + 1, expanded.begin(), expanded.end());
@@ -174,7 +176,7 @@ Transaction Runtime::prepareUnlocked(const Command& command, Budget budget, std:
       }
       std::visit([&](const auto& op) {
         using T = std::decay_t<decltype(op)>;
-        if constexpr (std::is_same_v<T, GrantReward> || std::is_same_v<T, RollLoot>) {
+        if constexpr (std::is_same_v<T, GrantReward> || std::is_same_v<T, RollLoot> || std::is_same_v<T, TransferResource> || std::is_same_v<T, TradeItems> || std::is_same_v<T, CraftItems>) {
             // Expanded above, in order, through the ordinary command pipeline.
         } else if constexpr (std::is_same_v<T, SetProgressionChoices>) {
             applyChoices(*candidate,results,*catalog_,op);

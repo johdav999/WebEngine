@@ -116,6 +116,10 @@ RpgTransaction Coordinator::prepareRpg(ContentId id,std::uint64_t sequence,std::
     need(id!=producer(),ErrorCode::InvalidAward,"Bridge award producer is reserved");
     for(const auto& operation:operations) {
         need(!std::holds_alternative<RecordAward>(operation),ErrorCode::InvalidAward,"Only coordinated quest publication may write this ledger");
+        if (const auto* trade=std::get_if<TradeItems>(&operation))
+            need(trade->id.source!=source_,ErrorCode::InvalidAward,"Quest award source is reserved");
+        if (const auto* craft=std::get_if<CraftItems>(&operation))
+            need(craft->id.source!=source_,ErrorCode::InvalidAward,"Quest award source is reserved");
         if (const auto* reward=std::get_if<GrantReward>(&operation))
             need(reward->id.source!=source_,ErrorCode::InvalidAward,"Quest award source is reserved");
     }

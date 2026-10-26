@@ -1,14 +1,14 @@
 #pragma once
 #include "host_scene.hpp"
-#include "builds.hpp"
+#include "economy.hpp"
 #include "engine/application.hpp"
 #include <deque>
 #include <limits>
 
 namespace rpg_example {
 namespace q=engine::quests;
-enum class Action { Begin, Move, Strike, EndTurn, Equip, Deliver, Pause, Travel, Save, Load, Recover, Finish, AiStep, Loot, Mastery, Greatblade, Respec };
-inline constexpr const char* actionNames[]={"Begin encounter","Move one tile","Strike","End turn","Equip / unequip","Deliver parcel","Pause / resume","Travel","Save","Load","Recover view","Finish / exit","AI step","Collect loot","Choose mastery","Equip greatblade","Respec"};
+enum class Action { Begin, Move, Strike, EndTurn, Equip, Deliver, Pause, Travel, Save, Load, Recover, Finish, AiStep, Loot, Mastery, Greatblade, Respec, Buy, Sell, Craft };
+inline constexpr const char* actionNames[]={"Begin encounter","Move one tile","Strike","End turn","Equip / unequip","Deliver parcel","Pause / resume","Travel","Save","Load","Recover view","Finish / exit","AI step","Collect loot","Choose mastery","Equip greatblade","Respec","Buy tonic","Sell tonic","Craft shield"};
 struct Storage {
     std::function<std::optional<std::vector<std::uint8_t>>()> read;
     std::function<void(std::span<const std::uint8_t>)> write;
@@ -17,7 +17,7 @@ class Controller {
     engine::Application& app_;
     Storage storage_;
     std::function<void(engine::SceneId,HostScene&)> registerView_;
-    std::shared_ptr<const r::Catalog> catalog_=example::encounterCatalog(example::tacticalRules(),example::buildDefinitions());
+    std::shared_ptr<const r::Catalog> catalog_=example::encounterCatalog(example::tacticalRules(),example::economyDefinitions());
     std::shared_ptr<const q::Catalog> quests_=example::rewardQuests();
     std::unique_ptr<example::SavedGame> game_=fresh();
     std::shared_ptr<const engine::WaypointGraph> graph_=navigation();
@@ -41,11 +41,13 @@ class Controller {
         auto bag=apply({r::CreateInventory{r::ContentId("example.pack"),player}}).inventories[0];
         apply({r::AddItem{bag,r::ContentId("example.blade"),1},r::AddItem{bag,r::ContentId("example.tonic"),2},r::AddItem{bag,r::ContentId("example.greatblade"),1},
                r::SetTacticalPosition{player,{-2,0,0}},r::SetTacticalPosition{partner,{2,0,0}}});
+        auto stock=apply({r::CreateInventory{r::ContentId("example.pack"),{}}}).inventories[0];
+        apply({r::AddItem{stock,r::ContentId("example.tonic"),5}});
         auto c=game_->game().command();c.batch.commands.push_back({"example.delivery",q::CommandKind::Activate,0,{}});auto t=game_->game().prepare(c);if(!game_->game().commit(std::move(t)))throw std::runtime_error("Quest activation failed");
     }
     static void validateSample(const example::SavedGame& sample){
         const auto&s=sample.game().rpgState();
-        if(sample.checkpoint()>1||s.characters.size()!=2||s.positions.size()!=2||s.inventories.size()!=1)throw std::invalid_argument("Incompatible sample save");
+        if(sample.checkpoint()>1||s.characters.size()!=2||s.positions.size()!=2||s.inventories.size()!=2)throw std::invalid_argument("Incompatible sample save");
         std::set<r::TacticalPosition> occupied;
         for(auto&[id,p]:s.positions)if(p.y||p.x< -4||p.x>4||p.z< -2||p.z>2||(!p.x&&!p.z)||!occupied.insert(p).second)throw std::invalid_argument("Invalid sample position");
     }
@@ -164,6 +166,22 @@ public:
         case Action::Move:tactical(true);break;
         case Action::Strike:tactical(false);break;
         case Action::AiStep:aiStep();break;
+        case Action::Buy:case Action::Sell:case Action::Craft:{
+            if(state().encounter)throw std::invalid_argument("Exit combat to use the market");
+            const auto bag=state().inventories.begin()->first,stock=state().inventories.rbegin()->first;
+            const auto merchant=state().characters.rbegin()->first;
+            const auto source=action==Action::Buy?stock:bag;
+            std::optional<r::ItemId> input;
+            for(const auto&[id,item]:state().items)if(item.inventory==source&&!item.slot&&item.definition==r::ContentId("example.tonic")){input=id;break;}
+            if(!input)throw std::invalid_argument("No tonic in stock");
+            // Each deliberate click is a new order; transient retries reuse its producer sequence.
+            r::AwardId order{r::ContentId("example.market"),std::to_string(sequence())};
+            if(action==Action::Craft)apply({r::CraftItems{order,{{bag,*input,1}},{{bag,r::ContentId("example.shield"),1}},{}}});
+            else apply({r::TradeItems{order,source,action==Action::Buy?bag:stock,*input,1,
+                r::TransferResource{action==Action::Buy?player():merchant,action==Action::Buy?merchant:player(),
+                    r::ContentId("example.coins"),{action==Action::Buy?3:1,r::ContentId("example.coin"),1}}}});
+            break;
+        }
         case Action::Mastery:apply({r::SetProgressionChoices{player(),{r::ContentId("example.mastery")}}});break;
         case Action::Greatblade:{for(auto&[id,item]:state().items)if(item.definition==r::ContentId("example.greatblade")){apply({r::EquipItem{item.inventory,id,r::ContentId("example.hand")}});break;}break;}
         case Action::Respec:{

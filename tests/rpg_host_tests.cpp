@@ -47,5 +47,13 @@ int main(){try{
  c.execute(Action::Save);c.execute(Action::Travel);c.execute(Action::Load);rejects([&]{c.execute(Action::Loot);});
  check(c.awards()==3&&c.state().random==lootRandom,"Reload/revisit duplicated loot");
  app.shutdown();check(app.loadedSceneCount()==0,"Shutdown retained scene");
+ saved.reset();engine::Application marketApp;Controller market(marketApp,storage,[](auto,auto&){});market.start();
+ auto coins=[&]{return market.state().characters.at(market.player()).resources.at(r::ContentId("example.coins")).current;};
+ market.execute(Action::Buy);check(coins()==7&&market.awards()==1,"Host buy failed");
+ market.execute(Action::Sell);check(coins()==8&&market.awards()==2,"Host sale failed");
+ market.execute(Action::Craft);check(market.awards()==3,"Host crafting failed");
+ bool shield=false;for(const auto&[id,item]:market.state().items)shield|=item.definition==r::ContentId("example.shield");
+ check(shield,"Host recipe output missing");market.execute(Action::Save);market.execute(Action::Load);
+ check(coins()==8&&market.awards()==3,"Market restore lost currency/receipts");marketApp.shutdown();
  std::cout<<"R9 host checks: "<<checks<<'\n';return 0;
 }catch(const std::exception&e){std::cerr<<e.what()<<'\n';return 1;}}

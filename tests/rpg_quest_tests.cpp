@@ -168,4 +168,25 @@ void selectableBuilds(){
     game.applyRpg(id("test.build"),3,{r::SetProgressionChoices{actor,{}}});
     check(game.rpgState().choices.empty()&&game.rpgState().characters.at(actor).unlocks.contains(id("example.first")),"Bridge respec removed automatic unlock");
 }
-int main(){try{atomicRewards();rejectedCompound();staleness();projectionsAndReplay();callbacksAndLedger();spatialAndPending();combatPlanning();encounterRewards();selectableBuilds();std::cout<<"R7 quest bridge checks: "<<checks<<'\n';return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+void economyBridge(){
+    Fixture f;auto stock=f.apply({r::CreateInventory{id("example.pack"),{}}}).inventories[0];
+    auto item=f.apply({r::AddItem{stock,id("example.tonic"),5}}).items[0];
+    r::TradeItems trade{{id("test.market"),"order"},stock,f.bag,item,2,{}};
+    auto forbidden=trade;forbidden.id.source=id("example.quest-awards");
+    rejects(r::ErrorCode::InvalidAward,[&]{f.apply({forbidden});});
+    r::CraftItems craft{{id("test.recipe"),"order"},{{stock,item,1}},{{stock,id("example.blade"),1}},{}};
+    auto bad=craft;bad.id.source=id("example.quest-awards");
+    rejects(r::ErrorCode::InvalidAward,[&]{f.apply({bad});});
+    auto before=f.game.save();auto tx=f.game.prepareRpg(id("test.preview"),1,{trade,craft});
+    check(f.game.save()==before&&f.game.commitRpg(std::move(tx)),"Bridge economics preview/publication");
+    auto bytes=f.game.save();f.game.restore(bytes);
+    rejects(r::ErrorCode::DuplicateAward,[&]{f.apply({trade});});
+    rejects(r::ErrorCode::DuplicateAward,[&]{f.apply({craft});});
+    f.activate();f.post();auto quest=f.game.prepare(f.game.command());check(f.game.commit(std::move(quest)),"Quest after market");
+    check(f.game.rpgState().awards.size()==4&&f.game.questState().receipts.size()==2,"Market polluted quest ledger");
+    f.apply({r::BeginEncounter{{id("example.turns"),1},{f.actor},{}}});
+    trade.id.receipt="combat";auto combat=f.game.rpgState().revision;
+    rejects(r::ErrorCode::InvalidEncounter,[&]{f.apply({trade});});
+    check(f.game.rpgState().revision==combat,"Combat economy failure published");
+}
+int main(){try{economyBridge();atomicRewards();rejectedCompound();staleness();projectionsAndReplay();callbacksAndLedger();spatialAndPending();combatPlanning();encounterRewards();selectableBuilds();std::cout<<"R7 quest bridge checks: "<<checks<<'\n';return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
