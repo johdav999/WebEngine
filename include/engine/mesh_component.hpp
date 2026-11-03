@@ -41,7 +41,9 @@ public:
     void setMorphWeight(std::string_view target,float weight);
     float morphWeight(std::size_t target) const;
     void resetMorphWeights(); // Restore asset defaults. Mesh replacement also resets weights.
-    std::shared_ptr<const MorphPose> morphPose() const; // Null when all weights are zero.
+    // Overrides may publish a complete dynamic vertex stream of the same topology;
+    // retain it through rendering and change revision whenever its vertices change.
+    virtual std::shared_ptr<const MorphPose> morphPose() const; // Null when all weights are zero.
     MeshBounds localBounds(const std::shared_ptr<const SkinPose>& pose={}) const;
 private:
     MeshBounds geometryBounds(const std::shared_ptr<const SkinPose>& pose) const;

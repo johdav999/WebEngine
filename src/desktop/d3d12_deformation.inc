@@ -1,5 +1,25 @@
 // Private revision-based pose uploads. Morphing remains in MeshComponent;
 // the vertex shader skins those vertices with the shared BoneUniform palette.
+ID3D12Resource& bendBuffer(Frame& frame,const std::shared_ptr<const MeshBend>& source) {
+    auto found=bends_.find(source.get());if(found!=bends_.end()&&found->second.source.lock()==source)return *found->second.image.Get();
+    if(bends_.size()>=4096)throw std::runtime_error("D3D12 bend cache budget exceeded");
+    const auto bytes=source->vertices().size()*16;const auto address=upload(frame,source->vertices().data(),bytes);
+    auto& gpu=bends_[source.get()];if(gpu.image)frame.retained.push_back(gpu.image);
+    gpu.image=buffer(bytes,D3D12_HEAP_TYPE_DEFAULT,D3D12_RESOURCE_STATE_COPY_DEST);gpu.source=source;gpu.capacity=bytes;
+    list_->CopyBufferRegion(gpu.image.Get(),0,frame.upload.Get(),address-frame.upload->GetGPUVirtualAddress(),bytes);
+    transition(*list_.Get(),gpu.image.Get(),D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);bendUploadBytes_+=bytes;return *gpu.image.Get();
+}
+ID3D12Resource& windBuffer(Frame& frame,const std::shared_ptr<const MeshWindState>& source) {
+    auto found=winds_.find(source.get());
+    if(found!=winds_.end()&&found->second.source.lock()==source&&found->second.revision==source->revision())return *found->second.image.Get();
+    if(winds_.size()>=4096&&!winds_.contains(source.get()))throw std::runtime_error("D3D12 wind cache budget exceeded");
+    const auto address=upload(frame,source->parameters().data(),32);auto& gpu=winds_[source.get()];
+    if(!gpu.image)gpu.image=buffer(256,D3D12_HEAP_TYPE_DEFAULT,D3D12_RESOURCE_STATE_COPY_DEST);
+    else transition(*list_.Get(),gpu.image.Get(),D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER,D3D12_RESOURCE_STATE_COPY_DEST);
+    list_->CopyBufferRegion(gpu.image.Get(),0,frame.upload.Get(),address-frame.upload->GetGPUVirtualAddress(),32);
+    transition(*list_.Get(),gpu.image.Get(),D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
+    gpu.source=source;gpu.revision=source->revision();windUploadBytes_+=32;return *gpu.image.Get();
+}
 template<class Source>
 void prunePoses(Frame& frame,std::map<const Source*,PoseBuffer<Source>>& cache) {
     for(auto it=cache.begin();it!=cache.end();)if(it->second.source.expired()){
@@ -14,7 +34,7 @@ template<class Source>
 ID3D12Resource& poseBuffer(Frame& frame,const std::shared_ptr<const Source>& pose,std::map<const Source*,PoseBuffer<Source>>& cache,
     const void* data,std::size_t bytes,D3D12_RESOURCE_STATES state,std::uint64_t& calls,std::uint64_t& uploaded) {
     if(!poseDirty(pose,cache))return *cache.at(pose.get()).image.Get();
-    if(!cache.contains(pose.get())&&cache.size()>=4096)throw std::runtime_error("D3D12 pose cache budget exceeded");
+    if(!cache.contains(pose.get())&&cache.size()>=16384)throw std::runtime_error("D3D12 pose cache budget exceeded");
     const auto address=upload(frame,data,bytes);auto& gpu=cache[pose.get()];
     if(!gpu.image||gpu.capacity<bytes){
         auto next=buffer(bytes,D3D12_HEAP_TYPE_DEFAULT,D3D12_RESOURCE_STATE_COPY_DEST);
@@ -27,6 +47,8 @@ ID3D12Resource& poseBuffer(Frame& frame,const std::shared_ptr<const Source>& pos
 void validateDeformation() {
     std::map<const Mesh*,UINT> checkedMeshes;
     std::set<const SkinPose*> checkedSkins;std::set<const MorphPose*> checkedMorphs;
+    std::set<const MeshBend*> checkedBends;
+    std::set<const MeshWindState*> checkedWinds;
     deformationUploadBytes_=0;
     auto reserve=[&](std::size_t bytes){
         if(!bytes||bytes>64*1024*1024||deformationUploadBytes_>64*1024*1024-bytes)
@@ -34,6 +56,13 @@ void validateDeformation() {
         deformationUploadBytes_+=bytes+256;
     };
     for(const auto& draw:preflight_.meshes){
+        if(draw.bend&&checkedBends.insert(draw.bend.get()).second) {
+            if(draw.bend->mesh()!=draw.mesh||!draw.wind)throw std::invalid_argument("D3D12 bend/source/state mismatch");
+            const auto cached=bends_.find(draw.bend.get());if(cached==bends_.end()||cached->second.source.lock()!=draw.bend)reserve(draw.bend->vertices().size()*16);
+        }
+        if(draw.bend&&checkedWinds.insert(draw.wind.get()).second) {
+            const auto cached=winds_.find(draw.wind.get());if(cached==winds_.end()||cached->second.source.lock()!=draw.wind||cached->second.revision!=draw.wind->revision())reserve(32);
+        }
         if(draw.skinPose){
             const auto& pose=draw.skinPose;
             if(pose->bones.empty()||pose->bones.size()>1024)throw std::invalid_argument("Invalid D3D12 bone palette");

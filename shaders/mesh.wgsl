@@ -17,6 +17,8 @@ struct Frame {
     shadows: array<Shadow,4>, waterClock: vec4f, inverseViewProjection: mat4x4f, viewport: vec4f, extent: vec4f, viewForward: vec4f, reflectionViewProjection: mat4x4f, reflectionPlane: vec4f, reflectionOptions: vec4f, interactionOptions: vec4f, interactionData: array<vec4f,64>, fog:Fog,
 };
 struct Object { model: mat4x4f, normalMatrix: mat4x4f, color: vec4f, shadow: vec4f };
+struct Wind { direction: vec4f, clock: vec4f };
+@group(2) @binding(1) var<uniform> wind: Wind;
 struct Material { surface: vec4f, emissiveCutoff: vec4f, uv: vec4f, flags: vec4f, wave: vec4f, detail: vec4f, horizon: vec4f, zenith: vec4f, transmission: vec4f, absorptionFoam: vec4f, foamColor: vec4f, layerColor: array<vec4f,4>, layerUv: array<vec4f,4>, weightUv: vec4f, layerOptions: vec4f, layerDetail: array<vec4f,4> };
 @group(0) @binding(0) var<uniform> frame: Frame;
 @group(0) @binding(1) var specularEnvironment: texture_cube<f32>;
@@ -122,6 +124,24 @@ fn outputVertex(p: vec3f,n: vec3f,t: vec3f,b: vec3f,uv: vec2f,o: Object) -> Vert
         b+=weights[i]*(bone.transform*vec4f(cross(n,tangent.xyz)*tangent.w,0)).xyz;
     }
     return outputVertex(position,normal,t,b,uv,Object(mat4x4f(m0,m1,m2,m3),mat4x4f(n0,n1,n2,n3),color,shadow));
+}
+@vertex fn windVertexMain(@location(0) p: vec3f,@location(1) n: vec3f,@location(2) uv: vec2f,
+    @location(3) m0: vec4f,@location(4) m1: vec4f,@location(5) m2: vec4f,@location(6) m3: vec4f,
+    @location(7) n0: vec4f,@location(8) n1: vec4f,@location(9) n2: vec4f,@location(10) n3: vec4f,
+    @location(11) color: vec4f,@location(12) bend: vec4f,@location(13) plant: vec4f,@location(14) tangent: vec4f,@location(15) shadow: vec4f) -> VertexOutput {
+    let object=Object(mat4x4f(m0,m1,m2,m3),mat4x4f(n0,n1,n2,n3),color,shadow);
+    var out=outputVertex(p,n,tangent.xyz,cross(n,tangent.xyz)*tangent.w,uv,object);
+    let amount=wind.direction.w*sin(wind.clock.x+plant.x)*(1-wind.clock.z+wind.clock.z*0.5*(1+sin(wind.clock.y+plant.x*1.37)));
+    let offset=wind.direction.xyz*amount;
+    let gradient=(object.normalMatrix*vec4f(bend.yzw*(2*bend.x),0)).xyz;
+    let denominator=1+dot(gradient,offset);
+    let safeDenominator=select(select(-0.05,0.05,denominator>=0),denominator,abs(denominator)>=0.05);
+    let normal=safeNormal(out.normal-gradient*(dot(offset,out.normal)/safeDenominator),out.normal);
+    let oldTangent=out.tangent.xyz;let oldBitangent=cross(out.normal,oldTangent)*out.tangent.w;
+    let movedTangent=oldTangent+offset*dot(gradient,oldTangent);let movedBitangent=oldBitangent+offset*dot(gradient,oldBitangent);
+    let t=safeNormal(movedTangent-normal*dot(normal,movedTangent),oldTangent);
+    out.normal=normal;out.tangent=vec4f(t,select(1.0,-1.0,dot(cross(normal,t),movedBitangent)<0));
+    out.world+=offset*(bend.x*bend.x);out.clip=frame.viewProjection*vec4f(out.world,1);return out;
 }
 // Share vertex skinning and material alpha/UVs with the color pass.
 struct LayerSample { color: vec4f, normal: vec3f, height: f32 };

@@ -1,5 +1,6 @@
 #include "desktop_graphics.hpp"
 #include "engine/render_frame.hpp"
+#include "engine/mesh_instances.hpp"
 #include "engine/fx_frame.hpp"
 #include "engine/performance.hpp"
 #include "engine/performance_timeline.hpp"
@@ -34,8 +35,8 @@ struct ShadowConstants {Mat4 matrix;Float4 options,selection;};
 struct FrameConstants {Mat4 viewProjection;Float4 ambientCount;std::array<LightConstants,8> lights{};Float4 cameraEnvironment,environmentOptions;std::array<ShadowConstants,4> shadows{};Float4 forward;FogUniform fog;Float4 output;
     Float4 waterClock;Mat4 inverseViewProjection;Float4 viewport,extent;Mat4 reflectionViewProjection;Float4 reflectionPlane,reflectionOptions;WaterInteractionParameters interactions;};
 struct SkyConstants {SkyUniform sky;Float4 output;};
-struct ObjectConstants {Mat4 model,normal;Float4 tint,surface,emission,uv,options,maps;std::array<float,56> layers;std::array<float,28> water;};
-static_assert(sizeof(FrameConstants)==2352&&sizeof(ObjectConstants)==560&&sizeof(SkyConstants)==336);
+struct ObjectConstants {Mat4 model,normal;Float4 tint,surface,emission,uv,options,maps;std::array<float,56> layers;std::array<float,28> water;Float4 windPlant;};
+static_assert(sizeof(FrameConstants)==2352&&sizeof(ObjectConstants)==576&&sizeof(SkyConstants)==336);
 
 class D3D12Graphics final:public DesktopGraphics {
     static constexpr UINT frameCount=2,descriptorCount=65536;
@@ -67,7 +68,10 @@ class D3D12Graphics final:public DesktopGraphics {
     ComPtr<ID3D12DescriptorHeap> rtvs_,dsv_;
     std::array<ComPtr<ID3D12Resource>,frameCount> targets_;
     ComPtr<ID3D12Resource> depth_,msaaColor_,shadowMaps_,hdrColor_,bloom_;ComPtr<ID3D12RootSignature> root_;
-    std::map<std::array<UINT,7>,ComPtr<ID3D12PipelineState>> meshPipelines_;
+    std::map<std::array<UINT,8>,ComPtr<ID3D12PipelineState>> meshPipelines_;
+    std::map<const MeshBend*,PoseBuffer<MeshBend>> bends_;
+    std::map<const MeshWindState*,PoseBuffer<MeshWindState>> winds_;
+    std::uint64_t windUploadBytes_=0,bendUploadBytes_=0,windDraws_=0;
     ComPtr<ID3D12PipelineState> guiPipeline_;
     ComPtr<ID3D12PipelineState> bloomPipeline_,compositePipeline_;
     std::map<std::array<UINT,3>,ComPtr<ID3D12PipelineState>> skyPipelines_;
@@ -168,7 +172,7 @@ class D3D12Graphics final:public DesktopGraphics {
     void prune(Frame& frame){
         for(auto it=meshes_.begin();it!=meshes_.end();)if(it->second.source.expired()){frame.retained.push_back(it->second.vertices);frame.retained.push_back(it->second.indices);frame.retained.push_back(it->second.skin);it=meshes_.erase(it);}else ++it;
         for(auto it=textures_.begin();it!=textures_.end();)if(it->second.source.expired()){frame.retained.push_back(it->second.image);it=textures_.erase(it);}else ++it;
-        prunePoses(frame,skins_);prunePoses(frame,morphs_);
+        prunePoses(frame,skins_);prunePoses(frame,morphs_);prunePoses(frame,bends_);prunePoses(frame,winds_);
     }
 #include "d3d12_pipelines.inc"
 #include "d3d12_environment.inc"
@@ -268,7 +272,8 @@ class D3D12Graphics final:public DesktopGraphics {
             {m.roughness,m.metallic,m.normalScale,m.occlusionStrength},{m.emissive.x,m.emissive.y,m.emissive.z,m.alphaCutoff},
             {m.uvScale.x,m.uvScale.y,m.uvOffset.x,m.uvOffset.y},
             {m.shader==MaterialShader::Water?2.f:m.shader==MaterialShader::Unlit?1.f:0.f,float(m.alphaMode),m.doubleSided?1.f:0.f,draw.receivesShadow?1.f:0.f},
-            {m.normalTexture?1.f:0.f,float(wraps),draw.layer==RenderLayer::World?(draw.blend==BlendMode::Additive?2.f:1.f):0.f,m.layers.enabled?1.f:0.f},materialLayerParameters(m.layers),water};
+            {m.normalTexture?1.f:0.f,float(wraps),draw.layer==RenderLayer::World?(draw.blend==BlendMode::Additive?2.f:1.f):0.f,m.layers.enabled?1.f:0.f},materialLayerParameters(m.layers),water,
+            {draw.windPhase,0,0,0}};
         list_->SetGraphicsRootConstantBufferView(1,upload(frame,&object,sizeof(object)));auto material=materialBinding(frame,draw);
         list_->SetGraphicsRootDescriptorTable(2,material);material.ptr+=5*srvStride_;list_->SetGraphicsRootDescriptorTable(11,material);
         if(m.layers.enabled)++layeredDraws_;if(m.shader==MaterialShader::Water)++waterDraws_;
@@ -278,6 +283,7 @@ class D3D12Graphics final:public DesktopGraphics {
         if(draw.skinPose){auto& image=poseBuffer(frame,draw.skinPose,skins_,draw.skinPose->bones.data(),draw.skinPose->bones.size()*sizeof(BoneUniform),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,skinUploads_,skinUploadBytes_);
             list_->SetGraphicsRootShaderResourceView(10,image.GetGPUVirtualAddress());list_->IASetVertexBuffers(1,1,&gpu.skinVb);++skinnedDraws_;}
         if(objects)list_->SetGraphicsRootShaderResourceView(16,objects);
+        if(draw.bend){list_->SetGraphicsRootShaderResourceView(17,bendBuffer(frame,draw.bend).GetGPUVirtualAddress());list_->SetGraphicsRootConstantBufferView(18,windBuffer(frame,draw.wind).GetGPUVirtualAddress());++windDraws_;}
         list_->SetPipelineState(materialPipeline(draw,shadow,objects!=0));list_->IASetVertexBuffers(0,1,&vertices);list_->IASetIndexBuffer(&gpu.ib);
         list_->DrawIndexedInstanced(draw.indexCount,instances,draw.firstIndex,0,0);++draws_;const auto triangles=std::uint64_t(draw.indexCount/3)*instances;triangles_+=triangles;
         submittedInstances_+=instances;instancedDraws_+=instances>1;maxInstances_=std::max(maxInstances_,std::uint64_t(instances));
@@ -371,7 +377,7 @@ public:
             skinnedDraws_=morphDraws_=skinUploads_=morphUploads_=skinUploadBytes_=morphUploadBytes_=0;
             layeredDraws_=cameraLodParts_=shadowLodParts_=shadowCulledParts_=0;
             waterDraws_=waterSnapshots_=reflectionPasses_=reflectionDraws_=reflectionTriangles_=underwaterPasses_=waterPresentCopies_=0;textureUploadBytes_=0;
-            particles_=meshParticles_=particleDraws_=trailDraws_=trailSegments_=particleUploadBytes_=trailUploadBytes_=0;submittedInstances_=instancedDraws_=maxInstances_=objectUploadBytes_=0;
+            particles_=meshParticles_=particleDraws_=trailDraws_=trailSegments_=particleUploadBytes_=trailUploadBytes_=0;submittedInstances_=instancedDraws_=maxInstances_=objectUploadBytes_=0;windUploadBytes_=bendUploadBytes_=windDraws_=0;
             beginGpuTiming();const auto gpuFrame=beginGpuSpan("Frame");
             {GpuSpan timing(*this,"Initialize targets");initializeWaterTargets();list_->SetGraphicsRootDescriptorTable(12,waterBinding(frame));}
             auto* target=targets_[index].Get();
@@ -496,7 +502,7 @@ public:
                    <<",\"shadowPasses\":"<<shadowPasses_<<",\"shadowDrawCalls\":"<<shadowDraws_<<",\"skyDrawCalls\":"<<skyDraws_<<",\"postPasses\":"<<postPasses_<<",\"bloomPasses\":"<<bloomPasses_
                    <<",\"skinnedDrawCalls\":"<<skinnedDraws_<<",\"morphDrawCalls\":"<<morphDraws_<<",\"skinUploads\":"<<skinUploads_<<",\"morphUploads\":"<<morphUploads_<<",\"skinUploadBytes\":"<<skinUploadBytes_<<",\"morphUploadBytes\":"<<morphUploadBytes_
                    <<",\"particles\":"<<particles_<<",\"meshParticles\":"<<meshParticles_<<",\"particleDrawCalls\":"<<particleDraws_<<",\"trailDrawCalls\":"<<trailDraws_<<",\"trailSegments\":"<<trailSegments_<<",\"particleUploadBytes\":"<<particleUploadBytes_<<",\"trailUploadBytes\":"<<trailUploadBytes_
-                    <<",\"submittedInstances\":"<<submittedInstances_<<",\"instancedDrawCalls\":"<<instancedDraws_<<",\"maxInstancesPerDraw\":"<<maxInstances_<<",\"objectUploadBytes\":"<<objectUploadBytes_<<",\"textureUploadBytes\":"<<textureUploadBytes_<<",\"gpuTextureBytes\":"<<gpuTextureBytes<<",\"compressedTextureCount\":"<<compressedCount
+                    <<",\"windUploadBytes\":"<<windUploadBytes_<<",\"bendUploadBytes\":"<<bendUploadBytes_<<",\"windDraws\":"<<windDraws_<<",\"submittedInstances\":"<<submittedInstances_<<",\"instancedDrawCalls\":"<<instancedDraws_<<",\"maxInstancesPerDraw\":"<<maxInstances_<<",\"objectUploadBytes\":"<<objectUploadBytes_<<",\"textureUploadBytes\":"<<textureUploadBytes_<<",\"gpuTextureBytes\":"<<gpuTextureBytes<<",\"compressedTextureCount\":"<<compressedCount
                       <<",\"cachedSkinPoses\":"<<skins_.size()<<",\"cachedMorphPoses\":"<<morphs_.size()<<",\"cachedMeshes\":"<<meshes_.size()<<",\"cachedTextures\":"<<textures_.size()<<",\"cachedMaterialPipelines\":"<<meshPipelines_.size()<<"},\"gpu\":"<<gpuMeasurements_.gpuJson(gpuNow(),gpuState())<<",\"gpuProfile\":"<<gpuProfileCached_<<'}';
         return {initialized_&&scene_&&error_.empty(),presented_,width_,height_,sampleCount_,error_,state.str(),performance.str()};
     }

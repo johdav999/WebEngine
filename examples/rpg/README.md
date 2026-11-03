@@ -2,8 +2,9 @@
 
 This consumer links only `WebEngine::RPG` and its public Modules dependency.
 It supplies a neutral compiled metadata validator, retains a catalogue across
-composition replacement, and allocates IDs in two independent sessions. It is not
-a combat implementation or rendered example. RPG stays disabled unless selected.
+composition replacement, and allocates IDs in two independent sessions. The additional character_consumer exercises two distinct authored resource and
+progression rulesets through R2 transactions. It is not a combat implementation
+or rendered example. RPG stays disabled unless selected.
 
 From the WebEngine root:
 

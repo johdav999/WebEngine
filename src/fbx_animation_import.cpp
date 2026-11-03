@@ -27,9 +27,13 @@ JointPose pose(const ufbx_node& node) {
     return localPose(local);
 }
 }
-FbxSkinImport::FbxSkinImport(const ufbx_scene& scene,const FbxImportOptions& options,Mesh& result):scene_(scene),options_(options),result_(result) {
-    if(scene.skin_deformers.count==0) return;
+FbxSkinImport::FbxSkinImport(const ufbx_scene& scene,const FbxImportOptions& options,Mesh& result,bool animationsOnly):scene_(scene),options_(options),result_(result) {
+    if(scene.skin_deformers.count==0 && !animationsOnly) return;
     skeleton_=std::make_shared<Skeleton>();skeleton_->bindings.push_back({});
+    if(scene.skin_deformers.count==0) {
+        for(const auto* node:scene.nodes) if(node->bone) addJoint(node);
+        if(nodes_.empty()) throw std::runtime_error("FBX contains no skeleton bones");
+    }
     for(const auto* node:scene.nodes) if(node->mesh) {
         addJoint(node);
         if(node->mesh->skin_deformers.count>1) throw std::runtime_error("Multiple skin deformers on one FBX mesh are unsupported");

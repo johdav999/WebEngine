@@ -1,7 +1,7 @@
 # Direct D3D12 recovery, instancing and compressed uploads
 
 Milestone 8 extends the existing selectable Windows backend. Browser WebGPU retains
-its existing instancing, compression and recovery; WebGL2 retains individual draws,
+its existing instancing, compression and recovery; WebGL2 now also batches compatible draws,
 RGBA fallback and context restoration. No new portable renderer or texture API is
 introduced. See [backend selection](windows-d3d12.md).
 
@@ -66,7 +66,7 @@ identities, layer and visibility decisions. Camera and shadow LOD/culling stay
 independent. Shared skin/morph poses may instance together; independently animated
 poses remain separate. Shadow caster participation splits batches; per-instance
 receive flags, tint/opacity, model and inverse-transpose normal matrices come from
-the existing 160-byte `ObjectUniform` in its initialized 256-byte slot. Deformation
+the 176-byte `ObjectUniform` in its initialized 256-byte slot (M6 adds plant phase). Deformation
 precedes model transforms in both color and cutout shadows. Water and mirrored
 reflection sources use the same instance path.
 

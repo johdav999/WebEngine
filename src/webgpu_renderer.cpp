@@ -22,7 +22,7 @@ struct GpuShadow { Mat4 viewProjection; Float4 options,selection; };
 struct FrameUniform { Mat4 viewProjection; Float4 ambientCount; std::array<GpuLight,WebGpuRenderer::maxLights> lights; Float4 cameraEnvironment,environmentOptions; std::array<GpuShadow,WebGpuRenderer::maxShadowLights> shadows; Float4 waterClock; Mat4 inverseViewProjection; Float4 viewport,extent,viewForward; Mat4 reflectionViewProjection; Float4 reflectionPlane,reflectionOptions; WaterInteractionParameters interactions; FogUniform fog; };
 struct ParticleCamera { Mat4 viewProjection;Float4 right,up; FogUniform fog; Mat4 inverseVp;Float4 viewport,forward; };
 static_assert(sizeof(ParticleCamera)==256);
-static_assert(sizeof(FrameUniform)==2336 && sizeof(ObjectUniform)==160);
+static_assert(sizeof(FrameUniform)==2336 && sizeof(ObjectUniform)==176);
 constexpr std::uint32_t objectStride=RenderFrame::objectStride;
 wgpu::Buffer makeBuffer(const wgpu::Device& device,std::uint64_t size,wgpu::BufferUsage usage,const char* label) {
     wgpu::BufferDescriptor desc{}; desc.label=label; desc.size=size; desc.usage=usage|wgpu::BufferUsage::CopyDst;
@@ -126,7 +126,8 @@ void WebGpuRenderer::releaseGpu() {
     ready_=false;initializing_=false;guiRenderer_.reset();
     if(surface_&&width_) surface_.Unconfigure();
     viewResources_.clear();activeView_=nullptr;activeCamera_=nullptr;
-    meshes_.clear();textures_.clear();materials_.clear();skeletons_.clear();morphs_.clear();
+    meshes_.clear();textures_.clear();materials_.clear();skeletons_.clear();morphs_.clear();bends_.clear();winds_.clear();
+    windLayout_=nullptr;windPipelineLayout_=nullptr;shadowWindPipelineLayout_=nullptr;
     materialPipelines_.clear();shadowPipelines_.clear();particlePipelines_={};ribbonPipelines_={};timingSlots_={};
     meshShader_=nullptr;meshPipelineLayout_=nullptr;skinPipelineLayout_=nullptr;
     shadowPipelineLayout_=nullptr;shadowSkinPipelineLayout_=nullptr;shadowLayout_=nullptr;
@@ -321,6 +322,10 @@ void WebGpuRenderer::createPipeline() {
     const std::array shadowLayouts={shadowLayout_,materialLayout_,skinLayout_};
     pl.bindGroupLayouts=shadowLayouts.data();pl.bindGroupLayoutCount=2;shadowPipelineLayout_=device_.CreatePipelineLayout(&pl);
     pl.bindGroupLayoutCount=3;shadowSkinPipelineLayout_=device_.CreatePipelineLayout(&pl);
+    wgpu::BindGroupLayoutEntry wind{};wind.binding=1;wind.visibility=wgpu::ShaderStage::Vertex;wind.buffer.type=wgpu::BufferBindingType::Uniform;wind.buffer.minBindingSize=32;
+    layout.entryCount=1;layout.entries=&wind;windLayout_=device_.CreateBindGroupLayout(&layout);
+    const std::array windLayouts={bindLayout_,materialLayout_,windLayout_};pl.bindGroupLayouts=windLayouts.data();windPipelineLayout_=device_.CreatePipelineLayout(&pl);
+    const std::array shadowWindLayouts={shadowLayout_,materialLayout_,windLayout_};pl.bindGroupLayouts=shadowWindLayouts.data();shadowWindPipelineLayout_=device_.CreatePipelineLayout(&pl);
     createShadowResources();
     createFxPipelines();
     createWaterPipelines();
@@ -354,12 +359,12 @@ void WebGpuRenderer::createShadowResources() {
     shadowResourcesDirty_=false;
 }
 wgpu::RenderPipeline WebGpuRenderer::materialPipeline(const MeshDraw& draw,bool shadow,bool reflection) {
-    const auto& m=draw.material;const bool skin=bool(draw.skinPose),transparent=draw.blend!=BlendMode::Opaque;
+    const auto& m=draw.material;const bool skin=bool(draw.skinPose),wind=bool(draw.bend&&draw.wind),transparent=draw.blend!=BlendMode::Opaque;
     const bool layered=m.layers.enabled,normalMap=bool(m.normalTexture)&&!layered;
     const bool surfaceMap=bool(m.metallicRoughnessTexture)&&!layered;
     const bool occlusionMap=bool(m.occlusionTexture)&&!layered,emissiveMap=bool(m.emissiveTexture)&&!layered;
     const auto key=std::uint32_t(m.alphaMode)|(std::uint32_t(m.shader)<<2)|(std::uint32_t(m.doubleSided)<<4)|(std::uint32_t(skin)<<5)|(std::uint32_t(draw.mirrored)<<6)|(std::uint32_t(reflection)<<7)|(std::uint32_t(layered)<<8)|(std::uint32_t(normalMap)<<9)
-        |(std::uint32_t(surfaceMap)<<10)|(std::uint32_t(occlusionMap)<<11)|(std::uint32_t(emissiveMap)<<12);
+        |(std::uint32_t(surfaceMap)<<10)|(std::uint32_t(occlusionMap)<<11)|(std::uint32_t(emissiveMap)<<12)|(std::uint32_t(wind)<<13);
     auto& pipelines=shadow ? shadowPipelines_ : materialPipelines_;
     if(auto it=pipelines.find(key);it!=pipelines.end()) return it->second;
     std::array<wgpu::VertexAttribute,4> attributes{};
@@ -367,14 +372,17 @@ wgpu::RenderPipeline WebGpuRenderer::materialPipeline(const MeshDraw& draw,bool 
     attributes[1]={nullptr,wgpu::VertexFormat::Float32x3,offsetof(Vertex,normal),1};
     attributes[2]={nullptr,wgpu::VertexFormat::Float32x2,offsetof(Vertex,uv),2};
     attributes[3]={nullptr,wgpu::VertexFormat::Float32x4,offsetof(Vertex,tangent),14};
-    std::array<wgpu::VertexAttribute,10> instance{};
+    std::array<wgpu::VertexAttribute,11> instance{};
     for(std::uint32_t i=0;i<9;++i) instance[i]={nullptr,wgpu::VertexFormat::Float32x4,i*16,i+3};
     instance[9]={nullptr,wgpu::VertexFormat::Float32x4,144,15};
+    instance[10]={nullptr,wgpu::VertexFormat::Float32x4,160,13};
     std::array<wgpu::VertexAttribute,2> weights={wgpu::VertexAttribute{nullptr,wgpu::VertexFormat::Uint32x4,0,12},wgpu::VertexAttribute{nullptr,wgpu::VertexFormat::Float32x4,offsetof(SkinVertex,weights),13}};
     std::array<wgpu::VertexBufferLayout,3> buffers{};
     buffers[0].arrayStride=sizeof(Vertex);buffers[0].attributeCount=attributes.size();buffers[0].attributes=attributes.data();
-    buffers[1].arrayStride=objectStride;buffers[1].stepMode=wgpu::VertexStepMode::Instance;buffers[1].attributeCount=instance.size();buffers[1].attributes=instance.data();
+    buffers[1].arrayStride=objectStride;buffers[1].stepMode=wgpu::VertexStepMode::Instance;buffers[1].attributeCount=wind?11:10;buffers[1].attributes=instance.data();
     buffers[2].arrayStride=sizeof(SkinVertex);buffers[2].attributeCount=weights.size();buffers[2].attributes=weights.data();
+    const wgpu::VertexAttribute bend{nullptr,wgpu::VertexFormat::Float32x4,0,12};
+    if(wind){buffers[2].arrayStride=16;buffers[2].attributeCount=1;buffers[2].attributes=&bend;}
     const auto blend=fxBlend(draw.blend==BlendMode::Additive);
     wgpu::ColorTargetState target{};target.format=colorFormat();if(transparent) target.blend=&blend;
     const std::array<wgpu::ConstantEntry,8> materialConstants={{{nullptr,"materialAlpha",double(m.alphaMode)},
@@ -389,8 +397,9 @@ wgpu::RenderPipeline WebGpuRenderer::materialPipeline(const MeshDraw& draw,bool 
     if(shadow) { depth.format=wgpu::TextureFormat::Depth32Float;depth.depthWriteEnabled=true;depth.depthCompare=wgpu::CompareFunction::Less;depth.depthBias=1;depth.depthBiasSlopeScale=1; }
     wgpu::RenderPipelineDescriptor desc{};desc.label="Cached material pipeline";desc.layout=skin ? skinPipelineLayout_ : meshPipelineLayout_;
     if(shadow) { desc.label="Directional shadow caster";desc.layout=skin ? shadowSkinPipelineLayout_ : shadowPipelineLayout_; }
+    if(wind)desc.layout=shadow?shadowWindPipelineLayout_:windPipelineLayout_;
     desc.vertex.constantCount=1;desc.vertex.constants=&vertexShader;
-    desc.vertex.module=meshShader_;desc.vertex.entryPoint=skin ? "skinnedVertexMain" : "vertexMain";desc.vertex.bufferCount=skin ? 3 : 2;desc.vertex.buffers=buffers.data();
+    desc.vertex.module=meshShader_;desc.vertex.entryPoint=wind?"windVertexMain":skin ? "skinnedVertexMain" : "vertexMain";desc.vertex.bufferCount=skin||wind ? 3 : 2;desc.vertex.buffers=buffers.data();
     desc.fragment=shadow && m.alphaMode!=AlphaMode::Mask ? nullptr : &fragment;desc.depthStencil=&depth;desc.primitive.topology=wgpu::PrimitiveTopology::TriangleList;
     desc.primitive.cullMode=m.doubleSided ? wgpu::CullMode::None : wgpu::CullMode::Back;desc.primitive.frontFace=(draw.mirrored!=reflection) ? wgpu::FrontFace::CW : wgpu::FrontFace::CCW;
     desc.multisample.count=shadow||reflection ? 1u : sampleCount_;
@@ -658,6 +667,7 @@ WebGpuRenderer::MaterialKey WebGpuRenderer::materialKey(const Material& m) const
 }
 bool WebGpuRenderer::resourcesReady(const MeshDraw& draw) const {
     if(!meshes_.contains(draw.mesh.get())||!materials_.contains(materialKey(draw.material))) return false;
+    if(draw.bend&&(!bends_.contains(draw.bend.get())||!draw.wind||!winds_.contains(draw.wind.get())))return false;
     if(draw.skinPose) {
         const auto it=skeletons_.find(draw.skinPose.get());
         if(it==skeletons_.end()||it->second.capacity<draw.skinPose->bones.size()||it->second.revision!=draw.skinPose->revision) return false;
@@ -826,6 +836,26 @@ void WebGpuRenderer::uploadMorph(const std::shared_ptr<const MorphPose>& pose) {
     }
     gpu.source=pose;
 }
+void WebGpuRenderer::uploadBend(const std::shared_ptr<const MeshBend>& source) {
+    auto found=bends_.find(source.get());if(found!=bends_.end()&&found->second.source.lock()==source)return;
+    const auto bytes=source->vertices().size()*16;admitUpload(bytes);
+    auto& gpu=bends_[source.get()];gpu.source=source;gpu.vertices=makeBuffer(device_,bytes,wgpu::BufferUsage::Vertex,"Immutable bend weights/gradients");
+    device_.GetQueue().WriteBuffer(gpu.vertices,0,source->vertices().data(),bytes);++counters_.uploadCalls;counters_.uploadBytes+=bytes;
+}
+void WebGpuRenderer::uploadWind(const std::shared_ptr<const MeshWindState>& source) {
+    auto found=winds_.find(source.get());
+    if(found==winds_.end()||found->second.source.lock()!=source) {
+        admitUpload(32);auto& gpu=winds_[source.get()];gpu={};gpu.source=source;gpu.buffer=makeBuffer(device_,32,wgpu::BufferUsage::Uniform,"Shared explicit-time mesh wind");
+        wgpu::BindGroupEntry entry{};entry.binding=1;entry.buffer=gpu.buffer;entry.size=32;
+        wgpu::BindGroupDescriptor desc{};desc.layout=windLayout_;desc.entryCount=1;desc.entries=&entry;gpu.binding=device_.CreateBindGroup(&desc);
+    }
+    auto& gpu=winds_.at(source.get());if(!gpu.initialized||gpu.values!=source->parameters()) {
+        gpu.values=source->parameters();gpu.initialized=true;device_.GetQueue().WriteBuffer(gpu.buffer,0,gpu.values.data(),32);++counters_.uploadCalls;counters_.uploadBytes+=32;
+    }
+}
+void WebGpuRenderer::bindWind(wgpu::RenderPassEncoder& pass,const MeshDraw& draw) {
+    if(draw.bend&&draw.wind){pass.SetVertexBuffer(2,bends_.at(draw.bend.get()).vertices);pass.SetBindGroup(2,winds_.at(draw.wind.get()).binding);}
+}
 void WebGpuRenderer::uploadSkeleton(const std::shared_ptr<const SkinPose>& pose) {
     if(pose->bones.empty() || pose->bones.size()>1024) throw std::invalid_argument("Invalid GPU bone palette");
     const auto bytes=pose->bones.size()*sizeof(BoneUniform);
@@ -901,6 +931,8 @@ void WebGpuRenderer::render(double updateMs,double intervalMs) {
             for(auto it=skeletons_.begin();it!=skeletons_.end();) {
                 if(it->second.source.expired()) it=skeletons_.erase(it);else ++it;
             }
+            for(auto it=bends_.begin();it!=bends_.end();) {if(it->second.source.expired())it=bends_.erase(it);else ++it;}
+            for(auto it=winds_.begin();it!=winds_.end();) {if(it->second.source.expired())it=winds_.erase(it);else ++it;}
             for(auto it=morphs_.begin();it!=morphs_.end();) {
                 if(it->second.source.expired()) it=morphs_.erase(it);else ++it;
             }
@@ -958,6 +990,7 @@ void WebGpuRenderer::render(double updateMs,double intervalMs) {
                     upload(draw.mesh);uploadMaterial(draw.material);
                     if(draw.skinPose) uploadSkeleton(draw.skinPose);
                     if(draw.morphPose) uploadMorph(draw.morphPose);
+                    if(draw.bend){uploadBend(draw.bend);uploadWind(draw.wind);}
                 } catch(const UploadDeferred&) { ++counters_.deferredAssetUploads; }
             }
             for(const auto& range:activeView_->frame.objectUploads()) {
@@ -998,7 +1031,7 @@ void WebGpuRenderer::render(double updateMs,double intervalMs) {
                     const auto& mesh=meshes_.at(shadowBatch.mesh.get());pass.SetPipeline(materialPipeline(draw,true));
                     pass.SetVertexBuffer(0,draw.morphPose ? morphs_.at(draw.morphPose.get()).vertices : mesh.vertices);pass.SetBindGroup(1,uploadMaterial(draw.material).binding);
                     if(draw.skinPose) { pass.SetBindGroup(2,skeletons_.at(draw.skinPose.get()).binding);pass.SetVertexBuffer(2,mesh.skin); }
-                    pass.SetIndexBuffer(mesh.indices,mesh.indexFormat);pass.DrawIndexed(shadowBatch.indexCount,batch.instanceCount,shadowBatch.firstIndex,0,batch.firstInstance);
+                    bindWind(pass,draw);pass.SetIndexBuffer(mesh.indices,mesh.indexFormat);pass.DrawIndexed(shadowBatch.indexCount,batch.instanceCount,shadowBatch.firstIndex,0,batch.firstInstance);
                     ++counters_.drawCalls;++counters_.shadowDrawCalls;counters_.shadowInstances+=batch.instanceCount;
                     counters_.shadowTriangles+=std::uint64_t(shadowBatch.indexCount/3)*batch.instanceCount;
                     counters_.triangles+=std::uint64_t(shadowBatch.indexCount/3)*batch.instanceCount;
@@ -1025,7 +1058,7 @@ void WebGpuRenderer::render(double updateMs,double intervalMs) {
                     pass.SetVertexBuffer(0,draw.morphPose ? morphs_.at(draw.morphPose.get()).vertices : mesh.vertices);
                     pass.SetBindGroup(1,uploadMaterial(draw.material).binding);
                     if(draw.skinPose) {pass.SetBindGroup(2,skeletons_.at(draw.skinPose.get()).binding);pass.SetVertexBuffer(2,mesh.skin);}
-                    pass.SetIndexBuffer(mesh.indices,mesh.indexFormat);pass.DrawIndexed(draw.indexCount,batch.instanceCount,draw.firstIndex,0,batch.firstInstance);
+                    bindWind(pass,draw);pass.SetIndexBuffer(mesh.indices,mesh.indexFormat);pass.DrawIndexed(draw.indexCount,batch.instanceCount,draw.firstIndex,0,batch.firstInstance);
                     ++counters_.drawCalls;counters_.triangles+=std::uint64_t(draw.indexCount/3)*batch.instanceCount;counters_.submittedInstances+=batch.instanceCount;
                 }
                 pass.End();++counters_.passes;
@@ -1079,7 +1112,7 @@ void WebGpuRenderer::render(double updateMs,double intervalMs) {
                     }
                     pass.SetVertexBuffer(0,draw.morphPose ? morphs_.at(draw.morphPose.get()).vertices : mesh.vertices);
                     pass.SetBindGroup(1,uploadMaterial(draw.material).binding);
-                    pass.SetIndexBuffer(mesh.indices,mesh.indexFormat); pass.DrawIndexed(draw.indexCount,batch.instanceCount,draw.firstIndex,0,batch.firstInstance);
+                    bindWind(pass,draw);pass.SetIndexBuffer(mesh.indices,mesh.indexFormat); pass.DrawIndexed(draw.indexCount,batch.instanceCount,draw.firstIndex,0,batch.firstInstance);
                     ++counters_.drawCalls;counters_.triangles+=std::uint64_t(draw.indexCount/3)*batch.instanceCount;
                     counters_.submittedInstances+=batch.instanceCount;
                     counters_.instancedDrawCalls+=batch.instanceCount>1;
@@ -1128,7 +1161,7 @@ void WebGpuRenderer::render(double updateMs,double intervalMs) {
                         pass.SetBindGroup(0,activeView_->binding);pass.SetVertexBuffer(0,draw.morphPose ? morphs_.at(draw.morphPose.get()).vertices : mesh.vertices);pass.SetVertexBuffer(1,activeView_->objectBuffer);
                         pass.SetBindGroup(1,uploadMaterial(draw.material).binding);
                         if(skinned) { pass.SetBindGroup(2,skeletons_.at(draw.skinPose.get()).binding);pass.SetVertexBuffer(2,mesh.skin);++counters_.skinnedInstances; }
-                        pass.SetIndexBuffer(mesh.indices,mesh.indexFormat);pass.DrawIndexed(draw.indexCount,1,draw.firstIndex,0,batch.first);
+                        bindWind(pass,draw);pass.SetIndexBuffer(mesh.indices,mesh.indexFormat);pass.DrawIndexed(draw.indexCount,1,draw.firstIndex,0,batch.first);
                         counters_.triangles+=draw.indexCount/3;++counters_.submittedInstances;++counters_.transparentMeshDraws;
                     }
                     ++counters_.drawCalls;

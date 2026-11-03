@@ -33,6 +33,14 @@ struct FbxImportOptions {
 };
 class FbxImporter {
 public:
+    // Decode skeleton/clips without geometry or texture IO; accepts unskinned
+    // animation-only exports. Unskinned bones use authored default rest transforms.
+    static std::shared_ptr<const Skeleton> loadAnimationsMemory(std::span<const std::byte> data,
+        const FbxImportOptions& options={});
+#ifndef __EMSCRIPTEN__
+    static std::shared_ptr<const Skeleton> loadAnimationsFile(const std::filesystem::path& path,
+        const FbxImportOptions& options={});
+#endif
     // Binary or ASCII FBX: geometry, skin bindings and sampled clips in Y-up meters.
     // All mesh instances are merged with their geometry-to-world transforms baked in.
     // Throws on invalid input or limits; owns no references to the supplied byte buffer.

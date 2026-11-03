@@ -80,6 +80,7 @@ add_library(engine_core
   src/mesh.cpp
   src/mesh_optimizer.cpp
   src/mesh_component.cpp
+  src/mesh_instances.cpp
   src/fbx_importer.cpp
   src/glb_importer.cpp
   src/camera_component.cpp
@@ -735,3 +736,7 @@ include(cmake/planet.cmake)
 
 include(cmake/browser.cmake)
 include(cmake/host_integration.cmake)
+
+include(cmake/simulator.cmake)
+include(cmake/clothing.cmake)
+include(cmake/foliage.cmake)

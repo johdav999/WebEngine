@@ -18,6 +18,10 @@ struct AnimationRetargetProfile {
 };
 // Exact-name suggestions only; may be empty/incomplete and require author edits.
 AnimationRetargetProfile matchAnimationJoints(const Skeleton& source,const Skeleton& target);
+// Explicit Mixamo naming preset: recognizes canonical body/finger names with
+// optional namespace and mixamorig prefix. Rejects ambiguous aliases; Hips uses
+// ScaledDelta even beneath helper roots. Other joints keep their bone offsets.
+AnimationRetargetProfile matchMixamoJoints(const Skeleton& source,const Skeleton& target);
 // Median nonzero mapped-segment length ratio, in model coordinates; 1 if none.
 float estimateRetargetScale(const Skeleton& source,const Skeleton& target,const AnimationRetargetProfile&);
 // Offline/owner-thread bake. Preserves clip names, samples, times and markers.

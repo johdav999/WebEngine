@@ -6,7 +6,7 @@ WebEngine is a C++20 engine for games running in desktop and mobile browsers thr
 
 This document describes the implementation inspected on 2026-10-10 and the architectural boundaries for future work. The current architecture sections describe existing code. The evolution table describes intended additions and extensions, not delivered functionality. Keep these sections current when implementations change; source code and focused validation establish actual capability.
 
-## Optional RPG foundation R1 and release plan (2026-10-25)
+## Optional RPG library R1-R2 and release plan (2026-10-25)
 
 `engine_rpg` / `WebEngine::RPG` now implements the optional standard-C++20 foundation
 above Modules: explicit content/session/entity identities, bounded metadata
@@ -24,12 +24,167 @@ See [delivered API](docs/rpg.md) and [actual evidence](docs/rpg-validation.md).
 
 The [full architecture](docs/rpg-library-architecture.md) and
 [ten prompts](docs/rpg-library-release-1-prompts.md) remain the release roadmap.
-Characters, progression, inventory, effects, encounters, transactions, RNG, snapshots,
-RPGQuests and rendered browser/Windows samples are not delivered in R1. Third-person
+R2 now adds immutable character/resource/progression definitions and independent
+state, checked additive modifiers, explicit XP/unlock proposals and shared command
+prepare/commit. Private runtime identity, generation/revision and producer watermarks
+reject stale input. Preparation stages all operations; publication swaps state with
+no allocations/callbacks and retires old state with the consumed candidate. Pure
+advancement handlers cannot mutate a preparing runtime. Read-only views expire on
+publication. See [R2 contracts](docs/rpg-characters.md) and
+[R2 evidence](docs/rpg-r2-validation.md). Inventory, effects, encounters, RNG,
+snapshots, RPGQuests and rendered browser/Windows samples remain future work. Third-person
 camera policy, Lattice abilities, balance, factions and campaign/world state stay
 in RPGGame. Existing engine core, Quests and hosts never depend on RPG.
 
 ## Current architecture
+
+### Optional foliage (2026-10-28)
+
+`engine_foliage` / `WebEngine::Foliage` layers above engine_core, with no core
+dependency on foliage. Immutable validated catalogues define static species,
+source-space filters and bounded jittered-lattice placement. Full species/lattice
+IDs survive cell eviction and presentation changes; the application owns biome,
+harvest/reward and content-compatibility policy. Source samplers synchronously
+borrow query coordinates and own their captures. The terrain adapter retains an
+immutable full-resolution source, independent of visual terrain residency/LOD.
+
+Application-owned `FoliageStream` borrows Scene and projects archive-transient
+ordinary root actors/components using existing handles. Separate visual/gameplay
+focus, radii, hysteresis and admission/resident bounds control visual cells and
+optional static compound trunk bodies. Entire candidate admissions/source/removal
+replacements prepare before publication; adoption failure rolls candidates back.
+Methods require idle hierarchy/identity scene transform. Explicit clear removes
+projection; destruction releases stream resources without touching a scene that
+may already have died. Existing Scene reconciliation owns physics registration;
+applications gate movement on collision readiness. No new frame phase or worker,
+asynchronous completion/cancellation path, IO owner or alternate graph is added.
+
+Explicit presentation selects distance details, shadow cutoff and supplied-time
+GPU wind by default. Generic core `MeshInstancesComponent` projects an immutable
+`MeshInstanceSet` per cell/species/detail, with cached matrices and 64-byte source
+records. Shared immutable `MeshBend` sidecars retain authored weights/gradients;
+one explicit owner-thread `MeshWindState` supplies 32 bytes per stream. Backend
+vertex shaders deform color/shadow geometry and correct normals/tangents. Wind-only
+ticks preserve instance resources/uploads. Conservative amplitude bounds support
+CPU culling; selection returns the component plus local key and evaluates displaced
+triangles. Foliage maps this ephemeral key to the unchanged durable placement ID.
+Collection/culling never advances wind or alters collision/persistent state.
+Rigid draws retain mesh LOD; weighted draws use explicit foliage topology/details.
+`CpuMeshes` retains the per-plant MorphPose reference path and exact deformed bounds.
+WebGL2 now consumes compatible instance batches through divisor attributes, alongside
+WebGPU/Dawn and direct D3D12. Existing CPU draw descriptors and 256-byte GPU object
+slots remain (176 attribute bytes, packed to 176-byte stride on WebGL to satisfy
+its 255-byte limit); this is not GPU culling or indirect submission.
+Bulk components are transient, support static opaque/masked sources and exclude
+skinning/morph source topology, water, blending and projected decal reception.
+Bounded WEFO 1 removal snapshots carry world/seed and stable IDs; storage and
+migration remain host/game responsibilities. Impostor generation, GPU culling,
+automatic terrain subscriptions and interactive bending are
+future extensions. Shared application examples live in `examples/foliage`.
+See [contracts](docs/foliage.md), [M1–5 validation](docs/foliage-validation.md)
+and [M6 validation](docs/foliage-dense-validation.md).
+
+### Optional character clothing, milestone one (2026-10-25)
+
+`engine_clothing` / `WebEngine::Clothing` is an opt-in layer above engine_core.
+It owns bounded clothing catalog/selection validation and an application-owned,
+scene-handle-based projection. Assets share the driver's exact immutable rig,
+binding table and mesh bind space. Generated body/garment skeletal components
+return the driver's final palette through virtual `SkeletalMeshComponent::skinPose`;
+their private animation players do not tick. Existing renderer, shadow, bounds and
+picking paths consume these draws on browser and Windows. No new animation clock,
+platform type or game inventory rules enter the portable mechanism.
+
+Outfit replacement stages a complete subtree before publication at an idle hierarchy
+boundary. The scene owns generated children beneath the driver; destruction of the
+driver removes them. The controller owns assets and handles, not the scene. Its
+explicit clear removes the projection; its destructor does not mutate a scene.
+Presentation synchronization refreshes the palette even while paused and hides a
+projection after incompatible source replacement. Generated nodes are archive-transient;
+bounded versioned item/color selections are persisted by the application and restored
+against its catalog. Masks hide authored body pieces; rigid accessories use one-bone
+skinning. See [contracts](docs/clothing.md) and [evidence](docs/clothing-validation.md).
+
+Milestone two adds optional portable `ClothSimulation` and per-item physical
+definitions to this same library. CPU XPBD distance constraints use world-space
+particles, animated pins/tethers, supplied gravity/wind acceleration and application
+owned kinematic capsule proxies. The application calls `advanceCloth` after its
+simulation/animation update using simulation delta. Bounded 120 Hz substeps retain
+a fractional remainder and report dropped excess time; rendering never advances
+the solver. Explicit/large-jump reset clears kinetic state. Particle state does not
+depend on culling, LOD or interpolation, and is not serialized in outfit saves.
+
+Physical garment projection uses ordinary non-skeletal MeshComponent draws with a
+complete dynamic stream through virtual `morphPose()`. Normals/tangents and revision
+aware bounds use existing browser/Windows deformation paths; the result is not
+skinned twice. Updates stage solver and render state across all physical garments
+before publication. Scene ownership and archive-transient lifetime stay unchanged.
+Unit-scale rigid character transforms are required. Discrete particle/capsule
+collision has no Jolt feedback or continuous collision guarantees.
+Automatic fitting, tearing and body-morph propagation remain future work. See
+[M2 contracts](docs/cloth-dynamics.md) and [M2 evidence](docs/cloth-dynamics-validation.md).
+
+Milestone three adds optional particle self-contact with immutable bind-space/link
+exclusions and an iteration-local spatial grid. Borrowed world-space planes and
+axis-aligned boxes supply explicit kinematic environment collision. The application
+owns collider discovery/placement; no physics query, retained pointer, renderer or
+frame boundary is added. Candidate simulation/render publication remains atomic.
+Shared browser/Windows scene code supplies a visible obstacle and floor. Particle
+contact is discrete and per garment; triangle/edge contact, CCD and inter-garment
+collision remain future work. See [M3 contracts](docs/cloth-collision.md) and
+[M3 evidence](docs/cloth-collision-validation.md).
+
+Milestone four extends this portable solver with optional indexed self surfaces,
+barycentric vertex/triangle response and borrowed environment triangles. Optional
+linear substep sweeps use bounded conservative advancement for surfaces/capsules
+and slab tests for boxes; proxy motion between snapshots remains application-owned.
+Private cloth_collision.hpp contains geometry queries without platform types.
+Generated garment state and render streams still publish together, with no renderer,
+physics or frame ownership change. Both hosts share a cape surface and triangle
+obstacle demo. Edge/edge and inter-garment CCD remain future work; this is not a
+global nonintersection guarantee. See [M4 contracts](docs/cloth-surfaces.md) and
+[M4 evidence](docs/cloth-surfaces-validation.md).
+
+Milestone five adds opt-in edge/edge self-contact to the same solver. It derives and
+owns a bounded unique edge list from validated garment topology; existing immutable
+neighbor exclusions omit local pairs. Iteration-local sweep-and-prune bounds and
+finite-segment queries feed four-endpoint inverse-mass response. Optional bounded
+linear sweeps use the substep's previous positions; no new scene or platform owner,
+physics coupling, frame phase or renderer integration is introduced. Candidate
+simulation/render publication, pause, reset and transient lifetime are unchanged.
+Shared browser/Windows examples enable edge contact. Inter-garment and universal
+mesh CCD guarantees remain outside this implementation. See [M5 contracts](docs/cloth-edges.md)
+and [M5 evidence](docs/cloth-edges-validation.md).
+
+Milestone six adds optional authored inverse mass to the same garment definition.
+All internal link and self-contact responses use effective inverse mass; target
+pins remain authoritative and supplied acceleration stays mass independent.
+The definition owns its copied values, with no new scene/platform dependencies.
+See [M6–M8 contracts](docs/cloth-materials-motion.md).
+
+Milestone seven adds optional surface aerodynamic pressure within each fixed
+cloth step. Air velocity/density are borrowed update inputs, and authored drag
+defaults off. Triangle forces use effective masses and animated pin velocity;
+bounded force evaluation updates transient diagnostics. No fluid system, extra
+clock or renderer dependency is introduced.
+
+Milestone eight accepts optional borrowed translations for capsule and triangle
+proxies. The application owns ordering and unconsumed motion history; the solver
+interpolates translation across executed fixed steps and performs relative-frame
+sweeps and contact-relative velocity response. Static inputs remain the default.
+No collider identity registry, retained physics object or new frame owner is added.
+The shared demo owns a translating obstacle and consumes history only after an
+actual step/reset. Rotation/deformation and inter-garment contact remain future work.
+
+The Blender cloth exporter is offline tooling in `tools/blender-cloth`. Its versioned
+WECG asset carries bounded geometry, rest-rig evidence and cloth parameters, preserving
+vertex order independently of GLB render-vertex splitting. `loadClothAsset` in the
+optional clothing library performs no IO: it validates and remaps bindings against
+the caller's immutable skeleton before returning immutable mesh/definition resources.
+Blender is not a runtime dependency. Asset IO, material selection, item IDs and body
+visibility remain application responsibilities. No frame, renderer or lifetime owner
+changes. UV seams needing split render vertices and simulation proxies are future work.
+See [exporter contracts](docs/cloth-exporter.md).
 
 ### Optional planetary terrain, stages 1 and 2 (2026-10-23)
 
@@ -1101,6 +1256,15 @@ and DOM semantics remain outside portable controllers. See
 
 ### Assets, animation and effects
 
+Mixamo preparation remains offline Blender authoring via `tools/mixamo-rigging`.
+The portable FBX importer also decodes skeleton/clips without triangle geometry or
+texture IO; native file loading is a thin bounded byte-read wrapper. An explicit
+Mixamo correspondence preset feeds the existing retarget bake and immutable
+animation library. Browser animation authoring exposes that preset; Windows
+consumers use the same APIs. No runtime rig fitting, new resource representation,
+renderer dependency or frame/lifetime boundary is introduced. See
+[Mixamo contracts](docs/mixamo.md) and [validation](docs/mixamo-validation.md).
+
 Mesh components share geometry through `shared_ptr<const Mesh>`; textures, materials, skeletons, clips and effect definitions also have shared resource representations. Per-instance transforms, material overrides, morph weights and playback state remain separate from shared assets. Treat published geometry as immutable; deliberate geometry changes must follow the existing bounds/cache invalidation contracts.
 
 FBX and GLB importers convert source assets into engine representations, validate input and report unsupported arrangements. Texture decoding uses stb_image; mesh optimization uses meshoptimizer. The material system supplies PBR maps/factors, material overrides and environment lighting. The material graph authoring tool bakes output into material data; editable graph source has its own JSON persistence.
@@ -1593,7 +1757,7 @@ formats and application policy do not change. See
 
 `Scene::collect()` fills reusable `SceneFrame` descriptions of meshes, lights and particles. `RenderFrame` and `FxFrame` prepare per-view draw data, batching and presentation decisions. [Renderer](include/engine/renderer.hpp) selects a backend and borrows its scene, cameras and optional GUI, which callers must keep alive. Each backend owns its GPU resources, pipelines, upload caches and submission. WebGPU is preferred; automatic mode uses WebGL 2 when the API is missing or initial adapter/device acquisition fails before the canvas acquires a context. Explicit backend query options support diagnosis. Selection is permanent once a canvas context is acquired, preserving DOM/input ownership; later WebGPU loss retains bounded WebGPU recovery.
 
-Ordered camera views compose into one canvas. Each view draws Background, World and Overlay with independent layer depth; GUI draws once afterward. WebGPU uses layer depth ranges; WebGL 2 clears depth between layers and converts the shared zero-to-one clip depth in its vertex shader. The fallback reuses `RenderFrame`, `FxFrame`, materials, RGBA textures, immutable LOD chains, CPU skeletal/morph poses and the GUI draw list. It provides basic directional/point/spot lighting and individual draws; PBR maps/environment lighting, instancing, compressed uploads and GPU timing are reported unavailable; directional/spot shadows are supported. WebGL context loss releases invalid handles and restoration rebuilds resources at host frame boundaries while retaining borrowed state. See [fallback contracts](docs/rendering-fallback.md). Cameras provide projection, viewport, masks, coordinate conversion and frustum data. WebGPU rendering includes instancing, frustum culling, material pipelines, directional shadow maps and shared GPU asset caches. Current code also includes projected-size mesh LOD, independent shadow-detail controls and configurable shadow resolution/filter taps. Portable `RenderQuality` profiles and resolution/shadow budgets compose these controls; applications choose their quality policy. The WebGPU backend reports actual device limits/features and constrains canvas dimensions without changing CSS layout or simulation.
+Ordered camera views compose into one canvas. Each view draws Background, World and Overlay with independent layer depth; GUI draws once afterward. WebGPU uses layer depth ranges; WebGL 2 clears depth between layers and converts the shared zero-to-one clip depth in its vertex shader. The fallback reuses `RenderFrame`, `FxFrame`, materials, RGBA textures, immutable LOD chains, CPU skeletal/morph poses and the GUI draw list. It provides basic directional/point/spot lighting and compatible mesh instance batches, including bulk foliage GPU wind with packed 176-byte object attributes. PBR maps/environment lighting, compressed uploads and GPU timing are reported unavailable; directional/spot shadows are supported. WebGL context loss releases invalid handles and restoration rebuilds resources at host frame boundaries while retaining borrowed state. See [fallback contracts](docs/rendering-fallback.md). Cameras provide projection, viewport, masks, coordinate conversion and frustum data. WebGPU rendering includes instancing, frustum culling, material pipelines, directional shadow maps and shared GPU asset caches. Current code also includes projected-size mesh LOD, independent shadow-detail controls and configurable shadow resolution/filter taps. Portable `RenderQuality` profiles and resolution/shadow budgets compose these controls; applications choose their quality policy. The WebGPU backend reports actual device limits/features and constrains canvas dimensions without changing CSS layout or simulation.
 
 Optional `RenderQuality::msaaSamples` selects 1 or 4 independently of simulation
 and scene archives. Backends report attachment support and effective samples.
@@ -2805,3 +2969,120 @@ post-GUI notifications do not also reach gameplay input. Native water overrides
 feed the existing private DesktopGraphics interface for either backend, with
 null preserving the host simulation clock. Sessions borrow the host Application; the engine gains no game save
 or quest policy. See [consumer host contracts](docs/consumer-hosts.md).
+
+## Optional simulator foundation (stage 2)
+
+`engine_simulator` / `WebEngine::Simulator` is an optional standard-C++20-only
+library with a standalone `simulator/` entry. It owns bounded inventory records,
+typed runtime identities, atomic input/output-capacity reservations, explicit
+millisecond time and a typed event outbox. Commands stage state before publication;
+failed validation/allocation preserves live state. Terminal reservation operations
+cannot consume, produce or release twice. The application owns runtime lifetime
+and supplies time; no scene, clock, callback, IO or renderer enters this library.
+
+Root builds default it off. The standalone example configures no engine core,
+physics, AI, Modules or RPG. Identical contracts compile for native Windows and
+Wasm; browser execution uses the same source. Jobs, stations, customer service,
+snapshots and rendered adapters remain planned. See [API](docs/simulator.md) and
+[validation limits](docs/simulator-validation.md). CafeGame's pin is unchanged.
+
+## Simulator production (stage 3)
+
+The optional Simulator now owns immutable process definitions, bounded station
+slots/workers and FIFO capability-matched jobs. Explicit assign atomically acquires
+input/output holds and worker/slot ownership. Host-reported arrival consumes inputs;
+absolute-deadline completion produces outputs once. Cancellation/removal releases
+holds, with no refund after consumption. Movement failure terminates rather than
+silently retrying. Existing navigation remains a host adapter responsibility.
+
+Advance returns consumed/remaining milliseconds and a bounded completion count;
+equal deadlines use JobId order. Outbox backpressure cannot partially publish a
+transition. Assignment is an explicit host command, not another Application clock.
+The optional C++ target and native/browser source boundary are unchanged. Customers,
+payment, snapshots and game integration remain later work. See
+[production contracts](docs/simulator-production.md) and
+[stage 3 evidence](docs/simulator-production-validation.md).
+
+## Simulator customer service (stage 4)
+
+Optional Simulator adds bounded arrival identities, FIFO acceptance, item/recipe
+orders, linked production jobs, simulation-time patience and retained delivery
+receipts. Completed outputs are claimed by the active order. Delivery consumes
+claims and creates one payment event/receipt atomically; prices and wallet remain
+application policy. Abandonment cancels or finishes already-running work according
+to explicit game policy, preserving produced stock. Linked job failures cascade
+cleanup without leaking input/output/worker/station holds.
+
+The existing candidate publication now guards the complete event batch, rejecting
+outbox overflow before publishing any partial cascade or time progress. Advance
+merges completion and expiry deadlines with bounded work; delivery must precede
+expiry. No new clock, navigation, renderer, persistence or IO ownership is added.
+See [service contracts](docs/simulator-service.md) and
+[validation](docs/simulator-service-validation.md). CafeGame's pin is unchanged.
+
+### Simulator stage 5 persistence
+
+The optional portable simulator owns a bounded version-1 snapshot codec (src/simulator/snapshot.inc). Restore validates a detached candidate, rebases handle epochs and publishes atomically without replaying events. Hosts own byte storage, travel rebinding and an envelope containing wallet/processed receipts. See docs/simulator-persistence.md. CafeGame now consumes a bundled source snapshot and supplies browser and minimal native console adapters; native execution remains unverified locally.
+
+## Simulator release candidate (stage 6)
+
+The standalone service/parity examples and release CI compare canonical snapshots plus ordered events across native Linux, Windows and Wasm, omitting transient epochs. They add no runtime dependency or host ownership. Current API, integration order and limits are documented in docs/simulator-guide.md; docs/simulator-release.md records observed evidence and open release gates. Historical stage sections above describe the sequence of delivery, not current feature absences.
+
+## Simulator movement bindings (stage 7)
+
+TravelBinding is a portable, header-only assignment bridge. It retains no scene or navigation objects. Hosts bind tickets to scene handles, own navigation cancellation, validate arrival and rebuild travel after restore. CafeGame reuses the pinned engine PathFollower/CharacterMotorComponent on authored clear interaction corridors. See docs/simulator-movement.md.
+
+## Simulator occupancy (stage 8)
+
+The optional header-only OccupancyPool<Owner> provides bounded FIFO spatial claims with compact queue and stable exclusive-slot policies. Hosts own owner validation, point geometry, navigation, persistence envelopes and departure cleanup. This helper has no scene/renderer/clock dependency and does not modify core snapshot schema 1. CafeGame schema 2 combines spatial state with core/wallet bytes. See docs/simulator-occupancy.md.
+
+## Simulator workflows (stage 9)
+
+Optional TaskBoard provides bounded dependency/priority tasks and role/shift matching above production. Explicit start/complete bridge navigation and host effects; interrupted tasks preserve remaining work and lose worker ownership. Hosts supply simulation time and persist/validate a joint envelope. CafeGame schema 3 adds staff breaks, collect/prepare/hand-over and dirty-seat cleaning while reusing WaypointGraph/PathFollower. Core Runtime snapshot schema remains 1. See docs/simulator-workflows.md.
+
+### Simulator supply extension (stage 10)
+
+The optional portable simulator adds an atomic cross-inventory transfer and a header-only SupplyBoard above existing output-capacity reservations. The host owns Runtime/board lifetime, time/poll boundaries, supplier policy, presentation and joint persistence. Supplier records reserve incoming capacity on order and commit it once at an explicit due poll; cancellation releases it. Reorder policy counts all incoming capacity to avoid duplicate orders. Per-order staged publication preserves valid helper/core state on failure, including event pressure. This adds no renderer, platform, scene, IO, wallet or scheduling dependency. Runtime restore invalidates boards; typed restore requires rebased IDs and validated reservation ownership. Core snapshot schema stays 1; CafeGame uses schema 4. See [supply contracts](docs/simulator-supply.md).
+
+
+### Simulator economy extension (stage 11)
+
+The optional portable Ledger owns bounded integer cash postings, per-source sequence watermarks, compacted history, detached prepared publication and validated typed restore. A shared lifetime token and revision guard prepared candidates. Hosts own prices, wage accrual, refund eligibility, time and cross-system command coordination. Preparation stages every allocation; exclusive synchronous ownership permits a stock/service mutation followed by allocation-free ledger commit. No platform, renderer, clock, IO, wallet policy or new event bus is introduced. Archived summaries preserve cumulative totals and duplicate barriers. Core Runtime snapshots stay schema 1; CafeGame jointly persists accounting in envelope 5. See [economy contracts](docs/simulator-economy.md).
+
+
+### Simulator quality extension (stage 12)
+
+Optional portable Freshness/Condition value mechanisms add bounded integer age/quality sampling, use-source idempotency, saturating equipment wear/dirt and validated typed state. Atomic Runtime::remove is a stock sink using the existing staged inventory/event publication. These mechanisms own no time, tasks, paths, scenes, inventory lots or monetary policy. CafeGame composes them with existing TaskBoard, navigation and Ledger for drink expiry, cleaning and paid repair tasks. The game validates those records jointly in envelope 6; core wire format remains 1. See [quality contracts](docs/simulator-quality.md).
+
+
+### Simulator placement extension (stage 13)
+
+Optional GridLayout owns bounded integer footprints, quarter-turn snapping/validation, one-cell furniture separation, front access and four-neighbour reachability checks. It owns no scene, actor navigation, clock, price or persistence format. OccupancyPool can disable unclaimed stable points and promote waiters on enable. CafeGame composes these with existing WaypointGraph/PathFollower and Ledger; its closed/drained edit gate, prices, table slots and joint envelope 7 remain game policy. Core snapshots remain schema 1. See [layout contracts](docs/simulator-layout.md).
+
+
+### Simulator demand extension (stage 14)
+
+Optional portable demand.hpp adds explicit seeded integer random state, a bounded arrival countdown and validated pure satisfaction/patience scoring. These values own no time, Runtime, profiles, reviews, prices or scene objects. CafeGame composes them with existing arrival/service APIs, coordinates candidate RNG publication and validates guest outcomes with paid-service counts in envelope 8. Simulation stepping stops at automatic-arrival boundaries; closed/disabled traffic holds time. Core wire format remains 1. See [demand contracts](docs/simulator-demand.md).
+
+### Simulator authoring and diagnostics (stage 15)
+
+Optional header-only diagnostics.hpp adds detached definition registration checks
+with field paths and read-only JobInspection copies/explanations. It reuses Runtime
+validation and owns no clocks, sessions, events, scene/renderer types, JSON or IO.
+Scenario authoring, cross-system action explanations and balance-policy reports
+remain consumer responsibilities. CafeGame composes those mechanisms with its
+existing joint candidate loader; core schema 1 and game envelope 8 remain unchanged.
+Identical native/Wasm sources cover these portable contracts; local execution
+limits are documented separately. See docs/simulator-authoring.md.
+
+### Simulator compatibility and scale (stage 16)
+
+Optional compatibility.hpp supplies canonical non-cryptographic ContentHash,
+ContentStamp comparison and checkpoint fingerprints; hosts own save envelopes,
+known-content migration tables and storage. Runtime::metrics returns O(1) retained
+record counts and configured limits. Clock-only advance and assignment with no
+queued jobs avoid staged state copies; due transitions retain transactional event/
+work budgets, tie ordering and cancellation invariants. No scheduling, renderer,
+IO or platform ownership is added. Core wire schema stays 1. Generic native/Wasm/
+browser contracts include saturation, rebase and retirement; Cafe envelope 9 adds
+content identity and long checkpoint/replay reports. See docs/simulator-compatibility.md.

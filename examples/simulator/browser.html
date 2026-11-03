@@ -1,0 +1,14 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>WebEngine simulator contract tests</title>
+<pre id="result">Running simulator contracts...</pre>
+<script>
+var Module = {
+  print(text) { document.getElementById('result').textContent = text; console.log(text); },
+  printErr(text) { console.error(text); },
+  onExit(code) { document.body.dataset.result = code === 0 ? 'passed' : 'failed'; },
+  onAbort(reason) { document.body.dataset.result = 'failed'; console.error(reason); }
+};
+</script>
+<script src="simulator_browser_tests.js"></script>

@@ -25,12 +25,12 @@ void useLod(MeshDraw& draw,std::size_t level) {
 }
 }
 std::size_t RenderFrame::chooseLod(const MeshDraw& draw,LodState& state,const DetailView* detail,bool shadow) {
-    if(state.component!=draw.component || state.source.lock()!=draw.sourceMesh) state={draw.component,draw.sourceMesh,0};
-    state.level=detail && !draw.skinPose && !draw.morphPose && !draw.sourceMesh->skeleton
+    if(state.component!=draw.component || state.source.lock()!=draw.sourceMesh||state.instanceKey!=draw.instanceKey) state={draw.component,draw.sourceMesh,0,draw.instanceKey};
+    state.level=detail && !draw.bend && !draw.skinPose && !draw.morphPose && !draw.sourceMesh->skeleton
         && draw.sourceMesh->skin.empty() && draw.sourceMesh->morphTargets.empty() && !draw.sourceMesh->lods.empty()
         ? selectMeshLod(*draw.sourceMesh,projectedMeshPixels(draw.sourceBounds,draw.model,detail->viewProjection,detail->width,detail->height)*(shadow ? draw.lodPolicy.shadowScale : draw.lodPolicy.cameraScale),state.level) : 0;
     const int fixed=shadow ? draw.lodPolicy.shadowLevel : draw.lodPolicy.cameraLevel;
-    if(detail&&fixed>=0&&draw.sourceBounds.valid&&!draw.skinPose&&!draw.morphPose&&!draw.sourceMesh->skeleton&&draw.sourceMesh->skin.empty()&&draw.sourceMesh->morphTargets.empty())
+    if(detail&&fixed>=0&&draw.sourceBounds.valid&&!draw.bend&&!draw.skinPose&&!draw.morphPose&&!draw.sourceMesh->skeleton&&draw.sourceMesh->skin.empty()&&draw.sourceMesh->morphTargets.empty())
         state.level=std::min(std::size_t(fixed),draw.sourceMesh->lods.size());
     return state.level;
 }
@@ -60,7 +60,7 @@ void RenderFrame::collect(const Scene& scene,bool instancing,std::uint32_t visib
         const auto& d=scene_.meshes[index];const auto& m=d.material;
         auto address=[](const auto* p) { return reinterpret_cast<std::uintptr_t>(p); };
         return std::tuple{address(d.mesh.get()),d.firstIndex,d.indexCount,address(d.skinPose.get()),
-            address(d.morphPose.get()),d.mirrored,address(d.texture ? d.texture.get() : white),
+            address(d.morphPose.get()),address(d.bend.get()),address(d.wind.get()),d.mirrored,address(d.texture ? d.texture.get() : white),
             address(m.baseColorTexture ? m.baseColorTexture.get() : white),address(m.metallicRoughnessTexture.get()),
             address(m.normalTexture.get()),address(m.occlusionTexture.get()),address(m.emissiveTexture.get()),
             m.roughness,m.metallic,m.normalScale,m.occlusionStrength,m.emissive.x,m.emissive.y,m.emissive.z,
@@ -90,6 +90,7 @@ void RenderFrame::collect(const Scene& scene,bool instancing,std::uint32_t visib
                 if(i==std::uint64_t(batch.firstInstance)+batch.instanceCount && draw.mesh==first.mesh
                     && draw.skinPose==first.skinPose
                     && draw.morphPose==first.morphPose
+                    && draw.bend==first.bend && draw.wind==first.wind
                     && draw.mirrored==first.mirrored && sameMaterialBinding(draw.material,first.material)
                     && draw.firstIndex==first.firstIndex && draw.indexCount==first.indexCount
                     && (draw.texture ? draw.texture.get() : white)==(first.texture ? first.texture.get() : white)) {
@@ -181,7 +182,7 @@ void RenderFrame::prepareObjects() {
     uploads_.clear();changedObjects_=0;
     for(std::size_t i=0;i<count;++i) {
         const auto& draw=instanceDraw(i);
-        const ObjectUniform object{draw.model,draw.normal,{draw.color.x,draw.color.y,draw.color.z,draw.opacity},{draw.receivesShadow ? 1.0f : 0.0f,draw.layer==RenderLayer::World&&draw.material.shader==MaterialShader::Water&&draw.material.water.usesSceneInputs() ? 1.0f : 0.0f,draw.layer==RenderLayer::World&&draw.material.shader==MaterialShader::Water ? 1.0f : 0.0f,draw.layer==RenderLayer::World ? (draw.blend==BlendMode::Additive ? 2.0f : 1.0f) : 0.0f}};
+        const ObjectUniform object{draw.model,draw.normal,{draw.color.x,draw.color.y,draw.color.z,draw.opacity},{draw.receivesShadow ? 1.0f : 0.0f,draw.layer==RenderLayer::World&&draw.material.shader==MaterialShader::Water&&draw.material.water.usesSceneInputs() ? 1.0f : 0.0f,draw.layer==RenderLayer::World&&draw.material.shader==MaterialShader::Water ? 1.0f : 0.0f,draw.layer==RenderLayer::World ? (draw.blend==BlendMode::Additive ? 2.0f : 1.0f) : 0.0f},{draw.windPhase,0,0,0}};
         const auto offset=i*objectStride;
         const bool changed=i>=previousCount || std::memcmp(objects_.data()+offset,&object,sizeof(object));
         if(changed) std::memcpy(objects_.data()+offset,&object,sizeof(object));

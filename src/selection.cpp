@@ -1,5 +1,6 @@
 #include "engine/selection.hpp"
 #include "engine/mesh_component.hpp"
+#include "engine/mesh_instances.hpp"
 #include "engine/skeletal_mesh_component.hpp"
 #include "engine/physics.hpp"
 
@@ -42,6 +43,7 @@ struct SurfaceHit {
     std::optional<std::uint32_t> triangle;
     Vec3 normal{},barycentric{};
     Vec2 uv{};
+    std::uint64_t instanceKey=0;
 };
 struct PreciseVector { double x,y,z; };
 PreciseVector precise(Vec3 p) { return {p.x,p.y,p.z}; }
@@ -51,10 +53,10 @@ double dot(PreciseVector a,PreciseVector b) { return a.x*b.x+a.y*b.y+a.z*b.z; }
 // Original CPU geometry, morphed before skinning exactly as in localBounds/rendering.
 // Broad-phase bounds avoid deforming/testing triangles on unrelated surfaces.
 std::optional<SurfaceHit> meshHit(Ray ray,const MeshComponent& component,const Mat4& model,
-    const SelectionQuery& query,SelectionGeometry geometry) {
+    const SelectionQuery& query,SelectionGeometry geometry,const MeshBend* bend=nullptr,const MeshWindState* wind=nullptr,float phase=0) {
     const auto* skeletal=dynamic_cast<const SkeletalMeshComponent*>(&component);
     const auto pose=skeletal ? skeletal->skinPose() : nullptr;
-    const auto broad=intersect(ray,component.localBounds(pose),model,query.minDistance,query.maxDistance);
+    const auto broad=intersect(ray,meshWindBounds(component.localBounds(pose),model,wind),model,query.minDistance,query.maxDistance);
     if(!broad) return {};
     if(geometry==SelectionGeometry::Bounds) return SurfaceHit{*broad,{}, {}, {}, {}};
     const auto& mesh=*component.mesh;
@@ -69,6 +71,7 @@ std::optional<SurfaceHit> meshHit(Ray ray,const MeshComponent& component,const M
                 p=p+transformPoint(pose->bones.at(skin.joints[j]).transform,vertices[i].position)*skin.weights[j];
         }
         p=transformPoint(model,p);
+        if(bend&&wind){const float w=bend->vertices().at(i)[0];p=p+wind->displacement(phase)*(w*w);}
         if(!finite(p)) throw std::invalid_argument("Nonfinite picking geometry");
         positions.push_back(p);
     }
@@ -158,7 +161,7 @@ std::optional<SelectionHit> SelectionSystem::resolveRay(Ray ray,const SelectionQ
     std::optional<float> blockerDistance;ActorId blockerActor;
     const auto consider=[&](const InteractionComponent& provider,ComponentId surface,const SurfaceHit& value) {
         if(!hit||value.distance<hit->distance) hit=SelectionHit{provider.owner()->id(),provider.id(),surface,
-            ray.origin+ray.direction*value.distance,value.distance,value.triangle,value.normal,value.barycentric,value.uv};
+            ray.origin+ray.direction*value.distance,value.distance,value.triangle,value.normal,value.barycentric,value.uv,value.instanceKey};
     };
     // Reuse the render transform (including physics interpolation), original
     // geometry and animated bounds. LOD and shadow detail do not affect picking.
@@ -174,13 +177,21 @@ std::optional<SelectionHit> SelectionSystem::resolveRay(Ray ray,const SelectionQ
             }
             const bool blocks=query.occlusion&&(mesh->visibilityMask&query.occluderMask);
             if(!providers.empty()||blocks) {
-                const auto value=meshHit(ray,*mesh,model,query,blocks ? SelectionGeometry::Triangles : query.geometry);
+                const auto* bulk=dynamic_cast<const MeshInstancesComponent*>(mesh);
+                auto test=[&](const Mat4& instanceModel,std::uint64_t key,float phase) {
+                auto value=meshHit(ray,*mesh,instanceModel,query,blocks ? SelectionGeometry::Triangles : query.geometry,bulk?bulk->bend().get():nullptr,bulk?bulk->wind().get():nullptr,phase);
+                if(value)value->instanceKey=key;
                 if(blocks&&value&&(!blockerDistance||value->distance<*blockerDistance)) {
                     blockerDistance=value->distance;blockerActor=mesh->owner() ? mesh->owner()->id() : ActorId{};
                 }
-                const auto target=blocks&&query.geometry==SelectionGeometry::Bounds&&!providers.empty()
-                    ? meshHit(ray,*mesh,model,query,SelectionGeometry::Bounds) : value;
+                auto target=blocks&&query.geometry==SelectionGeometry::Bounds&&!providers.empty()
+                    ? meshHit(ray,*mesh,instanceModel,query,SelectionGeometry::Bounds,bulk?bulk->bend().get():nullptr,bulk?bulk->wind().get():nullptr,phase) : value;
+                if(target)target->instanceKey=key;
                 if(target) for(const auto* provider:providers) consider(*provider,mesh->id(),*target);
+                };
+                if(bulk) {
+                    if(auto data=bulk->instances())for(std::size_t i=0;i<data->values().size();++i)if(data->values()[i].visible)test(model*data->model(i),data->values()[i].key,data->values()[i].phase);
+                } else test(model,0,0);
             }
         }
         const auto* provider=dynamic_cast<const InteractionComponent*>(&node);

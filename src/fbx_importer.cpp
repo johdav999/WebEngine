@@ -32,7 +32,7 @@ void validateOptions(const FbxImportOptions& options) {
         throw std::invalid_argument("Invalid FBX import limits");
 }
 }
-std::shared_ptr<const Mesh> FbxImporter::loadMemory(std::span<const std::byte> data,const FbxImportOptions& options) {
+static std::shared_ptr<const Mesh> decodeFbx(std::span<const std::byte> data,const FbxImportOptions& options,bool animationsOnly) {
     ProfileScope profile(ProfileCategory::Loading,"FBX import");
     const auto started=ImportClock::now();
     if(options.measurements) *options.measurements={};
@@ -63,6 +63,13 @@ std::shared_ptr<const Mesh> FbxImporter::loadMemory(std::span<const std::byte> d
         throw std::runtime_error(std::string("FBX parsing failed: ")+description);
     }
     auto result=std::make_shared<Mesh>();
+    if(animationsOnly) {
+        FbxSkinImport skin(*scene,options,*result,true);
+        skin.finish();
+        if(!result->skeleton || result->skeleton->clips.empty())
+            throw std::runtime_error("FBX contains no skeletal animation clips");
+        return result;
+    }
     struct ImportedMorph { const ufbx_node* node;const ufbx_blend_shape* shape;std::size_t target; };
     std::vector<ImportedMorph> morphs;
     std::size_t morphStreams=0;
@@ -329,6 +336,18 @@ std::shared_ptr<const Mesh> FbxImporter::loadMemory(std::span<const std::byte> d
     return result;
 }
 #ifndef __EMSCRIPTEN__
+std::shared_ptr<const Skeleton> FbxImporter::loadAnimationsFile(const std::filesystem::path& path,const FbxImportOptions& options) {
+    validateOptions(options);
+    std::ifstream file(path,std::ios::binary|std::ios::ate);
+    if(!file) throw std::runtime_error("Cannot open FBX animation file: "+path.string());
+    const auto length=file.tellg();
+    if(length<0 || static_cast<std::uintmax_t>(length)>options.maxFileBytes)
+        throw std::runtime_error("FBX animation file exceeds size limit");
+    std::vector<std::byte> data(static_cast<std::size_t>(length));file.seekg(0);
+    if(!file.read(reinterpret_cast<char*>(data.data()),static_cast<std::streamsize>(data.size())))
+        throw std::runtime_error("Cannot read FBX animation file");
+    return loadAnimationsMemory(data,options);
+}
 std::shared_ptr<const Mesh> FbxImporter::loadFile(const std::filesystem::path& path,const FbxImportOptions& options) {
     validateOptions(options);
     std::ifstream file(path,std::ios::binary|std::ios::ate);
@@ -366,4 +385,10 @@ std::shared_ptr<const Mesh> FbxImporter::loadFile(const std::filesystem::path& p
     return loadMemory(data,configured);
 }
 #endif
+std::shared_ptr<const Mesh> FbxImporter::loadMemory(std::span<const std::byte> data,const FbxImportOptions& options) {
+    return decodeFbx(data,options,false);
+}
+std::shared_ptr<const Skeleton> FbxImporter::loadAnimationsMemory(std::span<const std::byte> data,const FbxImportOptions& options) {
+    return decodeFbx(data,options,true)->skeleton;
+}
 } // namespace engine

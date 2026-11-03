@@ -1,6 +1,6 @@
 // Private D3D12Graphics root signature and PSO construction.
 void pipelines() {
-    std::array<D3D12_ROOT_PARAMETER,17> params{};
+    std::array<D3D12_ROOT_PARAMETER,19> params{};
     params[0].ParameterType=params[1].ParameterType=D3D12_ROOT_PARAMETER_TYPE_CBV;params[0].Descriptor.ShaderRegister=0;params[1].Descriptor.ShaderRegister=1;
     std::array<D3D12_DESCRIPTOR_RANGE,3> ranges{{
         {D3D12_DESCRIPTOR_RANGE_TYPE_SRV,5,0,0,D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND},
@@ -22,6 +22,8 @@ void pipelines() {
     params[14].ParameterType=D3D12_ROOT_PARAMETER_TYPE_CBV;params[14].Descriptor.ShaderRegister=6;params[14].ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
     params[15].ParameterType=D3D12_ROOT_PARAMETER_TYPE_CBV;params[15].Descriptor.ShaderRegister=7;
     params[16].ParameterType=D3D12_ROOT_PARAMETER_TYPE_SRV;params[16].Descriptor.ShaderRegister=23;params[16].ShaderVisibility=D3D12_SHADER_VISIBILITY_VERTEX;
+    params[17].ParameterType=D3D12_ROOT_PARAMETER_TYPE_SRV;params[17].Descriptor.ShaderRegister=24;params[17].ShaderVisibility=D3D12_SHADER_VISIBILITY_VERTEX;
+    params[18].ParameterType=D3D12_ROOT_PARAMETER_TYPE_CBV;params[18].Descriptor.ShaderRegister=8;params[18].ShaderVisibility=D3D12_SHADER_VISIBILITY_VERTEX;
     std::array<D3D12_STATIC_SAMPLER_DESC,6> samplers{};
     for(UINT i=0;i<6;++i){auto& s=samplers[i];s.Filter=D3D12_FILTER_MIN_MAG_MIP_LINEAR;
         s.AddressU=(i>=4||(i&1))?D3D12_TEXTURE_ADDRESS_MODE_CLAMP:D3D12_TEXTURE_ADDRESS_MODE_WRAP;
@@ -46,7 +48,7 @@ ID3D12PipelineState* materialPipeline(const MeshDraw& draw,bool shadow,bool inst
     // uses SV_IsFrontFace to orient normals, including mirrored water surfaces.
     const UINT winding=(material.doubleSided?0u:1u)|((draw.mirrored!=reflectionPass_)?2u:0u);
     const bool skin=bool(draw.skinPose);
-    const std::array<UINT,7> key{blend,winding,shadow||reflectionPass_?1:sampleCount_,shadow?1u:hdr_?2u:0u,skin?1u:0u,reflectionPass_?1u:0u,instanced?1u:0u};
+    const std::array<UINT,8> key{blend,winding,shadow||reflectionPass_?1:sampleCount_,shadow?1u:hdr_?2u:0u,skin?1u:0u,reflectionPass_?1u:0u,instanced?1u:0u,draw.bend?1u:0u};
     if(auto it=meshPipelines_.find(key);it!=meshPipelines_.end())return it->second.Get();
     const D3D12_INPUT_ELEMENT_DESC input[]={
         {"POSITION",0,DXGI_FORMAT_R32G32B32_FLOAT,0,offsetof(Vertex,position),D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,0},
@@ -61,6 +63,10 @@ ID3D12PipelineState* materialPipeline(const MeshDraw& draw,bool shadow,bool inst
     if(instanced){
         p.VS=shadow?D3D12_SHADER_BYTECODE{d3d12_shaders::instanceShadowVS,sizeof(d3d12_shaders::instanceShadowVS)}:D3D12_SHADER_BYTECODE{d3d12_shaders::instanceVS,sizeof(d3d12_shaders::instanceVS)};
         if(skin)p.VS=shadow?D3D12_SHADER_BYTECODE{d3d12_shaders::instanceSkinShadowVS,sizeof(d3d12_shaders::instanceSkinShadowVS)}:D3D12_SHADER_BYTECODE{d3d12_shaders::instanceSkinVS,sizeof(d3d12_shaders::instanceSkinVS)};
+    }
+    if(draw.bend) {
+        p.VS=shadow?D3D12_SHADER_BYTECODE{d3d12_shaders::windShadowVS,sizeof(d3d12_shaders::windShadowVS)}:D3D12_SHADER_BYTECODE{d3d12_shaders::windVS,sizeof(d3d12_shaders::windVS)};
+        if(instanced)p.VS=shadow?D3D12_SHADER_BYTECODE{d3d12_shaders::instanceWindShadowVS,sizeof(d3d12_shaders::instanceWindShadowVS)}:D3D12_SHADER_BYTECODE{d3d12_shaders::instanceWindVS,sizeof(d3d12_shaders::instanceWindVS)};
     }
     p.PS=shadow?D3D12_SHADER_BYTECODE{d3d12_shaders::shadowPS,sizeof(d3d12_shaders::shadowPS)}:D3D12_SHADER_BYTECODE{d3d12_shaders::meshPS,sizeof(d3d12_shaders::meshPS)};
     p.RasterizerState.FillMode=D3D12_FILL_MODE_SOLID;p.RasterizerState.CullMode=(winding&1)?D3D12_CULL_MODE_BACK:D3D12_CULL_MODE_NONE;

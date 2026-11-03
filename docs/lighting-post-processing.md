@@ -81,7 +81,7 @@ WebGPU supports the float targets directly. WebGL2 requires
 `EXT_color_buffer_float`; `RenderCapabilities::hdrPostProcessing` reports it.
 Unavailable devices keep the requested setting and render the standard path.
 Float-target MSAA is checked separately; requested 4x falls back to 1x if needed.
-The existing WebGL basic-lighting/no-IBL/no-instancing limits remain.
+WebGL retains basic lighting and no IBL; compatible mesh draws support instancing.
 
 All fields validate together before replacing quality: exposure -8..8, bloom
 strength 0..2, threshold 0..32, saturation/contrast 0..2, cascades 1..4, finite

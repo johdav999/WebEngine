@@ -2,7 +2,9 @@
 
 These prompts implement [the RPG library architecture](rpg-library-architecture.md).
 R1 is implemented as documented in [rpg.md](rpg.md) with evidence in
-[rpg-validation.md](rpg-validation.md). Prompts 2-10 remain the sequential backlog.
+[rpg-validation.md](rpg-validation.md). R2 is delivered in
+[character/transaction contracts](rpg-characters.md) with
+[R2 evidence](rpg-r2-validation.md). Prompts 3-10 remain the sequential backlog.
 The original prompt text below is retained as the milestone acceptance scope.
 Run each prompt as a separate task in WebEngine; prompts 2-10 depend on the
 preceding delivered milestones. Keep working changes isolated and preserve other

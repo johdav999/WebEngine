@@ -1,5 +1,43 @@
 # WebEngine
 
+Optional [foliage](docs/foliage.md) adds seeded surface placement, bounded visual
+and independent trunk-collision streaming, masked mesh rendering, distance detail,
+GPU wind, bulk instancing and saved plant removals. Enable `WEBENGINE_BUILD_FOLIAGE`,
+`WEBENGINE_BUILD_FOLIAGE_TESTS` and `WEBENGINE_BUILD_FOLIAGE_DEMO` for shared browser
+and Windows examples. An explicit CPU reference supports comparison; dense grass
+still needs device-appropriate budgets. See [M6 validation](docs/foliage-dense-validation.md).
+
+Optional [character clothing, milestone one](docs/clothing.md) provides shared-rig
+garments, rigid hats, body-region hiding, colors and saved outfits through
+`WebEngine::Clothing`, with browser and Windows examples. See the feature's
+[validation record](docs/clothing-validation.md) for platform evidence.
+
+[Clothing milestone two](docs/cloth-dynamics.md) adds a physical cape with animated
+pins, stretch/bend constraints, wind and body capsule collision through the same
+optional library and both host examples. [M2 validation](docs/cloth-dynamics-validation.md)
+records its actual browser and Windows coverage.
+
+[Clothing milestone three](docs/cloth-collision.md) adds optional particle
+self-contact and world-space floor/box collision, with a shared cape obstacle demo.
+See [M3 validation](docs/cloth-collision-validation.md) for platform evidence.
+
+[Clothing milestone four](docs/cloth-surfaces.md) adds vertex/triangle self-contact,
+environment triangle surfaces and optional swept collision, with shared browser and
+Windows examples. [M4 evidence](docs/cloth-surfaces-validation.md) records validation.
+
+[Clothing milestone five](docs/cloth-edges.md) adds optional edge-to-edge
+self-contact and bounded linear edge sweeps derived from garment topology.
+[M5 evidence](docs/cloth-edges-validation.md) records browser and native validation.
+
+[Clothing milestones six through eight](docs/cloth-materials-motion.md) add authored
+inverse masses, surface aerodynamic drag and translating capsule/triangle collision.
+The shared browser/Windows demo uses a weighted cape and moving obstacle; see
+[M6–M8 validation](docs/cloth-materials-motion-validation.md) for platform evidence.
+
+[Blender cloth exporter](docs/cloth-exporter.md) prepares painted physical garments
+as `.wecloth` assets. Its portable loader validates and remaps rig bindings before
+sharing the character skeleton on browser and Windows targets.
+
 ## Procedural planet flight
 
 The optional [planet stage 1 demo](docs/planet-terrain.md) flies continuously from
@@ -1198,6 +1236,11 @@ Shader edits trigger CMake regeneration and rebuild the embedded shader. `build/
 
 ## Skeletal meshes and animation
 
+[Mixamo workflow](docs/mixamo.md): import rigged FBX/GLB characters and meshless
+FBX animations, use explicit Mixamo joint matching and the existing retarget bake.
+The [headless Blender skill](tools/mixamo-rigging/SKILL.md) binds an unrigged mesh
+to a fitted Mixamo armature offline and exports an engine-ready skinned GLB.
+
 Select a skeletal mesh in **Details → Animation library & state machine** to
 organize named clips by folder/tags, import same-rig animations, author a visual
 parameter/condition graph, and preview it on an isolated Play scene. Apply is
@@ -1488,9 +1531,11 @@ when detail settings are fixed. `scripts/ship-instancing-smoke.cjs` compares bot
 fleet sizes with instancing disabled, including exact rendered pixels and shadows.
 
 The GPU reads the existing reusable 256-byte object slots as an instance vertex
-buffer (160 bytes of attributes). `DrawIndexed` supplies the batch's instance
+buffer (176 bytes of attributes, including the plant phase). `DrawIndexed` supplies the batch's instance
 count and first-instance slot. Changed-only uploads, resource sharing and cached
 transforms continue to work; batching does not duplicate mesh geometry.
+WebGL2 packs the same attributes into a 176-byte buffer stride to obey its
+255-byte attribute stride limit, and uses divisor attributes for compatible draws.
 `Renderer::setInstancingEnabled(false)` disables batching; the browser accepts
 `?instancing=off` for a visual/submission comparison.
 
@@ -1917,7 +1962,38 @@ only on Modules and C++20, and defaults off. The
 downloads on native Windows/Linux and Wasm. See [API and ownership](docs/rpg.md)
 and [validation evidence](docs/rpg-validation.md).
 
-Characters, inventory, abilities, turn-based encounters, snapshots, RPGQuests and
-rendered hosts remain in the [release architecture](docs/rpg-library-architecture.md)
+R2 adds [characters, resources, modifiers, progression and atomic transactions](docs/rpg-characters.md),
+with [native/Wasm validation](docs/rpg-r2-validation.md). Inventory, abilities,
+turn-based encounters, snapshots, RPGQuests and rendered hosts remain in the [release architecture](docs/rpg-library-architecture.md)
 and [ten implementation prompts](docs/rpg-library-release-1-prompts.md). RPGGame
 owns The Shattered Sea's rules, balance, world, story and third-person presentation.
+
+## Simulator foundation
+
+The optional [simulator library](docs/simulator.md) provides portable C++20 inventory,
+atomic reservations and explicit time/events. See [validation](docs/simulator-validation.md).
+Production and customer service are documented below; persistence remains later work.
+
+Simulator [stage 3](docs/simulator-production.md) adds timed production, station slots,
+worker assignment and cancellation. Customer service is in stage 4 below; saves remain later work.
+
+Simulator [stage 4](docs/simulator-service.md) adds FIFO customer orders, patience,
+output claims, abandonment policies and delivery receipts. Save/load remains later work.
+Simulator stage 10 adds atomic stock transfers and optional supplier delivery/reorder helpers. See [supply contracts](docs/simulator-supply.md).
+
+Simulator stage 11 adds the optional integer cash Ledger, bounded journal and prepared publication. See [economy contracts](docs/simulator-economy.md).
+
+Simulator stage 12 adds optional freshness/condition and atomic stock disposal. See [quality contracts](docs/simulator-quality.md).
+
+
+Simulator stage 13 adds optional grid placement validation and enabled occupancy points. See [layout contracts](docs/simulator-layout.md).
+
+
+Simulator stage 14 adds optional seeded demand timing and pure satisfaction/patience scoring. See [demand contracts](docs/simulator-demand.md).
+
+Simulator stage 15 adds optional detached definition checks and read-only job
+inspection in `engine/simulator/diagnostics.hpp`. Scenario definitions, blocked
+action UI and deterministic balance-policy reports remain host-owned; CafeGame
+provides the reference consumer. See [authoring contracts](docs/simulator-authoring.md).
+
+Simulator stage 16 adds optional content/checkpoint fingerprints, retained-record metrics and clock-only fast paths. Hosts own explicit migrations and stress policy. See docs/simulator-compatibility.md for contracts and simulator-release.md for evidence.

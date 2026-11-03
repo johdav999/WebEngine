@@ -3,9 +3,9 @@
 #include <span>
 
 namespace engine {
-// Instance attributes occupy 160 bytes in a reusable 256-byte GPU vertex-buffer slot.
-struct alignas(16) ObjectUniform { Mat4 model,normal; std::array<float,4> color,shadow; };
-static_assert(sizeof(ObjectUniform)==160);
+// Instance attributes occupy 176 bytes in the existing reusable 256-byte slot.
+struct alignas(16) ObjectUniform { Mat4 model,normal; std::array<float,4> color,shadow,wind; };
+static_assert(sizeof(ObjectUniform)==176);
 struct ObjectUploadRange { std::size_t offset=0,bytes=0; };
 // Resource/range information comes from instanceDraw(firstInstance).
 struct InstanceBatch { std::uint32_t firstInstance=0,instanceCount=1; };
@@ -43,7 +43,7 @@ public:
     std::size_t storageBytes() const;
 private:
     SceneFrame scene_;
-    struct LodState { ComponentId component;std::weak_ptr<const Mesh> source;std::size_t level=0; };
+    struct LodState { ComponentId component;std::weak_ptr<const Mesh> source;std::size_t level=0;std::uint64_t instanceKey=0; };
     struct ShadowState { std::vector<LodState> levels;std::vector<ShadowBatch> batches; };
     std::vector<LodState> cameraLevels_;
     std::array<ShadowState,4> shadows_;

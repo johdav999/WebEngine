@@ -1,5 +1,6 @@
 #pragma once
 #include "engine/renderer.hpp"
+#include "engine/mesh_instances.hpp"
 #include "engine/gui.hpp"
 #include <emscripten/html5.h>
 #include <GLES3/gl3.h>
@@ -31,7 +32,7 @@ public:
     void setAssetUploadBudget(UploadBudget budget) { budget.validate();uploadBudget_=budget; }
     const UploadBudget& assetUploadBudget() const { return uploadBudget_; }
     void resetMeasurements() { measurements_.reset();lastReport_=-1000; }
-    void setInstancingEnabled(bool) {} // Draws individually; capability report declares this.
+    void setInstancingEnabled(bool value) {instancing_=value;}
     void setFrustumCullingEnabled(bool enabled) { culling_=enabled; }
     void setShadowsEnabled(bool value) {shadowsEnabled_=value;}
     void setLodEnabled(bool enabled) { quality_.lod=enabled; }
@@ -73,6 +74,15 @@ private:
     std::vector<Vertex> deformed_;
     std::unordered_map<const Mesh*,GpuMesh> meshes_;
     std::unordered_map<const Texture*,GpuTexture> textures_;
+    struct GpuBend {std::weak_ptr<const MeshBend> source;GLuint buffer=0;};
+    std::unordered_map<const MeshBend*,GpuBend> bends_;
+    GLuint objects_=0;
+    std::size_t objectCapacity_=0;
+    bool instancing_=true;
+    std::array<float,8> windValues_{};
+    bool windValuesValid_=false;
+    std::vector<std::byte> packedObjects_;
+    void prepareObjects();
     RenderQuality quality_;
     RenderCapabilities capabilities_;
     EMSCRIPTEN_WEBGL_CONTEXT_HANDLE context_=0;
@@ -112,7 +122,7 @@ private:
     void fail(const std::string& message);
     GpuMesh& mesh(const MeshDraw& draw);
     GLuint texture(const std::shared_ptr<const Texture>& source);
-    void drawMesh(const MeshDraw& draw,const Mat4& vp,const SceneFrame& frame);
+    void drawMesh(const MeshDraw& draw,const Mat4& vp,const SceneFrame& frame,std::uint32_t instances=1,std::uint32_t firstInstance=0,bool instanced=false);
     void drawGui(double now);
     void drawSky(const RenderView& view,float aspect);
     void drawRibbon(const FxBatch& batch,const Mat4& vp);

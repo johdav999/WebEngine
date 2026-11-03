@@ -125,8 +125,9 @@ Baked clips need no new scene or library encoding. Current scene format 34 and l
 ANIM3 retain baked clips; retargeting adds no new codec fields. Mapping/source provenance is saved separately in the
 profile, not embedded in the applied scene or `.weanim`.
 
-This is rest-relative transfer for explicitly compatible hierarchies. There is no
-semantic joint-name inference, humanoid classification, joint-limit calibration,
+This is rest-relative transfer for explicitly compatible hierarchies. An explicit
+[Mixamo naming preset](mixamo.md) maps known body/finger names; the default matcher
+still uses exact names. There is no general semantic inference, humanoid classification, joint-limit calibration,
 automatic ground/contact correction, twist redistribution, full-body optimization,
 animated/nonuniform scale transfer or runtime streaming retargeter. Use
 [IK](inverse-kinematics.md) for authored contact adjustment. Large changes in
