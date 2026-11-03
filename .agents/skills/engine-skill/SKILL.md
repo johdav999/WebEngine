@@ -5,6 +5,9 @@ description: Build or extend games using WebEngine's public C++ APIs, applicatio
 
 # WebEngine game integration
 
+For the combined foliage/unlit renderer contract and merge validation commands,
+read [rendering-merge.md](references/rendering-merge.md).
+
 For Blender-authored physical garments, read [cloth-exporter.md](references/cloth-exporter.md).
 Use the versioned exporter and validated rig-remapping loader; verify the consumer pin.
 

@@ -6,7 +6,7 @@ WebEngine is a C++20 engine for games running in desktop and mobile browsers thr
 
 This document describes the implementation inspected on 2026-10-10 and the architectural boundaries for future work. The current architecture sections describe existing code. The evolution table describes intended additions and extensions, not delivered functionality. Keep these sections current when implementations change; source code and focused validation establish actual capability.
 
-## Optional RPG library R1-R2 and release plan (2026-10-25)
+## Optional RPG library R1-R10 and release candidate (2026-10-25)
 
 `engine_rpg` / `WebEngine::RPG` now implements the optional standard-C++20 foundation
 above Modules: explicit content/session/entity identities, bounded metadata
@@ -17,7 +17,7 @@ does not replace existing published state. Runtime identity allocation creates n
 scene entity and owns no clock, renderer, physics, IO or gameplay scheduler.
 
 The root and standalone builds share `rpg/`. RPG and its tests default off;
-missing Modules and undelivered quest/demo options fail explicitly. The external
+missing Modules/bridge dependencies fail explicitly; the demo requires the root host build. The external
 `examples/rpg` consumer configures no engine core or platform dependencies. Native
 Windows/Linux and pinned Emscripten/Node contract/configuration tests are provided.
 See [delivered API](docs/rpg.md) and [actual evidence](docs/rpg-validation.md).
@@ -31,10 +31,96 @@ reject stale input. Preparation stages all operations; publication swaps state w
 no allocations/callbacks and retires old state with the consumed candidate. Pure
 advancement handlers cannot mutate a preparing runtime. Read-only views expire on
 publication. See [R2 contracts](docs/rpg-characters.md) and
-[R2 evidence](docs/rpg-r2-validation.md). Inventory, effects, encounters, RNG,
-snapshots, RPGQuests and rendered browser/Windows samples remain future work. Third-person
-camera policy, Lattice abilities, balance, factions and campaign/world state stay
+[R2 evidence](docs/rpg-r2-validation.md). R3 adds immutable item/inventory definitions,
+durable item ownership, bounded stacks, split/merge/transfer and atomic equipment
+replacement through the same command transaction. Equipment modifiers are derived
+from equipped IDs and cannot be edited as ordinary modifier sources. See
+[R3 contracts](docs/rpg-inventory.md) and [evidence](docs/rpg-r3-validation.md).
+R4 adds typed pure ability evaluators, atomic costs/item use and bounded resource/
+status proposals. Explicit owner/round phase commands drive status ticks and
+expiry. Candidate PCG32 state and draw budgets preserve randomness on rejection
+and preview. Commit remains a single no-throw publication. See [R4 contracts](docs/rpg-abilities.md)
+and [evidence](docs/rpg-r4-validation.md). R5 adds explicit encounter begin/end/finish/exit,
+bounded initiative and turn epochs, policy allowances/outcomes and cooldown phases
+inside the same transaction. Encounter phases only affect its fixed roster; status
+failures roll back initiating actions. No clock advances combat. See
+[R5 contracts](docs/rpg-encounters.md) and [evidence](docs/rpg-r5-validation.md).
+R6 now adds tactical ability/item/move authorization, AP/movement/resource costs,
+immutable runtime/turn/world-stamped query quotes and bounded ordered reactions.
+Commit rechecks the host-supplied world stamp without callbacks. A pending
+presentation blocks input until a matching acknowledgement; acknowledgement only
+unlocks, never replays gameplay. The R9 sample reserves routes before commit and attaches no competing simulation
+writers to its presentation actors. See [R6 contracts](docs/rpg-tactics.md) and
+[evidence](docs/rpg-r6-validation.md). R7 adds the optional RPGQuests target above
+RPG and Quests, keeping their registries distinct. A private owner-thread coordinator
+prepares quest progress, typed reward operations and bounded award receipts,
+preflights both kernels and publishes without callbacks/interleaving. Failed rewards
+preserve the quest queue. Replay records suppression without granting rewards. See
+[R7 contracts and publication proof](docs/rpg-quests.md) and [evidence](docs/rpg-r7-validation.md).
+R8 adds canonical catalogue/snapshot bytes, strict compatibility and state validation,
+rebased standalone restore and one-swap combined RPG/quest restore. The sample outer
+envelope joins its checkpoint state to both kernels. No IO, migration, scene archive
+change or reward evaluation occurs during restore. See [R8 contracts](docs/rpg-snapshots.md)
+and [evidence](docs/rpg-r8-validation.md).
+R9 adds a shared primitive 3D sample controller and scene under examples/rpg,
+with thin browser and DesktopHost adapters. Application owns ticks; only explicit
+commands advance turns. Camera inspection is presentation-only. Scene-scoped handles
+are rebuilt on travel/load; interrupted playback snaps to committed positions before
+acknowledgement. The example uses existing WaypointGraph navigation and host-owned
+combined saves (localStorage / atomic DesktopFiles). No host dependency enters the
+RPG kernel. See [host contracts](docs/rpg-hosts.md) and [R9 evidence](docs/rpg-r9-validation.md).
+R10 adds a complete alternate standalone ruleset and the [release audit](docs/rpg-release-1.md).
+L1 retained API 1.7.0 / wire 1 and closed the RPG rendered CI gates with
+separate WARP/SwiftShader and Intel hardware evidence.
+Library stabilization L1 adds explicit `WEBENGINE_D3D12_WARP=1` diagnostic
+rendering for software-only Windows CI; default hardware selection remains strict.
+Adapter enumeration failures are checked before dereferencing returned interfaces.
+Native pipelines initialize valid disabled-state enums and check debug-layer
+errors before command submission. Non-layered unlit materials have a dedicated
+pixel shader preserving alpha, clipping, emission and fog semantics; browser
+pipelines already specialize material shaders. The sample shares primitive meshes
+to exercise batches; instance-buffer binding and lifetime remain unchanged.
+Linux software WebGPU acceptance uses full Chromium under Xvfb with Vulkan
+shared-image presentation and retains real frame/input/storage assertions and
+the normal GPU watchdog. See [L1 evidence](docs/rpg-l1-validation.md).
+
+Library milestone L2 adds persistent parties (active/reserve members, leader,
+control metadata) and explicit encounter teams to the portable RPG kernel.
+Party changes use atomic commands outside encounters; encounter team assignments
+are immutable and complete when supplied. Hosts own recruitment, AI, targeting and
+victory policy. API 1.8.0 supports v1 snapshots and a v2 party/team extension,
+while preserving v1 output for states without L2 data. Both rendered hosts use the
+shared party/team sample. See [L2 contracts](docs/rpg-parties.md) and
+[validation status](docs/rpg-l2-validation.md).
+Third-person camera policy, Lattice abilities, balance, factions and campaign/world state stay
 in RPGGame. Existing engine core, Quests and hosts never depend on RPG.
+
+Library milestone L5 adds synchronous bounded combat planning: hosts enumerate
+stamped tactical candidates, the ordinary transaction pipeline filters legality,
+and pure game scorers select with stable ID tie-breaking. Validated EndTurn is
+the explicit fallback. Stop tokens and runtime/turn/world stamps protect deferred
+execution; planning never publishes state or RNG. The RPGQuests coordinator
+forwards planning without exposing its kernels. Both sample hosts expose AI step;
+automatic scheduling, navigation and enemy policy remain game-owned. API 1.11.0
+retains L4 snapshot formats. See [contracts](docs/rpg-combat-ai.md) and
+[validation](docs/rpg-l5-validation.md).
+
+Library milestone L4 adds optional vitality over existing character resources,
+typed damage/healing/defeat/revival effects, incapacitated actor gates and
+nonempty-team defeat queries. Rulesets own formulas, resistance, revival costs,
+outcomes and checkpoint policy. Transactions publish life state with costs/RNG;
+runtime snapshot v3 stores profiles while v1/v2 remain supported. Both rendered
+hosts share the vitality sample. API 1.10.0; see
+[contracts](docs/rpg-vitality.md) and [validation](docs/rpg-l4-validation.md).
+
+Library milestone L3 adds pure, bounded, exact-integer 3D single/sphere/cone/line
+target queries, cast range, self/LOS and L2 team filters. An optional query in the
+existing immutable spatial quote enforces the complete selected set before and
+after BeforeAction reactions. Existing action transactions publish all costs,
+effects and RNG together. Host physics facts and authored shape/effect policy stay
+outside the kernel. API 1.9.0 leaves durable snapshot formats unchanged; shared
+Windows/browser sample actions exercise the new query. See [L3 contracts](docs/rpg-targeting.md)
+and [validation status](docs/rpg-l3-validation.md).
 
 ## Current architecture
 
@@ -77,6 +163,9 @@ slots remain (176 attribute bytes, packed to 176-byte stride on WebGL to satisfy
 its 255-byte limit); this is not GPU culling or indirect submission.
 Bulk components are transient, support static opaque/masked sources and exclude
 skinning/morph source topology, water, blending and projected decal reception.
+Direct D3D12 pipeline identity independently includes wind deformation and the
+non-layered unlit pixel-shader specialization. Shader embedding includes both
+families; neither presentation choice changes simulation state or resource ownership.
 Bounded WEFO 1 removal snapshots carry world/seed and stable IDs; storage and
 migration remain host/game responsibilities. Impostor generation, GPU culling,
 automatic terrain subscriptions and interactive bending are
@@ -185,6 +274,26 @@ Blender is not a runtime dependency. Asset IO, material selection, item IDs and 
 visibility remain application responsibilities. No frame, renderer or lifetime owner
 changes. UV seams needing split render vertices and simulation proxies are future work.
 See [exporter contracts](docs/cloth-exporter.md).
+
+### RPG equipment and rewards (L6-L7)
+
+Library milestone L7 adds optional equipment prerequisites, multi-slot occupancy
+and point-budgeted progression choices (API 1.13.0). Ordinary transactions validate
+every intermediate build before callbacks; respec requires explicit unequip first.
+Automatic and selected unlock ownership remain distinct. Catalogue v2 and runtime
+v4 extensions preserve older output when unused and validate build integrity on
+restore. Both hosts share mastery/equipment/respec controls. Game content, costs
+and specialization policy stay in consumers. See [contracts](docs/rpg-builds.md)
+and [validation](docs/rpg-l7-validation.md).
+
+Library milestone L6 adds bounded weighted loot and receipt-backed atomic reward
+bundles through the existing portable transaction pipeline (API 1.12.0).
+XP/items/status/resource grants, RNG and receipts publish together; full inventory
+rejects the bundle for an explicit game-owned retry. RPGQuests accepts loot in
+coordinated rewards and reserves its receipt namespace. Existing snapshots persist
+all consequences. Both hosts share Collect loot and quest loot examples. Content,
+eligibility and pending claims remain game-owned. See
+[contracts](docs/rpg-rewards.md) and [validation](docs/rpg-l6-validation.md).
 
 ### Optional planetary terrain, stages 1 and 2 (2026-10-23)
 
@@ -3086,3 +3195,14 @@ work budgets, tie ordering and cancellation invariants. No scheduling, renderer,
 IO or platform ownership is added. Core wire schema stays 1. Generic native/Wasm/
 browser contracts include saturation, rebase and retirement; Cafe envelope 9 adds
 content identity and long checkpoint/replay reports. See docs/simulator-compatibility.md.
+
+## RPG trading, crafting and replay (L8)
+
+Library milestone L8 (API 1.14.0) adds exact resource payments, receipt-backed
+bounded item trades and crafting through the existing atomic command pipeline.
+Game code owns recipes, prices, participants, currency and order identity. The
+existing ledger/snapshots retain all consequences without a new wire format.
+Detached bounded exploration replay reports the first failed command and exports
+the successful prefix; it adds no scheduler, IO or world-query authority.
+Windows/browser hosts share buy/sell/craft controls. See [contracts](docs/rpg-economy.md)
+and [validation](docs/rpg-l8-validation.md). Game adoption remains G12.

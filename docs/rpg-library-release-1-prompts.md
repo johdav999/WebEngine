@@ -4,7 +4,15 @@ These prompts implement [the RPG library architecture](rpg-library-architecture.
 R1 is implemented as documented in [rpg.md](rpg.md) with evidence in
 [rpg-validation.md](rpg-validation.md). R2 is delivered in
 [character/transaction contracts](rpg-characters.md) with
-[R2 evidence](rpg-r2-validation.md). Prompts 3-10 remain the sequential backlog.
+[R2 evidence](rpg-r2-validation.md). R3 delivers [inventory and equipment](rpg-inventory.md),
+with [R3 evidence](rpg-r3-validation.md). R4 adds [abilities/statuses/RNG](rpg-abilities.md),
+with [R4 evidence](rpg-r4-validation.md). R5 adds [encounter lifecycle and turn budgets](rpg-encounters.md),
+with [R5 evidence](rpg-r5-validation.md). R6 adds [tactical actions and spatial/reaction contracts](rpg-tactics.md),
+with [R6 evidence](rpg-r6-validation.md). R7 adds [coordinated quest rewards](rpg-quests.md),
+with [R7 evidence](rpg-r7-validation.md). R8 adds [canonical snapshots and safe restore](rpg-snapshots.md),
+with [R8 evidence](rpg-r8-validation.md). R9 adds [shared rendered hosts](rpg-hosts.md), with [R9 evidence](rpg-r9-validation.md).
+R10 delivers the [release handoff](rpg-release-1.md), two-ruleset consumer and adoption mapping.
+Unmet rendered release gates remain explicit in [R10 evidence](rpg-r10-validation.md).
 The original prompt text below is retained as the milestone acceptance scope.
 Run each prompt as a separate task in WebEngine; prompts 2-10 depend on the
 preceding delivered milestones. Keep working changes isolated and preserve other

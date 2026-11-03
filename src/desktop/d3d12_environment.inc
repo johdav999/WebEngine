@@ -16,7 +16,7 @@ ComPtr<ID3D12Resource> colorTarget(UINT w,UINT h,DXGI_FORMAT format,UINT samples
     device_->CreateRenderTargetView(image.Get(),nullptr,view);return image;
 }
 D3D12_GRAPHICS_PIPELINE_STATE_DESC fullPipeline() const {
-    D3D12_GRAPHICS_PIPELINE_STATE_DESC p{};p.pRootSignature=root_.Get();p.SampleMask=UINT_MAX;
+    auto p=pipelineDescription();p.pRootSignature=root_.Get();p.SampleMask=UINT_MAX;
     p.RasterizerState.FillMode=D3D12_FILL_MODE_SOLID;p.RasterizerState.CullMode=D3D12_CULL_MODE_NONE;p.RasterizerState.DepthClipEnable=TRUE;
     auto& b=p.BlendState.RenderTarget[0];b.SrcBlend=b.SrcBlendAlpha=D3D12_BLEND_ONE;b.DestBlend=b.DestBlendAlpha=D3D12_BLEND_ZERO;
     b.BlendOp=b.BlendOpAlpha=D3D12_BLEND_OP_ADD;b.RenderTargetWriteMask=D3D12_COLOR_WRITE_ENABLE_ALL;

@@ -1,11 +1,31 @@
 # Optional RPG library: release 1 architecture
 
-Status: release architecture with R1 foundation and R2 characters/transactions implemented. Created
+L7 adds equipment requirements, multi-slot displacement, selectable unlocks and
+atomic respec through the ordinary transaction API. API 1.13.0; catalogue v2 /
+runtime v4 extensions retain legacy formats when unused. Both sample hosts use
+the same rules. See [contracts](rpg-builds.md) and [validation](rpg-l7-validation.md).
+
+L6 is implemented locally: API 1.12.0 adds bounded weighted loot and atomic
+receipt-backed reward bundles, including quest coordination and both shared host
+adapters. Existing snapshot formats remain sufficient. Game content and pending
+claim policy stay outside the engine. See [contracts](rpg-rewards.md) and
+[validation](rpg-l6-validation.md); publication is pending approval.
+
+Status: release architecture with R1 foundation, R2 characters/transactions,
+R3 inventory/equipment, R4 abilities/statuses/RNG, R5 encounters, R6 tactical actions,
+R7 quest bridge, R8 snapshots/restore, R9 shared sample hosts and R10 release handoff implemented.
+L1 closes the [RPG acceptance gates](rpg-l1-validation.md); consumer adoption remains separate. Created
 2026-10-25 against WebEngine `56080eca124c9a62e15b146799a8004bdad5a9b2`.
 The delivered subset is documented in [rpg.md](rpg.md): optional RPG target,
 identities, metadata bindings/catalogue and runtime ownership, plus
 [R2 characters, modifiers, progression and transactions](rpg-characters.md).
-Inventory, combat, quest bridge, serialization and hosts below remain proposed.
+[R3 inventory and equipment](rpg-inventory.md) extend the same transaction.
+[R4 abilities, statuses and candidate randomness](rpg-abilities.md) are delivered.
+[R5 encounters, initiative, allowances and cooldown phases](rpg-encounters.md) are delivered.
+[R6 tactical actions, spatial quotes, reactions and presentation gates](rpg-tactics.md)
+are delivered. [R7 coordinated quest rewards](rpg-quests.md) are implemented.
+[R8 snapshots and combined restore](rpg-snapshots.md) are implemented.
+[R9 shared sample hosts](rpg-hosts.md) are implemented; see [platform evidence](rpg-r9-validation.md).
 Use [validation](rpg-validation.md) for actual evidence. Existing
 [Modules](modules.md), [Quests](quests.md), [SDK composition](module-sdk.md),
 [Application](application-lifecycle.md) and [host contracts](consumer-hosts.md)
@@ -52,7 +72,7 @@ them as example data. ElevenLabs/Tripo remain external authoring tools in RPGGam
 
 ## Targets, dependencies and source layout
 
-| Proposed target | Required dependencies | Responsibility |
+| Delivered target (except future game target) | Required dependencies | Responsibility |
 | --- | --- | --- |
 | `engine_rpg` / `WebEngine::RPG` | `WebEngine::Modules`, C++20 standard library | Catalogue, session state, transactions, characters, inventory, effects, turns, snapshots |
 | `engine_rpg_quests` / `WebEngine::RPGQuests` | `WebEngine::RPG`, `WebEngine::Quests` | Typed projection/reward helpers and coordinated publication contract |
@@ -66,11 +86,11 @@ library before two real consumers demonstrate reusable binding code; keep the
 first adapter in the sample and RPGGame. Do not introduce a second ECS, scene
 registry, scheduler, navigation system, physics engine, script VM or plugin loader.
 
-Proposed files:
+Source layout (bridge is composed in rpg/CMakeLists.txt, not a separate subdirectory):
 
 ```text
 rpg/CMakeLists.txt                 Standalone portable target and test options
-rpg/quests/CMakeLists.txt          Optional bridge
+src/rpg/quest_bridge.cpp          Optional bridge, composed by rpg/CMakeLists.txt
 cmake/rpg.cmake                   Root opt-in integration and demo selection
 include/engine/rpg/               Public typed contracts
   types.hpp bindings.hpp catalog.hpp state.hpp runtime.hpp snapshot.hpp
@@ -122,8 +142,10 @@ Avoid arbitrary expression graphs or multiplication chains in the first release.
 ## Transaction and extension contract
 
 Proposed flow is `prepare(command, context, budget)` then `commit(candidate)`.
-R2 delivers prepare/commit for character operations; spatial, encounter, RNG and
-later-system integration below remain future work.
+R2-R7 deliver prepare/commit for character, inventory/equipment, abilities, statuses,
+candidate RNG, encounter lifecycle, cooldowns, tactical actions, immutable spatial
+quotes, reactions and coordinated quest rewards/receipts. R8 adds detached snapshot validation and restore; host integration
+below is delivered by R9 with the recorded platform limitations.
 
 1. Check command owner/generation/revision/turn and producer sequence.
 2. Resolve definitions and targets against one immutable snapshot and world stamp.
@@ -151,7 +173,10 @@ preempt malicious compiled code: providers are trusted, reviewed application cod
 
 ## Turn-based encounters and movement
 
-Release 1 uses an explicit state machine: inactive, awaiting command, preparing
+R5 commits inactive/awaiting-command/finished encounter states. R6 delivers tactical
+spending and a separate committed presentation gate that also covers terminal
+outcomes. R9 supplies host reservation/playback adapters in the optional sample. The following describes
+the complete release architecture. Release 1 uses an explicit state machine: inactive, awaiting command, preparing
 resolution, committed presentation pending, next turn, finished. Preparation is
 synchronous and private; the host observes only committed states. The encounter
 records a bounded roster, round, turn epoch, active participant, ordered initiative,
@@ -196,6 +221,10 @@ safe route/destination, reject before commit. Continuous physics-controlled comb
 movement with partial refunds/replans is explicitly beyond release 1.
 
 ## Quest coordination and progression
+
+R7 now implements the private-runtime coordinator and proves sequential no-throw
+publication in [rpg-quests.md](rpg-quests.md). R8 adds combined restore through one detached kernel-aggregate swap; see
+[rpg-snapshots.md](rpg-snapshots.md).
 
 Reuse Quests for objectives, stages, facts, events and completion receipts. The
 bridge projects explicit RPG facts and maps typed quest effects to staged RPG
@@ -291,17 +320,49 @@ procedural campaigns and a full RPG editor from release 1.
 
 ## Engine-skill synchronization handoff
 
-AGENTS.md requires the installed engine-skill and CatGame mirror to track
-architecture changes. Its configured `C:/Users/Johan/...` locations and the
-corresponding EJOHDAV engine-skill copies were not present during this documentation
-task. No skill copy was created or replaced. When those existing copies are
-available, merge this navigation entry into SKILL.md and its architecture reference:
+R10 synchronizes available installed and game-local skill copies with the
+release handoff, API 1.7.0 / wire 1 and the rendered acceptance contract. L1 updates
+the copies for validated software CI and separate hardware evidence.
+See [L1 evidence](rpg-l1-validation.md). Consumer pins must still be checked;
+RPGGame adoption is tracked in its own repository; this library task does not
+advance consumer pins.
 
-> RPG library planning: read docs/rpg-library-architecture.md and
-> docs/rpg-library-release-1-prompts.md. Read docs/rpg.md for the delivered R1
-> RPG foundation; RPGQuests and gameplay APIs remain planned. Reuse Modules/Quests; keep portable RPG mechanisms optional and
-> keep game definitions, Lattice rules, presentation and save policy in consumers.
-> Require native Windows and browser evidence before claiming release support.
+## Library milestone L2 (implemented)
 
-Preserve all existing and CatGame-specific skill guidance. Future implementation
-tasks must update the available skill copies with actual APIs and validation.
+API 1.8.0 provides persistent parties with ordered active/reserve membership,
+leader and control metadata, plus complete immutable encounter team assignments.
+Party replacement/removal use the existing transaction lifecycle. Hosts retain
+recruitment, AI, targeting and victory policy. Runtime snapshots retain v1
+compatibility and add a v2 party/team extension. Both hosts share the updated
+sample. See [contracts](rpg-parties.md) and [validation](rpg-l2-validation.md).
+
+## Library milestone L5 (implemented)
+
+API 1.11.0 provides bounded combat candidate evaluation through ordinary tactical
+transactions, pure game utility scoring, stable ID ties, validated end-turn
+fallback and stop-token cancellation through final publication. Plans retain
+private command identity and revalidate before execution. The optional quest
+coordinator and both sample hosts use the same implementation. No scheduler,
+navigation or enemy-specific policy enters the kernel; wire formats are unchanged.
+See [contracts](rpg-combat-ai.md) and [validation](rpg-l5-validation.md).
+
+## Library milestone L4 (implemented)
+
+API 1.10.0 adds optional vitality profiles over existing resources, typed
+damage/healing/defeat/revival effects, turn/reaction eligibility and team defeat
+queries. Game handlers retain formulas, resistance, revival eligibility/costs,
+outcome and checkpoint decisions. Runtime snapshot v3 persists life state;
+untracked v1/v2 saves retain legacy behavior. Shared Windows/browser examples
+exercise the pipeline. See [contracts](rpg-vitality.md) and
+[validation](rpg-l4-validation.md).
+
+## Library milestone L3 (implemented)
+
+API 1.9.0 adds bounded deterministic 3D single, sphere, 90-degree cone and line
+selection, cast range, explicit self/LOS filtering and L2 team relations. Pure
+previews share the selection implementation enforced by tactical preparation when
+a query is attached to the spatial quote. Existing transactions apply complete
+area effects/costs/RNG atomically and retain the presentation gate. Hosts own
+physics/LOS facts and ability-specific shape/friendly-fire/cover/falloff policy.
+Snapshots retain L2 wire compatibility. See [contracts](rpg-targeting.md) and
+[validation](rpg-l3-validation.md).

@@ -1963,8 +1963,8 @@ downloads on native Windows/Linux and Wasm. See [API and ownership](docs/rpg.md)
 and [validation evidence](docs/rpg-validation.md).
 
 R2 adds [characters, resources, modifiers, progression and atomic transactions](docs/rpg-characters.md),
-with [native/Wasm validation](docs/rpg-r2-validation.md). Inventory, abilities,
-turn-based encounters, snapshots, RPGQuests and rendered hosts remain in the [release architecture](docs/rpg-library-architecture.md)
+with [native/Wasm validation](docs/rpg-r2-validation.md).
+Turn-based encounters, snapshots and optional RPGQuests are delivered; [rendered hosts](docs/rpg-hosts.md) are delivered with [explicit acceptance limits](docs/rpg-r9-validation.md). See the [release architecture](docs/rpg-library-architecture.md)
 and [ten implementation prompts](docs/rpg-library-release-1-prompts.md). RPGGame
 owns The Shattered Sea's rules, balance, world, story and third-person presentation.
 
@@ -1997,3 +1997,31 @@ action UI and deterministic balance-policy reports remain host-owned; CafeGame
 provides the reference consumer. See [authoring contracts](docs/simulator-authoring.md).
 
 Simulator stage 16 adds optional content/checkpoint fingerprints, retained-record metrics and clock-only fast paths. Hosts own explicit migrations and stress policy. See docs/simulator-compatibility.md for contracts and simulator-release.md for evidence.
+## RPG extensions and validation
+
+R3 delivers [inventory and equipment transactions](docs/rpg-inventory.md),
+with [cross-platform validation](docs/rpg-r3-validation.md).
+The neutral inventory definitions cover weapon/consumable and tool/loadout policies.
+
+R4 adds [abilities, statuses and candidate RNG](docs/rpg-abilities.md)
+with [native/Wasm evidence](docs/rpg-r4-validation.md). The ability sample
+provides random damage, item-consuming healing and non-damage resource effects.
+
+RPG R5: [encounter lifecycle, initiative, turn budgets and cooldown phases](docs/rpg-encounters.md);
+[Windows/Linux/Wasm validation](docs/rpg-r5-validation.md). Tactical actions and rendered
+hosts remain later milestones.
+
+RPG R6: [tactical actions, immutable spatial quotes, bounded reactions and
+presentation recovery](docs/rpg-tactics.md); [validation](docs/rpg-r6-validation.md).
+R9 supplies optional browser/Windows hosts with route reservation and frozen writers.
+See [build/run instructions](docs/rpg-hosts.md) and [validation](docs/rpg-r9-validation.md).
+
+RPG R7: optional [quest bridge, award ledger and publication proof](docs/rpg-quests.md);
+[Windows/Linux/Wasm evidence](docs/rpg-r7-validation.md). Base RPG remains independent
+of Quests. R8 adds [canonical snapshots and coordinated restore](docs/rpg-snapshots.md),
+with [platform evidence](docs/rpg-r8-validation.md) and a sample-owned outer save envelope.
+
+R10: [release audit and consumer guide](docs/rpg-release-1.md),
+[validation](docs/rpg-r10-validation.md), and [RPGGame adoption mapping](docs/rpg-game-adoption.md).
+L1: [release stabilization and passing RPG platform gates](docs/rpg-l1-validation.md),
+including software CI and separate Windows hardware evidence. Consumer pins remain unchanged.

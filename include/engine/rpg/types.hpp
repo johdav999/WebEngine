@@ -8,13 +8,21 @@
 #include <utility>
 
 namespace engine::rpg {
-inline constexpr ModuleVersion apiVersion{1, 1, 0};
-// R1 publishes no snapshot wire format. Content revisions are application-owned.
+inline constexpr ModuleVersion apiVersion{1, 14, 0};
+// API, content revision and snapshot wire version are independent.
 struct Limits {
+    static constexpr std::size_t lootEntries = 64, lootRolls = 32, rewardTables = 16;
+    static constexpr std::size_t parties = 64, partyMembers = 64, teams = 16;
+    static constexpr std::size_t awards = 16384, receiptBytes = 257;
+    static constexpr std::size_t pathPoints = 256, reactions = 256, reactionDepth = 8;
+    static constexpr std::size_t participants = 64, encounterWork = 4096, cooldowns = 64;
     static constexpr std::size_t keyBytes = 128, definitions = 4096, handlers = 256;
     static constexpr std::size_t characters = 1024, values = 64, modifierSources = 64,
         modifiers = 256, thresholds = 256, unlocks = 256, producers = 64,
         operations = 256, advancements = 256;
+    static constexpr std::size_t inventories = 1024, items = 16384, inventorySlots = 256, equipmentSlots = 32;
+    static constexpr std::size_t effects = 256, randomDraws = 4096, targets = 64, parameters = 64,
+        statuses = 128, totalStatuses = 16384, statusStacks = 32, statusDuration = 65535, results = 512;
 };
 enum class ErrorCode {
     InvalidId, Limit, InvalidVersion, DuplicateDefinition, DuplicateHandler,
@@ -22,7 +30,7 @@ enum class ErrorCode {
     InvalidSession, ExhaustedIdentity, InvalidDefinition, MissingDefinition,
     InvalidAmount, Overflow, StaleCommand, InvalidSequence, Reentrant,
     MissingEntity, MissingValue, InvalidModifier, BudgetExceeded, RejectedUnlock,
-    ConsumedTransaction
+    ConsumedTransaction, MissingInventory, MissingItem, InvalidQuantity, Capacity, InvalidSlot, InvalidOwnership, IncompatibleStack, RejectedEffect, InvalidTarget, InvalidStatus, StalePhase, InvalidEncounter, StaleTurn, RejectedEncounter, InvalidSpatial, StaleWorld, InvalidAction, PresentationPending, StalePresentation, InvalidAward, DuplicateAward, InvalidSnapshot, InvalidParty, InvalidTeam, InvalidVitality, InvalidBuild
 };
 class Error : public std::invalid_argument {
 public:
@@ -62,6 +70,12 @@ struct EntityId {
     SessionId session;
     std::uint64_t value;
     auto operator<=>(const EntityId&) const = default;
+};
+
+struct ItemId {
+    SessionId session;
+    std::uint64_t value;
+    auto operator<=>(const ItemId&) const = default;
 };
 
 // Host chooses a unique durable namespace. Zero next means exhausted, not wrapped.

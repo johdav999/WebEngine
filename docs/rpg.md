@@ -1,11 +1,17 @@
-# Optional RPG library (R1-R2)
+# Optional RPG library (R1-R10)
 
 R1 implements `engine_rpg` / `WebEngine::RPG`: a standard-C++20 static library
 depending only on [Modules](modules.md). It supplies typed identities, validated
 catalogue metadata, provider registration and independent runtime ownership.
 R2 adds [characters, modifiers, progression and shared transactions](rpg-characters.md).
-Inventory, combat, quest bridge, snapshots, scene integration, scheduler and renderer
-remain outside the delivered library. Those remain later milestones
+R3 adds [inventory, durable items and equipment transactions](rpg-inventory.md).
+R4 adds [abilities, statuses and deterministic randomness](rpg-abilities.md).
+R5 adds [encounters, initiative, turn allowances and cooldowns](rpg-encounters.md).
+R6 adds [tactical actions, spatial quotes, reactions and presentation gates](rpg-tactics.md).
+R7 adds the separately optional [quest bridge and award ledger](rpg-quests.md).
+R8 adds [canonical snapshots and safe restore](rpg-snapshots.md).
+R9 adds the optional [shared rendered hosts](rpg-hosts.md); the library owns no scheduler or renderer. R10 adds the [release handoff](rpg-release-1.md),
+two-ruleset consumer and [adoption mapping](rpg-game-adoption.md). See scope
 in the [architecture](rpg-library-architecture.md) and
 [release prompts](rpg-library-release-1-prompts.md).
 
@@ -37,8 +43,9 @@ target_link_libraries(my_game PRIVATE WebEngine::RPG)
 
 Root builds include the same optional `rpg/` subdirectory through `cmake/rpg.cmake`.
 All four RPG options default OFF. `WEBENGINE_BUILD_RPG=ON` requires the existing
-Modules target. Tests require RPG enabled. `WEBENGINE_BUILD_RPG_QUESTS=ON` and
-`WEBENGINE_BUILD_RPG_DEMO=ON` fail clearly because R7/R9 are not implemented.
+Modules target. Tests require RPG enabled. `WEBENGINE_BUILD_RPG_QUESTS=ON` additionally requires the existing Quests target.
+`WEBENGINE_BUILD_RPG_DEMO=ON` selects the root-only rendered sample and requires
+RPGQuests. Standalone kernel consumers reject this host option explicitly.
 Omitting RPG creates no RPG target/test and has no effect on other libraries.
 This is source/CMake composition with one compatible toolchain, not a binary ABI.
 
@@ -51,10 +58,10 @@ Headers are `engine/rpg/types.hpp`, `bindings.hpp`, `catalog.hpp` and `runtime.h
   underscore or hyphen within nonempty segments. Leading/trailing/repeated dots,
   uppercase, whitespace and non-ASCII bytes reject.
 - `ContentRevision` is an explicitly constructed positive uint64 selected by the
-  application. It is independent of `apiVersion` (currently 1.1.0).
+  application. It is independent of `apiVersion` (currently 1.7.0).
 - `SessionId` is a nonzero uint64 durable namespace chosen by the host. The host
   must ensure uniqueness between distinct persistent sessions. No global ID
-  registry, random namespace generator or save restore is supplied.
+  registry or random namespace generator is supplied. Restore requires a matching namespace.
 - `EntityId` contains a SessionId and a numeric value. The allocator issues positive
   values monotonically, including UINT64_MAX once; zero cursor then means exhausted.
   `EntityIds` supports an explicit initial cursor for construction/testing; it is
@@ -68,13 +75,12 @@ Headers are `engine/rpg/types.hpp`, `bindings.hpp`, `catalog.hpp` and `runtime.h
 
 `Limits` caps keys at 128 bytes, catalogue records at 4096 and registry handlers
 at 256. R2 adds character, modifier, producer and transaction caps documented in
-[the character contract](rpg-characters.md). Limits reject without truncation. No content/snapshot wire schema or
-fingerprint is advertised in R1; R8 will define them independently from module API
-and application content revision. Runtime IDs are not scene handles.
+[the character contract](rpg-characters.md). Limits reject without truncation. R8 defines a separate version-1 catalogue/snapshot wire format and exact catalogue
+compatibility descriptor, independent of module API and application content revision. Runtime IDs are not scene handles.
 
 ## Explicit composition and validation
 
-`moduleRegistration()` supplies `webengine.rpg`, API version 1.1.0, with no implicit
+`moduleRegistration()` supplies `webengine.rpg`, API version 1.7.0, with no implicit
 handlers or schema claims. Game modules declare a dependency on this registration
 and install typed `DefinitionHandler` entries into staging `Bindings`. A handler
 has a positive uint32 version and a required `void(const Definition&)` validator.
@@ -131,8 +137,8 @@ actor, character or entity record. `nextEntity` exposes the next cursor for
 diagnostics, not save bytes. Exhausted allocation throws without changing state.
 R2 adds character state and a shared transaction boundary; see
 [command, revision and lifetime contracts](rpg-characters.md). Allocation now
-advances revision and invalidates prepared commands/candidates. No RNG, event
-scheduler or wire snapshots are introduced.
+advances revision and invalidates prepared commands/candidates. R4 adds candidate
+RNG with a versioned state encoding; there is no event scheduler. R8 supplies full durable snapshots.
 
 Composition replacement/destruction does not invalidate retained sessions.
 Runtime state is destroyed before its catalogue. The catalogue retains immutable
@@ -141,7 +147,10 @@ before releasing installer captures in reverse dependency order. Other retained
 registrations/snapshots may extend those lifetimes; no dynamic code unload exists.
 
 R2 extends these types with character/resource state, owner/generation/revision
-stamps and producer sequencing. R3 must reuse that transaction boundary for
-inventory and equipment. Future snapshot versions remain separate. The [external consumer](../examples/rpg/consumer.cpp)
+stamps and producer sequencing. R3 reuses that boundary for inventory/equipment,
+and R4 for abilities/statuses/RNG. Snapshot wire versions remain separate from API and content versions. The [external consumer](../examples/rpg/consumer.cpp)
 proves isolated identity allocation and usable retained definitions. See
 [validation evidence](rpg-validation.md) for actual checks and limitations.
+
+
+L8: API 1.14.0 adds [trading, crafting and diagnostic replay](rpg-economy.md).
