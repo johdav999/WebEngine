@@ -201,7 +201,7 @@ private:
         std::vector<ParticleInstance> particleShadow;
         std::vector<RibbonVertex> ribbonShadow;
         FogUniform fog;
-        std::array<std::byte,2464> frameUniformShadow{};
+        std::array<std::byte,2592> frameUniformShadow{};
         std::array<wgpu::Buffer,maxShadowLights> shadowBuffers;
         std::array<wgpu::BindGroup,maxShadowLights> shadowBindings;
         std::array<Mat4,maxShadowLights> shadowMatrices{};

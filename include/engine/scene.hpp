@@ -39,7 +39,7 @@ struct MeshDraw {
     bool receivesDecals=true;
     std::uint32_t visibilityMask=1;
 };
-struct SceneLight { LightType type; Vec3 position, direction, color; float intensity, range; ShadowSettings shadow; Vec3 shadowCenter; };
+struct SceneLight { LightType type; Vec3 position, direction, color; float intensity, range; ShadowSettings shadow; Vec3 shadowCenter; float innerCone=.20f,outerCone=.35f; };
 struct SceneFrame {
     std::vector<MeshDraw> meshes;
     std::vector<SceneLight> lights;

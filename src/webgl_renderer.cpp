@@ -127,7 +127,7 @@ uniform vec2 waterExtent;
 uniform vec3 viewForward;
 uniform vec4 tint,uvTransform;
 uniform vec3 ambient,emissive;
-uniform vec4 lightPosition[8],lightDirection[8],lightColor[8];
+uniform vec4 lightPosition[8],lightDirection[8],lightColor[8],lightCone[8];
 uniform int lightCount;
 uniform bool unlit,toneMapped;
 #ifdef ENGINE_GL_SIMPLE_MATERIAL
@@ -292,6 +292,7 @@ void main() {
         bool directional=lightPosition[i].w<0.5;
         vec3 direction=directional ? -lightDirection[i].xyz : delta/max(distance,0.0001);
         float attenuation=directional ? 1.0 : pow(max(1.0-distance/max(lightDirection[i].w,0.0001),0.0),2.0);
+        if(lightPosition[i].w>1.5) attenuation*=smoothstep(lightCone[i].y,lightCone[i].x,dot(-direction,normalize(lightDirection[i].xyz)));
         lighting+=lightColor[i].rgb*lightColor[i].a*max(dot(n,direction),0.0)*attenuation;
         if(water) {
             vec3 h=(viewDirection+direction)*inversesqrt(max(dot(viewDirection+direction,viewDirection+direction),0.0001));
@@ -640,15 +641,15 @@ void WebGlRenderer::drawMesh(const MeshDraw& draw,const Mat4& vp,const SceneFram
     glUniform1i(glGetUniformLocation(activeProgram,"toneMapped"),m.shader!=MaterialShader::Unlit);
     glUniform1i(glGetUniformLocation(activeProgram,"masked"),m.alphaMode==AlphaMode::Mask);
     glUniform1f(glGetUniformLocation(activeProgram,"cutoff"),m.alphaCutoff);
-    const auto count=std::min(std::size_t(8),frame.lights.size());std::array<float,32> positions{},directions{},colors{};
+    const auto count=std::min(std::size_t(8),frame.lights.size());std::array<float,32> positions{},directions{},colors{},cones{};
     for(std::size_t i=0;i<count;++i) {
         const auto& l=frame.lights[i];const auto k=i*4;
-        positions[k]=l.position.x;positions[k+1]=l.position.y;positions[k+2]=l.position.z;positions[k+3]=l.type==LightType::Directional ? 0:1;
+        positions[k]=l.position.x;positions[k+1]=l.position.y;positions[k+2]=l.position.z;positions[k+3]=static_cast<float>(l.type);
         directions[k]=l.direction.x;directions[k+1]=l.direction.y;directions[k+2]=l.direction.z;directions[k+3]=l.range;
-        colors[k]=l.color.x;colors[k+1]=l.color.y;colors[k+2]=l.color.z;colors[k+3]=l.intensity;
+        colors[k]=l.color.x;colors[k+1]=l.color.y;colors[k+2]=l.color.z;colors[k+3]=l.intensity;cones[k]=std::cos(l.innerCone);cones[k+1]=std::cos(l.outerCone);
     }
     glUniform1i(glGetUniformLocation(activeProgram,"lightCount"),count);
-    if(count) { glUniform4fv(glGetUniformLocation(activeProgram,"lightPosition"),count,positions.data());glUniform4fv(glGetUniformLocation(activeProgram,"lightDirection"),count,directions.data());glUniform4fv(glGetUniformLocation(activeProgram,"lightColor"),count,colors.data()); }
+    if(count) { glUniform4fv(glGetUniformLocation(activeProgram,"lightPosition"),count,positions.data());glUniform4fv(glGetUniformLocation(activeProgram,"lightDirection"),count,directions.data());glUniform4fv(glGetUniformLocation(activeProgram,"lightColor"),count,colors.data());glUniform4fv(glGetUniformLocation(activeProgram,"lightCone"),count,cones.data()); }
     glUniform1i(glGetUniformLocation(activeProgram,"fogWorld"),draw.layer==RenderLayer::World);glUniform1i(glGetUniformLocation(activeProgram,"fogAdditive"),draw.blend==BlendMode::Additive);
     blend(draw.blend);glFrontFace((draw.mirrored!=reflectionPass_) ? GL_CW : GL_CCW);
     if(m.doubleSided) glDisable(GL_CULL_FACE);else { glEnable(GL_CULL_FACE);glCullFace(GL_BACK); }

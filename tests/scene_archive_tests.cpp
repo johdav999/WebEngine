@@ -49,6 +49,7 @@ int main(int argc,char** argv) { try {
     auto& generic=actor.addChild<Component>("Generic component");generic.addChild<Node>("Plain node").enabled=false;
     auto& sun=scene.addChild<LightComponent>("Sun",LightType::Directional);sun.shadow.enabled=true;sun.shadow.center={1,2,3};sun.shadow.halfExtent=20;sun.visibilityMask=8;
     auto& point=scene.addChild<LightComponent>("Point",LightType::Point);point.color={1,0.3f,0.1f};point.intensity=4;point.range=12;
+    auto& spot=scene.addChild<LightComponent>("Spot",LightType::Spot);spot.innerCone=.11f;spot.outerCone=.31f;spot.direction={0,-.2f,1};
     const auto animated=FbxImporter::loadFile(std::filesystem::path(FBX_FIXTURE_DIR)/"skeletal_column_ascii.fbx");
     auto& skeletal=actor.addChild<SkeletalMeshComponent>("Animated",animated);skeletal.color={1,1,1};
     skeletal.animation().enableRootMotion(1);
@@ -83,6 +84,7 @@ int main(int argc,char** argv) { try {
     check(loaded.views.size()==2&&loaded.views[0].camera==&named<CameraComponent>(copy,"Camera")&&!loaded.views[1].clearColor,"View order, camera references and clear modes");
     check(loaded.views[0].camera->farPlane==400&&loaded.views[0].camera->visibilityMask()==5&&named<CameraComponent>(copy,"Overview").orthographicHeight()==24,"Perspective and orthographic lens settings");
     check(named<LightComponent>(copy,"Sun").shadow.halfExtent==20&&named<LightComponent>(copy,"Point").range==12,"Shadow and light settings");
+    check(named<LightComponent>(copy,"Spot").type==LightType::Spot&&named<LightComponent>(copy,"Spot").innerCone==.11f&&named<LightComponent>(copy,"Spot").outerCone==.31f,"Spotlight cone archive round trip");
     check(copy.environment->specular[0].pixels==scene.environment->specular[0].pixels&&copy.environmentIntensity==1.3f,"Baked environment retained exactly");
     check(loaded.applicationData==std::vector<std::byte>(metadata.begin(),metadata.end()),"Opaque application metadata");
     auto& animation=named<SkeletalMeshComponent>(copy,"Animated");

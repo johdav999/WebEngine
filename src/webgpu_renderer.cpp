@@ -30,12 +30,12 @@ std::string messageText(wgpu::StringView message) {
     return message.data ? std::string(message.data, message.length == WGPU_STRLEN ? std::strlen(message.data) : message.length) : std::string{};
 }
 struct alignas(16) Float4 { float x=0,y=0,z=0,w=0; };
-struct GpuLight { Float4 positionType,directionRange,colorIntensity; };
+struct GpuLight { Float4 positionType,directionRange,colorIntensity,cone; };
 struct GpuShadow { Mat4 viewProjection; Float4 options; };
 struct FrameUniform { Mat4 viewProjection; Float4 ambientCount; std::array<GpuLight,WebGpuRenderer::maxLights> lights; Float4 cameraEnvironment,environmentOptions; std::array<GpuShadow,WebGpuRenderer::maxLights> shadows; Float4 waterClock; Mat4 inverseViewProjection; Float4 viewport,extent,viewForward; Mat4 reflectionViewProjection; Float4 reflectionPlane,reflectionOptions; WaterInteractionParameters interactions; FogUniform fog; };
 struct ParticleCamera { Mat4 viewProjection;Float4 right,up; FogUniform fog; Mat4 inverseVp;Float4 viewport,forward; };
 static_assert(sizeof(ParticleCamera)==256);
-static_assert(sizeof(FrameUniform)==2464 && sizeof(ObjectUniform)==160);
+static_assert(sizeof(FrameUniform)==2592 && sizeof(ObjectUniform)==160);
 constexpr std::uint32_t objectStride=RenderFrame::objectStride;
 wgpu::Buffer makeBuffer(const wgpu::Device& device,std::uint64_t size,wgpu::BufferUsage usage,const char* label) {
     wgpu::BufferDescriptor desc{}; desc.label=label; desc.size=size; desc.usage=usage|wgpu::BufferUsage::CopyDst;
@@ -842,6 +842,8 @@ void WebGpuRenderer::uploadSkeleton(const std::shared_ptr<const SkinPose>& pose)
     gpu.source=pose;
 }
 void WebGpuRenderer::render(double updateMs,double intervalMs) {
+    static_assert(sizeof(ViewResources::frameUniformShadow)==sizeof(FrameUniform),
+                  "Frame uniform cache must match the uploaded layout");
     if(!ready_) return;
     try {
         const auto started=emscripten_get_now();FrameTiming timing{};timing.updateMs=updateMs;timing.intervalMs=intervalMs;counters_={};resourceMs_=0;++frameSerial_;
@@ -919,8 +921,8 @@ void WebGpuRenderer::render(double updateMs,double intervalMs) {
             std::size_t shadowCount=0;
             for(auto& shadow:uniforms.shadows) shadow.options.x=-1;
             for(std::size_t i=0;i<count;++i) {
-                const auto& l=frame.lights[i]; uniforms.lights[i]={{l.position.x,l.position.y,l.position.z,l.type==LightType::Point ? 1.0f : 0.0f},
-                    {l.direction.x,l.direction.y,l.direction.z,l.range},{l.color.x,l.color.y,l.color.z,l.intensity}};
+                const auto& l=frame.lights[i]; uniforms.lights[i]={{l.position.x,l.position.y,l.position.z,static_cast<float>(l.type)},
+                    {l.direction.x,l.direction.y,l.direction.z,l.range},{l.color.x,l.color.y,l.color.z,l.intensity},{std::cos(l.innerCone),std::cos(l.outerCone),0,0}};
                 if(shadowsEnabled_&&quality_.maxShadowMaps>0&&l.shadow.enabled&&l.intensity>0) {
                     if(shadowCount==quality_.maxShadowMaps) {
                         if(quality_.maxShadowMaps==maxShadowLights&&!shadowOverflowReported_) { emscripten_log(EM_LOG_WARN,"WebGpuRenderer uses first four shadow-casting directional lights");shadowOverflowReported_=true; }

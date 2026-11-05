@@ -310,13 +310,14 @@ void Scene::collect(SceneFrame& frame,std::uint32_t visibilityMask,const Frustum
             const auto rc=frame.ribbons.capacity();emitter->appendRibbons(frame.ribbons,world);frame.storageGrowths+=rc!=frame.ribbons.capacity();
         }
         if(const auto* light=dynamic_cast<const LightComponent*>(&node); light && (light->visibilityMask&visibilityMask)) {
+            light->validate();
             if(light->shadow.enabled) {
                 light->shadow.validate();
                 if(light->type!=LightType::Directional) throw std::invalid_argument("Shadow maps currently require a directional light");
                 directionalShadowMatrix(transformDirection(world,light->direction),transformPoint(world,light->shadow.center),light->shadow,1024);
             }
             const auto capacity=frame.lights.capacity();
-            frame.lights.push_back({light->type,transformPoint(world,{}),normalized(transformDirection(world,light->direction)),light->color,light->intensity,light->range,light->shadow,transformPoint(world,light->shadow.center)});
+            frame.lights.push_back({light->type,transformPoint(world,{}),normalized(transformDirection(world,light->direction)),light->color,light->intensity,light->range,light->shadow,transformPoint(world,light->shadow.center),light->innerCone,light->outerCone});
             frame.storageGrowths+=capacity!=frame.lights.capacity();
         }
     },Mat4::identity(),&frame.transformRebuilds);

@@ -42,14 +42,15 @@ void registerBuiltinPrefabComponents(ComponentFactoryRegistry& registry) {
         component->setViewport(settings.viewport);component->setVisibilityMask(settings.visibilityMask);component->setFollow(settings.follow);return component;
     });
     next.registerFactory<PrefabLightSettings>("LightComponent",1,[](const auto& settings) {
-        if((settings.type!=LightType::Directional && settings.type!=LightType::Point) || !finite(settings.color) || !finite(settings.direction)
+        if((settings.type!=LightType::Directional && settings.type!=LightType::Point && settings.type!=LightType::Spot) || !finite(settings.color) || !finite(settings.direction)
             || !std::isfinite(settings.intensity) || settings.intensity<0 || !std::isfinite(settings.range) || settings.range<=0
             || dot(settings.direction,settings.direction)<1e-12f)
             throw std::invalid_argument("Invalid prefab light settings");
         settings.shadow.validate();
         auto component=std::make_unique<LightComponent>("Light",settings.type);
         component->color=settings.color;component->direction=settings.direction;component->intensity=settings.intensity;
-        component->range=settings.range;component->visibilityMask=settings.visibilityMask;component->shadow=settings.shadow;return component;
+        component->range=settings.range;component->innerCone=settings.innerCone;component->outerCone=settings.outerCone;
+        component->visibilityMask=settings.visibilityMask;component->shadow=settings.shadow;component->validate();return component;
     });
     next.registerFactory<std::shared_ptr<const CollisionShape>>("ColliderComponent",1,[](const auto& shape) {
         return std::make_unique<ColliderComponent>("Collider",shape);

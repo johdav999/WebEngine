@@ -1130,3 +1130,10 @@ source counts and charges derived allocation before rebuilding each route once.
 Generated geometry is not an independent serialized cache; required child identities
 remain persisted. Readers retain versions 1..27, with older records unchanged.
 Prefab factories accept shared RouteAsset. See [contracts](docs/splines-routes.md).
+
+### Consumer spotlight extension
+
+This RacingGame baseline adds ordinary LightComponent spot cones on WebGPU and
+WebGL2, including prefab/editor/archive v28 support. Applications retain light
+selection and vehicle policy; spotlight shadows remain unsupported on this branch.
+See [spotlight contracts](docs/spotlights.md).

@@ -50,6 +50,14 @@ int main() {
         light.type=LightType::Point;rejects([&] { scene.collect(); });light.type=LightType::Directional;
         light.direction={};rejects([&] { scene.collect(); });light.enabled=false;check(scene.collect().lights.empty(),"Disabled invalid lights cannot leave stale shadows");
         PerformanceMonitor monitor;monitor.recordGpu({1,2,3},10,4);
+        auto& spot=parent.addComponent<LightComponent>("Headlight",LightType::Spot);
+        spot.direction={0,0,1};spot.innerCone=.12f;spot.outerCone=.4f;spot.range=24;
+        auto lights=scene.collect().lights;
+        check(lights.size()==1&&lights[0].type==LightType::Spot&&near(lights[0].innerCone,.12f)&&near(lights[0].outerCone,.4f),"Spot cone survives scene collection");
+        spot.innerCone=.5f;rejects([&]{scene.collect();});spot.innerCone=.12f;
+        spot.outerCone=pi;rejects([&]{scene.collect();});spot.outerCone=.4f;
+        spot.intensity=std::numeric_limits<float>::quiet_NaN();rejects([&]{scene.collect();});spot.intensity=1;
+        spot.shadow.enabled=true;rejects([&]{scene.collect();});spot.shadow.enabled=false;
         const auto json=monitor.json(10,"enabled");
         check(json.find("\"totalMs\":{\"mean\":10.000000")!=std::string::npos&&json.find("\"shadowMs\":{\"mean\":4.000000")!=std::string::npos,"GPU total includes separately reported shadow duration");
         std::cout<<"Shadow projection, scene participation, staging and timing tests passed\n";

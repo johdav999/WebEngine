@@ -9,7 +9,7 @@ override materialOcclusionMap: bool = false;
 override materialEmissiveMap: bool = false;
 override materialReflectionPass: bool = false;
 // FOG_FUNCTIONS
-struct Light { positionType: vec4f, directionRange: vec4f, colorIntensity: vec4f };
+struct Light { positionType: vec4f, directionRange: vec4f, colorIntensity: vec4f, cone: vec4f };
 struct Shadow { viewProjection: mat4x4f, options: vec4f }; // layer, depth bias, normal bias, texel size
 struct Frame {
     viewProjection: mat4x4f, ambientCount: vec4f, lights: array<Light,8>,
@@ -327,6 +327,7 @@ fn shade(input: VertexOutput,front: bool) -> vec4f {
         if(light.positionType.w>0.5) {
             let delta=light.positionType.xyz-input.world;let distance=max(length(delta),0.001);l=delta/distance;
             attenuation=pow(clamp(1-distance/max(light.directionRange.w,0.001),0,1),2);
+            if(light.positionType.w>1.5) { attenuation*=smoothstep(light.cone.y,light.cone.x,dot(-l,safeNormal(light.directionRange.xyz,vec3f(0,-1,0)))); }
         }
         lighting+=directBrdf(normal,v,l,base,rough,metal,f0)*light.colorIntensity.xyz*light.colorIntensity.w*attenuation*shadowVisibility(i,input,normal,l);
     }
@@ -348,6 +349,7 @@ fn shade(input: VertexOutput,front: bool) -> vec4f {
             if(light.positionType.w>0.5) {
                 let delta=light.positionType.xyz-input.world;let distance=max(length(delta),0.001);l=delta/distance;
                 attenuation=pow(clamp(1-distance/max(light.directionRange.w,0.001),0,1),2);
+            if(light.positionType.w>1.5) { attenuation*=smoothstep(light.cone.y,light.cone.x,dot(-l,safeNormal(light.directionRange.xyz,vec3f(0,-1,0)))); }
             }
             let h=safeNormal(v+l,normal);
             let power=mix(256.0,8.0,rough);
