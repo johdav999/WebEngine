@@ -1,6 +1,65 @@
 #include "engine/mesh_component.hpp"
 
 namespace engine {
+namespace {
+bool equal(Vec2 a,Vec2 b) {return a.x==b.x&&a.y==b.y;}
+bool equal(Vec3 a,Vec3 b) {return a.x==b.x&&a.y==b.y&&a.z==b.z;}
+template<class T,class Compare> bool equalOptional(const std::optional<T>& a,const std::optional<T>& b,Compare compare) {
+    return bool(a)==bool(b)&&(!a||compare(*a,*b));
+}
+bool equalInstance(const MaterialInstance& a,const MaterialInstance& b) {
+    if(a.material!=b.material||!equal(a.tint,b.tint)||a.opacity!=b.opacity||!equal(a.uvScale,b.uvScale)||!equal(a.uvOffset,b.uvOffset)
+       ||a.roughness!=b.roughness||a.metallic!=b.metallic||a.normalScale!=b.normalScale||a.occlusionStrength!=b.occlusionStrength
+       ||a.alphaCutoff!=b.alphaCutoff||a.alphaMode!=b.alphaMode||a.doubleSided!=b.doubleSided||a.shader!=b.shader
+       ||a.baseColorTexture!=b.baseColorTexture||a.metallicRoughnessTexture!=b.metallicRoughnessTexture||a.normalTexture!=b.normalTexture
+       ||a.occlusionTexture!=b.occlusionTexture||a.emissiveTexture!=b.emissiveTexture||a.baseColorSurface!=b.baseColorSurface) return false;
+    return equalOptional(a.emissive,b.emissive,[](auto x,auto y){return equal(x,y);})
+        &&equalOptional(a.water,b.water,[](const auto& x,const auto& y){return waterParameters(x)==waterParameters(y);})
+        &&equalOptional(a.layers,b.layers,[](const auto& x,const auto& y){
+            if(x.weights!=y.weights||materialLayerParameters(x)!=materialLayerParameters(y))return false;
+            for(std::size_t i=0;i<x.layers.size();++i)
+                if(x.layers[i].texture!=y.layers[i].texture||x.layers[i].normalHeightTexture!=y.layers[i].normalHeightTexture)return false;
+            return true;
+        })
+        &&equalOptional(a.advanced,b.advanced,[](const auto& x,const auto& y){
+            return materialAdvancedParameters(x)==materialAdvancedParameters(y)&&x.surfaceTexture==y.surfaceTexture
+                &&x.coatNormalTexture==y.coatNormalTexture&&x.colorTexture==y.colorTexture&&x.anisotropyTexture==y.anisotropyTexture;
+        });
+}
+bool equalOverrides(const std::vector<std::optional<MaterialInstance>>& a,const std::vector<std::optional<MaterialInstance>>& b) {
+    if(a.size()!=b.size())return false;
+    for(std::size_t i=0;i<a.size();++i)if(!equalOptional(a[i],b[i],equalInstance))return false;
+    return true;
+}
+}
+const std::vector<Material>& MeshComponent::renderMaterials() const {
+    if(!mesh) {
+        renderMaterialsValid_=false;renderMesh_.reset();renderTexture_.reset();renderOverrides_.clear();renderMaterials_.clear();
+        return renderMaterials_;
+    }
+    if(renderMaterialsValid_&&renderMesh_.lock()==mesh&&renderTexture_==texture&&renderBlend_==blend
+       &&equalOverrides(renderOverrides_,materialOverrides))return renderMaterials_;
+    for(const auto& part:mesh->parts)
+        if(part.materialIndex>=mesh->materials.size()||part.firstIndex>mesh->indices.size()
+           ||part.indexCount>mesh->indices.size()-part.firstIndex||part.indexCount%3)
+            throw std::invalid_argument("Invalid mesh material range");
+    std::vector<Material> materials;
+    materials.reserve(std::max<std::size_t>(1,mesh->materials.size()));
+    for(std::size_t i=0;i<std::max<std::size_t>(1,mesh->materials.size());++i)materials.push_back(resolveMaterial(i,false));
+    // Stage all allocations/validation before publishing the replacement.
+    auto overrides=materialOverrides;
+    renderMaterials_.swap(materials);renderOverrides_.swap(overrides);
+    renderMesh_=mesh;renderTexture_=texture;renderBlend_=blend;renderMaterialsValid_=true;
+    return renderMaterials_;
+}
+Material MeshComponent::resolvedMaterial(std::size_t slot,bool metadata) const {
+    if(!metadata&&mesh) {
+        const auto& materials=renderMaterials();
+        if(slot<materials.size())return materials[slot];
+    }
+    return resolveMaterial(slot,metadata);
+}
+
 void MeshComponent::synchronizeMorphs() const {
     // An expired weak mesh and a newly cleared mesh both compare equal to null.
     // Clear the instance state first so that cannot retain a stale deformation.
@@ -91,8 +150,7 @@ MeshBounds MeshComponent::localBounds(const std::shared_ptr<const SkinPose>& pos
     auto bounds=geometryBounds(pose);
     if(!mesh||!bounds.valid) return bounds;
     float margin=0;
-    for(std::size_t slot=0;slot<std::max<std::size_t>(1,mesh->materials.size());++slot) {
-        const auto m=resolvedMaterial(slot,false);
+    for(const auto& m:renderMaterials()) {
         if(m.shader==MaterialShader::Water) margin=std::max(margin,m.water.amplitude);
         margin=std::max(margin,m.advanced.windAmplitude);
     }
@@ -110,7 +168,7 @@ void MeshComponent::setMaterial(std::size_t slot,MaterialInstance instance) {
 void MeshComponent::clearMaterial(std::size_t slot) {
     if(slot<materialOverrides.size()) materialOverrides[slot].reset();
 }
-Material MeshComponent::resolvedMaterial(std::size_t slot,bool metadata) const {
+Material MeshComponent::resolveMaterial(std::size_t slot,bool metadata) const {
     const auto fallback=mesh&&slot<mesh->materials.size()&&mesh->materials[slot] ? mesh->materials[slot] : Material::standard();
     auto result=slot<materialOverrides.size()&&materialOverrides[slot] ? materialOverrides[slot]->resolve(fallback,metadata) : metadata ? *fallback : fallback->parameters();
     const bool slotTexture=slot<materialOverrides.size()&&materialOverrides[slot]&&(materialOverrides[slot]->material||materialOverrides[slot]->baseColorTexture);

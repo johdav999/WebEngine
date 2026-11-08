@@ -122,6 +122,19 @@ int main() {
         }
         countAllocations=false;
         check(allocations==0,"Animated bounds, frustum collection and visible batches allocate zero heap blocks after warmup");
+        Scene staticView;
+        for(int i=0;i<100;++i) {
+            auto& mesh=staticView.spawn("Scenery").addComponent<MeshComponent>("Cube",multi);
+            mesh.transform.position={i%2?500.f:0.f,0,0};mesh.allowInstanceReordering=true;
+        }
+        const auto view=camera.frustum(1);
+        frame.collect(staticView,true,~0u,&view,nullptr,{},false,true);frame.prepareObjects();
+        allocations=0;countAllocations=true;
+        for(int i=0;i<1000;++i) {
+            frame.collect(staticView,true,~0u,&view,nullptr,{},false,true);frame.prepareObjects();
+        }
+        countAllocations=false;
+        check(allocations==0,"Warm cached early-culling collection allocates zero heap blocks");
         std::cout<<"Render frame tests passed: 1000 warm collections/preparations allocated zero heap blocks\n";
     } catch(const std::exception& error) {countAllocations=false;std::cerr<<error.what()<<'\n';return 1;}
 }

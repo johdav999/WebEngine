@@ -67,7 +67,7 @@ public:
     void setBend(std::shared_ptr<const MeshBend>,std::shared_ptr<const MeshWindState>);
     const auto& bend() const { return bend_; }
     const auto& wind() const { return wind_; }
-    void appendDraws(SceneFrame&,const Mat4& world,const Frustum*) const;
+    void appendDraws(SceneFrame&,const Mat4& world,const Frustum*,bool retainOffCamera=true) const;
 private:
     std::shared_ptr<const MeshInstanceSet> instances_;
     std::shared_ptr<const MeshBend> bend_;

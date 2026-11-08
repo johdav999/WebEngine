@@ -3420,3 +3420,33 @@ Detached bounded exploration replay reports the first failed command and exports
 the successful prefix; it adds no scheduler, IO or world-query authority.
 Windows/browser hosts share buy/sell/craft controls. See [contracts](docs/rpg-economy.md)
 and [validation](docs/rpg-l8-validation.md). Game adoption remains G12.
+
+### Cached static collection (2026-11-08)
+
+MeshComponent::renderMaterials() returns a borrowed vector of validated,
+metadata-free effective draw materials. It caches one published mesh's resolved
+slots and automatically observes component texture/blend changes and by-value
+public materialOverrides edits, including nested water/layer/advanced maps.
+Published mesh/material assets remain immutable. Replacement validates and stages
+all allocations before publication; mesh clearing releases old material references
+on the next collection. Color, world transform, visibility, skin/morph and renderer
+clock state are evaluated normally and are not frozen by the cache.
+
+Scene::collect and RenderFrame::collect accept a final bool cullUnused=false.
+Complete collection stays the default for selection, GI and manual secondary-pass
+users. Browser WebGPU/WebGL2 and native Dawn/D3D12 enable the optimized policy.
+With a frustum, it rejects off-camera mesh/bulk-instance packets before material
+partition expansion, LOD sorting and object staging when no active masked shadow
+light or World planar-reflection requester requires secondary geometry. It keeps
+mesh/cull counters and traversal order. It does not alter hierarchy, simulation,
+physics, asset LOD or collision. Shadow/reflection scenes conservatively retain
+complete geometry. Custom secondary-pass users must keep complete collection.
+
+Physics presentation lookup skips hierarchy-only nodes during collection. Both
+Windows native and browser renderers consume the same portable material and
+visibility paths. No frame phase, archive format or rendering-platform type is added.
+
+Native checks cover cache invalidation, zero-allocation warm frames, material
+bindings, LOD and independent secondary-pass visibility.
+
+See [static collection contracts](docs/static-scene-collection.md).

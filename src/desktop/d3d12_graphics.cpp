@@ -528,7 +528,7 @@ public:
                 const float detailWidth=surface?resolved.viewport.width:float(resolved.width);
                 const float detailHeight=surface?resolved.viewport.height:float(resolved.height);
                 const DetailView detail{camera.viewProjection(aspect),detailWidth*quality_.detailScale,detailHeight*quality_.detailScale};
-                collected.collect(*scene_,true,camera.visibilityMask(),&camera.frustum(aspect),quality_.lod?&detail:nullptr,uploadCluster);
+                collected.collect(*scene_,true,camera.visibilityMask(),&camera.frustum(aspect),quality_.lod?&detail:nullptr,uploadCluster,false,true);
                 cameraLodParts_+=collected.cameraLodParts();
                 D3D12_GPU_VIRTUAL_ADDRESS objects=0;{GpuSpan timing(*this,"Object uploads",int(resolved.index));objects=instanceObjects(frame,collected,resolved.index);}
                 const auto& scene=collected.sceneFrame();FrameConstants constants{};constants.viewProjection=camera.viewProjection(aspect);

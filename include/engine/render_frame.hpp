@@ -28,7 +28,7 @@ public:
     static constexpr std::size_t objectStride=256;
     // One collect/prepare cycle per frame; upload objectUploads() before next prepare.
     void collect(const Scene& scene,bool instancing=true,std::uint32_t visibilityMask=0xffffffffu,const Frustum* frustum=nullptr,
-                 const DetailView* detail=nullptr,const ClusterPageUpload& upload={},bool gpuHierarchy=false);
+                 const DetailView* detail=nullptr,const ClusterPageUpload& upload={},bool gpuHierarchy=false,bool cullUnused=false);
     // Independent per-light selection; object slots are shared with camera draws.
     void prepareShadow(std::size_t light,const DetailView& detail,bool lod=true,bool culling=true,bool casting=true,
                        const ClusterPageUpload& upload={});

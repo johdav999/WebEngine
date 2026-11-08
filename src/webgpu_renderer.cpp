@@ -1470,7 +1470,7 @@ void WebGpuRenderer::render(double updateMs,double intervalMs) {
             const DetailView detail{activeCamera_->viewProjection(viewport.width/viewport.height),viewport.width*quality_.detailScale,viewport.height*quality_.detailScale};
             bool hierarchyCamera=quality_.gpuClusterHierarchy&&quality_.gpuClusterCulling&&!surfaceCapture&&sampleCount_==1;
             activeView_->frame.collect(*scene_,instancingEnabled_,activeCamera_->active() ? activeCamera_->visibilityMask() : 0,
-                frustum,lodEnabled_ ? &detail : nullptr,uploadCluster,hierarchyCamera);
+                frustum,lodEnabled_ ? &detail : nullptr,uploadCluster,hierarchyCamera,true);
             if(hierarchyCamera) {
                 const auto& collected=activeView_->frame.sceneFrame();
                 if(std::any_of(collected.meshes.begin(),collected.meshes.end(),[](const MeshDraw& draw){
@@ -1478,7 +1478,7 @@ void WebGpuRenderer::render(double updateMs,double intervalMs) {
                 })||(hdr_&&quality_.screenSpaceReflections&&activeCamera_->projectionMode()==ProjectionMode::Perspective&&hasScreenReflectionReceivers(collected))) {
                     hierarchyCamera=false;
                     activeView_->frame.collect(*scene_,instancingEnabled_,activeCamera_->visibilityMask(),frustum,
-                        lodEnabled_?&detail:nullptr,uploadCluster);
+                        lodEnabled_?&detail:nullptr,uploadCluster,false,true);
                 }
             }
             const auto& frame=activeView_->frame.sceneFrame();timing.collectMs+=host_.nowMs()-collectStart;
