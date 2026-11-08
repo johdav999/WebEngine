@@ -452,3 +452,36 @@ graph does not author animated water parameters; use the C++ material API.
 ## Scene atmospheric fog
 
 Optional [height fog](fog.md) applies to intrinsic water shading before mixing captured inputs. Refraction samples already fogged opaque color. Planar captures integrate the real two-leg eye/near-plane-to-water-to-receiver path; captured fog is not applied again at the surface. Foam/body scattering use surface fog. Underwater remains a later independent depth composite, with its existing transparent-depth limitation. Scene atmospheric fog is not clipped out of underwater regions.
+
+### Volumetric fog acceptance
+
+The portable fixture uses a flat water surface and an unlit receiver. It
+compares refraction against the exposed bed through separate fog boxes in
+front of and beyond the surface. Reflection cases isolate each real ray leg,
+both legs together, the virtual camera leg, the shared distance limit and
+green scattering from the reflected leg. Turning off refraction and reflection
+provides controls. The same checks run with perspective, orthographic and
+perspective 4× MSAA views, subject to the backend's effective sample count.
+
+Run `node scripts/volumetric-water-smoke.cjs browser` against the staged
+browser build with the usual `NODE_PATH`, `DEMO_URL` and
+`BROWSER_EXECUTABLE` settings. Build `webengine_water_windows` and run
+`node scripts/volumetric-water-smoke.cjs windows build/windows-desktop/Release/webengine_water_windows.exe`.
+Both commands force their two backends and store captures, sampled colors and
+linear transmission ratios in `build/evidence/volumetric-water/`.
+
+On 2026-11-06, all 15 cases passed in all three profiles on each backend.
+The browser checks ran in Chrome 156 with the pinned Emscripten build.
+Windows used the Release gallery. All four paths reported effective 4× MSAA
+for the MSAA profile. The expected linear transmission is 0.372 for one leg
+and 0.138 for both legs.
+
+| Backend | First leg | Second leg | Both legs |
+| --- | ---: | ---: | ---: |
+| Browser WebGPU | 0.373 | 0.373 | 0.140 |
+| Browser WebGL2 | 0.393 | 0.393 | 0.151 |
+| Windows Dawn | 0.373 | 0.373 | 0.140 |
+| Windows direct D3D12 | 0.373 | 0.373 | 0.140 |
+
+The Windows device inventory showed no reachable Android or iOS device for
+sustained mobile measurements. Physical mobile qualification remains open.

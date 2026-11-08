@@ -3,6 +3,7 @@
 #include "engine/render_frame.hpp"
 #include "engine/mesh_component.hpp"
 #include "engine/fx_frame.hpp"
+#include "engine/persistence.hpp"
 #include <iostream>
 #include <limits>
 
@@ -35,8 +36,50 @@ int main() {
         rejected=false;try { const RenderView bad{&a,std::array<float,4>{0,0,std::numeric_limits<float>::quiet_NaN(),1}};plan.set({&bad,1}); } catch(const std::invalid_argument&) { rejected=true; }
         check(rejected && plan.views().size()==2,"Invalid clear color is rejected atomically");
         plan.set(plan.views());check(plan.views().size()==2,"Replacing views from their own span is safe");
+        const auto target=std::make_shared<RenderSurface>(320,160);
+        auto capture=views[1];capture.target=target;
+        const std::array mixed={views[0],capture};
+        plan.set(mixed);
+        plan.resolve(1920,1080,resolved);
+        check(resolved.size()==1&&resolved[0].index==0,"Window plan omits capture producers");
+        plan.resolveSurfaces(resolved);
+        check(resolved.size()==1&&resolved[0].index==1&&resolved[0].x==224&&resolved[0].width==80
+            &&resolved[0].y==16&&resolved[0].height==48,"Capture resolves against its own extent");
+        capture.refreshSurface=false;
+        plan.set({&capture,1});plan.resolveSurfaces(resolved);
+        check(resolved.empty()&&plan.hasSurface(target.get()),"Frozen surface stays registered");
+        rejected=false;
+        try {const std::array duplicate={capture,capture};plan.set(duplicate);} catch(const std::invalid_argument&) {rejected=true;}
+        check(rejected&&plan.views().size()==1,"Duplicate producers are rejected atomically");
+        std::array overBudget={capture,capture};
+        for(auto& view:overBudget) view.target=std::make_shared<RenderSurface>(2048,2048);
+        rejected=false;
+        try {plan.set(overBudget);} catch(const std::invalid_argument&) {rejected=true;}
+        check(rejected&&plan.hasSurface(target.get()),"Surface pixel budget preserves the prior plan on rejection");
+        rejected=false;
+        try {const RenderSurface invalid(0,160);} catch(const std::invalid_argument&) {rejected=true;}
+        check(rejected,"Zero-width surface is rejected");
+        auto binding=MaterialInstance{};
+        binding.shader=MaterialShader::Unlit;binding.baseColorSurface=target;
+        const auto first=binding.resolve();
+        binding.baseColorSurface=std::make_shared<RenderSurface>(320,160);
+        check(first.parameters().baseColorSurface==target&&!sameMaterialBinding(first,binding.resolve()),
+            "Equal extents on distinct surfaces must not batch together");
+        binding.shader=MaterialShader::Pbr;
+        rejected=false;
+        try {binding.resolve();} catch(const std::invalid_argument&) {rejected=true;}
+        check(rejected,"Surface bindings require unlit materials");
         auto& red=scene.addChild<MeshComponent>("Red",Mesh::cube());red.visibilityMask=1;
         auto& blue=scene.addChild<MeshComponent>("Blue",Mesh::cube());blue.visibilityMask=2;
+        red.setSavedId("monitor");
+        binding.shader=MaterialShader::Unlit;
+        binding.baseColorTexture=Texture::white();
+        red.setMaterial(0,binding);
+        const auto restored=SceneArchive::load(SceneArchive::save(scene,mixed));
+        const auto* monitor=dynamic_cast<const MeshComponent*>(restored.scene->findSavedNode("monitor"));
+        check(restored.views.size()==1&&!restored.views.front().target&&monitor
+            &&!monitor->resolvedMaterial(0).baseColorSurface&&monitor->resolvedMaterial(0).baseColorTexture,
+            "Archives omit producers and keep the static monitor fallback");
         a.setVisibilityMask(1);b.setVisibilityMask(2);
         RenderFrame left,right;left.collect(scene,true,a.visibilityMask());right.collect(scene,true,b.visibilityMask());
         left.prepareObjects();right.prepareObjects();

@@ -28,20 +28,23 @@ def verify(directory):
     for a,b,minimum in [('baseline','gradient',1000),('gradient','bright-sky',500),('panorama','panorama-rotated',1000),
         ('gradient','atmosphere',1000),('atmosphere','clouds',50),('clouds','clouds-advanced',50),('clouds','night',1000),
         ('gradient','fog',1000),('fog','overlay-as-world',50),('fog','fog-additive-off',100),('fog','uniform-fog',100),('uniform-fog','fog-start',100),('orthographic-fog','fog-start',1000),
-        ('hdr','bloom',100),('bloom','threshold',100),('bloom','exposure',1000),('bloom','grayscale',1000),('bloom','contrast',1000)]:
+        ('hdr','pbr-neutral',1000),('hdr','bloom',100),('bloom','threshold',100),('bloom','exposure',1000),('bloom','grayscale',1000),('bloom','contrast',1000)]:
         changed=difference(a,b);checks[a+'/'+b]=changed;assert changed>minimum,(a,b,changed)
     for a,b in [('gradient','sphere'),('gradient','fog-disabled-view'),('baseline','sky-disabled-view'),
-                ('baseline','restored'),('grayscale','invalid-retained'),('fog','invalid-fog-retained'),('fog','invalid-sky-retained'),('orthographic-fog','orthographic-sphere'),('single-hdr','preserved-color')]:
+                ('baseline','restored'),('grayscale','invalid-retained'),('fog','invalid-fog-retained'),('fog','invalid-sky-retained'),('orthographic-fog','orthographic-sphere'),('single-hdr','preserved-color'),
+                ('hdr','reinhard-restored'),('pbr-neutral','pbr-neutral-retained')]:
         changed=difference(a,b);checks[a+'/'+b]=changed;assert changed<100,(a,b,changed)
     w,h,p=images['grayscale'];assert max(max(p[i:i+3])-min(p[i:i+3]) for y in range(64,h) for i in range(y*w*3,(y+1)*w*3,3))<=1,'Saturation zero is not grayscale'
     # The opaque retained GUI must remain outside fog, bloom and grading.
     def gui(name):
         w,h,p=images[name];return b''.join(p[(y*w+20)*3:(y*w+140)*3] for y in range(20,48))
-    for name in ['hdr','bloom','exposure','grayscale','fog','restored']:
+    for name in ['hdr','pbr-neutral','bloom','exposure','grayscale','fog','restored']:
         assert gui(name)==gui('baseline'),('GUI changed with environment/post',name)
     assert images['resized'][:2]==(803,603)
     assert images['scaled'][:2]==(602,452)
     cases=report['cases']
+    assert cases['pbr-neutral']['renderState']['postToneMapper']==1
+    assert cases['reinhard-restored']['renderState']['postToneMapper']==0
     if report['requested']=='d3d12':
         def counters(name):return cases[name]['performance']['counters']
         assert counters('hdr')['postPasses']==1 and counters('hdr')['bloomPasses']==0

@@ -1,5 +1,5 @@
 // Private water targets and passes. Shared helpers own selection and numeric payloads.
-D3D12_CPU_DESCRIPTOR_HANDLE reflectionDsv() const {auto view=dsv_->GetCPUDescriptorHandleForHeapStart();view.ptr+=5*dsvStride_;return view;}
+D3D12_CPU_DESCRIPTOR_HANDLE reflectionDsv() const {auto view=dsv_->GetCPUDescriptorHandleForHeapStart();view.ptr+=6*dsvStride_;return view;}
 void prepareWaterTargets(bool capture,bool reflection){
     const UINT w=capture?width_:1,h=capture?height_:1,rw=reflection?width_:1,rh=reflection?height_:1;
     if(waterWidth_==w&&waterHeight_==h&&reflectionWidth_==rw&&reflectionHeight_==rh&&waterCapture_==capture&&waterSamples_==sampleCount_&&waterHdr_==hdr_)return;
@@ -36,13 +36,14 @@ ID3D12PipelineState* waterPipeline(bool underwater){
     ComPtr<ID3D12PipelineState> next;checked(device_->CreateGraphicsPipelineState(&p,IID_PPV_ARGS(&next)),"Create water pipeline");return waterPipelines_.emplace(key,std::move(next)).first->second.Get();
 }
 void fullViewport(){const D3D12_VIEWPORT viewport{0,0,float(width_),float(height_),0,1};list_->RSSetViewports(1,&viewport);}
-void captureWater(Frame& frame,ID3D12Resource* source,const D3D12_RECT& rect){
+void captureWater(Frame& frame,ID3D12Resource* source,const D3D12_RECT& rect,bool waterSnapshot=true){
     transition(*list_.Get(),source,D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);transition(*list_.Get(),depth_.Get(),D3D12_RESOURCE_STATE_DEPTH_WRITE,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
     for(auto* image:{waterColor_.Get(),waterDepth_.Get()})transition(*list_.Get(),image,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_RENDER_TARGET);
     const float black[]{0,0,0,0},farDepth[]{1,0,0,1};list_->ClearRenderTargetView(rtv(frameCount+4),black,0,nullptr);list_->ClearRenderTargetView(rtv(frameCount+5),farDepth,0,nullptr);
     const auto first=reserveDescriptors(frame,4);for(UINT i=0;i<4;i++)imageView(frame,first+i,((i<2)==(sampleCount_==1))?(i%2?depth_.Get():source):nullptr,i%2?DXGI_FORMAT_R32_FLOAT:colorFormat(),i>=2);
     const D3D12_CPU_DESCRIPTOR_HANDLE targets[]{rtv(frameCount+4),rtv(frameCount+5)};list_->OMSetRenderTargets(2,targets,FALSE,nullptr);fullViewport();list_->RSSetScissorRects(1,&rect);
-    list_->SetGraphicsRootDescriptorTable(13,srvGpu(frame,first));list_->SetPipelineState(waterPipeline(false));list_->DrawInstanced(3,1,0,0);++waterSnapshots_;
+    list_->SetGraphicsRootDescriptorTable(13,srvGpu(frame,first));list_->SetPipelineState(waterPipeline(false));list_->DrawInstanced(3,1,0,0);
+    if(waterSnapshot)++waterSnapshots_;
     for(auto* image:{waterColor_.Get(),waterDepth_.Get()})transition(*list_.Get(),image,D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
     transition(*list_.Get(),source,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_RENDER_TARGET);transition(*list_.Get(),depth_.Get(),D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_DEPTH_WRITE);
 }
@@ -51,9 +52,28 @@ void drawUnderwater(Frame& frame,ID3D12Resource* source,D3D12_CPU_DESCRIPTOR_HAN
     list_->SetGraphicsRootConstantBufferView(14,upload(frame,&data,sizeof(data)));list_->SetGraphicsRootDescriptorTable(12,waterBinding(frame));
     list_->OMSetRenderTargets(1,&target,FALSE,nullptr);fullViewport();list_->RSSetScissorRects(1,&rect);list_->SetPipelineState(waterPipeline(true));list_->DrawInstanced(3,1,0,0);++underwaterPasses_;
 }
-void drawReflection(Frame& frame,const RenderFrame& collected,D3D12_GPU_VIRTUAL_ADDRESS objects,const WaterReflection& reflection,const FrameConstants& constants,const D3D12_RECT& rect,const D3D12_VIEWPORT& viewport){
+void drawReflection(Frame& frame,const RenderFrame& collected,D3D12_GPU_VIRTUAL_ADDRESS objects,const WaterReflection& reflection,const FrameConstants& constants,const D3D12_RECT& rect,const D3D12_VIEWPORT& viewport,const SkyConstants* cloudSky){
     auto mirrored=constants;mirrored.viewProjection=constants.reflectionViewProjection;mirrored.reflectionOptions={0,1,0,0};
     const auto eye=transformPoint(reflection.mirror,{constants.cameraEnvironment[0],constants.cameraEnvironment[1],constants.cameraEnvironment[2]});mirrored.cameraEnvironment[0]=eye.x;mirrored.cameraEnvironment[1]=eye.y;mirrored.cameraEnvironment[2]=eye.z;
+    if(cloudSky&&constants.cloud.layer[3]>.5f) {
+        mirrored.inverseViewProjection=inverse(mirrored.viewProjection);
+        mirrored.cloud.eye={eye.x,eye.y,eye.z,constants.cloud.eye[3]};
+        auto reflectedSky=*cloudSky;
+        const Vec3 n{reflection.plane[0],reflection.plane[1],reflection.plane[2]};
+        for(auto* axis:{&reflectedSky.sky.right,&reflectedSky.sky.up,&reflectedSky.sky.forward,&reflectedSky.sky.fogRight,&reflectedSky.sky.fogUp}) {
+            const Vec3 v{(*axis)[0],(*axis)[1],(*axis)[2]};
+            const auto value=v-n*(2*dot(v,n));
+            (*axis)[0]=value.x;(*axis)[1]=value.y;(*axis)[2]=value.z;
+        }
+        const double frequency=reflectedSky.sky.cloudOrigin[3];
+        for(unsigned axis:{0u,2u}) {
+            const double coordinate=axis==0?eye.x:eye.z;
+            const double phase=double(cloudSky->sky.cloudOrigin[axis])+(coordinate-constants.cloud.eye[axis])*frequency;
+            reflectedSky.sky.cloudOrigin[axis]=float(phase-std::floor(phase));
+        }
+        reflectedSky.sky.cloudOrigin[1]=eye.y;reflectedSky.sky.cloud=mirrored.cloud;
+        {GpuSpan timing(*this,"Cloud grid");drawCloudGrid(frame,reflectedSky);}
+    }
     list_->SetGraphicsRootConstantBufferView(0,upload(frame,&mirrored,sizeof(mirrored)));list_->SetGraphicsRootDescriptorTable(12,waterBinding(frame,true));
     transition(*list_.Get(),reflectionColor_.Get(),D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_RENDER_TARGET);const auto color=rtv(frameCount+6),depth=reflectionDsv();const float clear[]{0,0,0,0};
     list_->ClearRenderTargetView(color,clear,0,nullptr);list_->ClearDepthStencilView(depth,D3D12_CLEAR_FLAG_DEPTH,1,0,0,nullptr);list_->OMSetRenderTargets(1,&color,FALSE,&depth);list_->RSSetViewports(1,&viewport);list_->RSSetScissorRects(1,&rect);

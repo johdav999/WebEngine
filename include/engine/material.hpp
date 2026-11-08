@@ -1,5 +1,6 @@
 #pragma once
 #include "engine/math.hpp"
+#include "engine/render_surface.hpp"
 #include "engine/texture.hpp"
 #include "engine/water.hpp"
 #include <memory>
@@ -29,6 +30,29 @@ struct MaterialLayers {
     float triplanarScale=1,triplanarSharpness=4; // World units^-1; axis blend exponent [1,16].
     void validate() const;
 };
+// Portable advanced surface approximations. Neutral defaults retain ordinary PBR.
+// Effects use the host-controlled renderer clock and never modify simulation data.
+struct MaterialAdvanced {
+    float clearcoat=0,clearcoatRoughness=.1f,transmission=0,ior=1.5f;
+    float thickness=0,attenuationDistance=0,subsurface=0,sheen=0;
+    Vec3 attenuationColor{1,1,1};
+    float sheenRoughness=.5f;
+    Vec3 subsurfaceColor{1,1,1};
+    float anisotropy=0;
+    Vec3 sheenColor{1,1,1};
+    float anisotropyRotation=0,specular=.5f;
+    Vec2 uvSpeed{};
+    Vec3 windDirection{1,0,0};
+    float windAmplitude=0,windFrequency=1,windSpeed=1,clearcoatNormalScale=1;
+    // Packed map contract: surface RGBA=coat/coat roughness/transmission/thickness;
+    // color top half=sheen RGB/roughness A, bottom=subsurface RGB/strength A.
+    // Anisotropy RG=encoded direction, B=strength, A=specular strength.
+    std::shared_ptr<const Texture> surfaceTexture,coatNormalTexture,colorTexture,anisotropyTexture;
+    void validate() const;
+    bool animated() const {return uvSpeed.x!=0||uvSpeed.y!=0||windAmplitude>0;}
+    bool usesSceneInputs() const {return transmission>0;}
+};
+std::array<float,36> materialAdvancedParameters(const MaterialAdvanced& material);
 // A published asset is immutable; components customize it through MaterialInstance.
 struct Material {
     std::string name;
@@ -44,10 +68,12 @@ struct Material {
     MaterialShader shader=MaterialShader::Pbr;
     WaterSettings water;
     MaterialLayers layers;
+    MaterialAdvanced advanced;
     Vec2 uvScale{1,1},uvOffset{};
     void validate() const;
     Material parameters() const; // Metadata-free copy for allocation-free frame collection.
     static std::shared_ptr<const Material> standard();
+    RenderSurfaceHandle baseColorSurface; // Runtime only; baseColorTexture supplies the fallback.
 };
 struct MaterialInstance {
     MaterialInstance()=default;
@@ -63,8 +89,10 @@ struct MaterialInstance {
     std::optional<MaterialShader> shader;
     std::optional<WaterSettings> water;
     std::optional<MaterialLayers> layers;
+    std::optional<MaterialAdvanced> advanced;
     // Engaged null overrides deliberately clear a map; disengaged overrides inherit.
     std::optional<std::shared_ptr<const Texture>> baseColorTexture,metallicRoughnessTexture,normalTexture,occlusionTexture,emissiveTexture;
+    RenderSurfaceHandle baseColorSurface; // Runtime instance override; empty inherits the asset binding.
     Material resolve(const std::shared_ptr<const Material>& fallback=Material::standard(),bool metadata=true) const;
 };
 // By-value effective binding. Names/import paths are excluded from GPU identity.

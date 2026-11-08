@@ -23,10 +23,10 @@ class FallbackGraphics final:public DesktopGraphics {
     std::uint64_t frames_=0;
     static std::vector<DesktopView> handles(Scene* scene,std::span<const RenderView> views){
         std::vector<DesktopView> result;result.reserve(views.size());
-        for(const auto& v:views){if(!scene||!v.camera||v.camera->scene()!=scene)throw std::invalid_argument("Fallback camera must belong to its scene");result.push_back({v.camera->id(),v.clearColor,v.skyEnabled,v.fogEnabled});}return result;
+        for(const auto& v:views){if(!scene||!v.camera||v.camera->scene()!=scene)throw std::invalid_argument("Fallback camera must belong to its scene");result.push_back({v.camera->id(),v.clearColor,v.skyEnabled,v.fogEnabled,v.target,v.refreshSurface});}return result;
     }
     std::vector<RenderView> resolve()const{
-        std::vector<RenderView> result;if(scene_)for(const auto& v:views_)if(auto* c=dynamic_cast<CameraComponent*>(scene_->findComponent(v.camera)))result.push_back({c,v.clearColor,v.skyEnabled,v.fogEnabled});return result;
+        std::vector<RenderView> result;if(scene_)for(const auto& v:views_)if(auto* c=dynamic_cast<CameraComponent*>(scene_->findComponent(v.camera)))result.push_back({c,v.clearColor,v.skyEnabled,v.fogEnabled,v.target,v.refreshSurface});return result;
     }
     void retire(){if(!active_)return;frames_+=active_->diagnostics().presentedFrames;if(active_->capturePending())captureError_="Framebuffer capture cancelled by graphics fallback";active_->bind(nullptr,{});active_.reset();}
     void fail(std::string reason){if(!attempts_.empty())attempts_.back().error=reason.substr(0,16384);}

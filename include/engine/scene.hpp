@@ -5,16 +5,19 @@
 #include "engine/light_component.hpp"
 #include "engine/render_layer.hpp"
 #include "engine/particle_emitter_component.hpp"
-#include "engine/environment.hpp"
+#include "engine/environment_lighting.hpp"
 #include "engine/sky.hpp"
 #include "engine/fog.hpp"
 #include <optional>
 #include <array>
 
 namespace engine {
+struct DiffuseGiSnapshot;
+struct ReflectionProbeSnapshot;
 class PhysicsWorld;
 class SelectionSystem;
 class Application;
+class CinematicRuntime;
 enum class SceneLifecycleState { Detached, Loaded, Active };
 struct Frustum;
 struct MeshDraw {
@@ -39,7 +42,12 @@ struct MeshDraw {
     bool receivesDecals=true;
     std::uint32_t visibilityMask=1;
 };
-struct SceneLight { LightType type; Vec3 position, direction, color; float intensity, range; ShadowSettings shadow; Vec3 shadowCenter; float innerAngle=pi/9,outerAngle=pi/6; };
+struct SceneLight {
+    LightType type; Vec3 position, direction, color; float intensity, range; ShadowSettings shadow; Vec3 shadowCenter;
+    float innerAngle=pi/9,outerAngle=pi/6;
+    std::int32_t priority=0;
+    ComponentId component;
+};
 struct SceneFrame {
     std::vector<MeshDraw> meshes;
     std::vector<SceneLight> lights;
@@ -61,6 +69,12 @@ public:
     Vec3 ambient{0.14f,0.17f,0.23f};
     std::shared_ptr<const Environment> environment=Environment::studio();
     float environmentIntensity=1,environmentRotation=0; // Rotation radians about world Y.
+    void setLightingZones(std::vector<LightingZone> zones);
+    const std::vector<LightingZone>& lightingZones() const { return lightingZones_; }
+    void setDiffuseGi(std::shared_ptr<const DiffuseGiSnapshot> snapshot);
+    const std::shared_ptr<const DiffuseGiSnapshot>& diffuseGi() const { return diffuseGi_; }
+    void setReflectionProbe(std::shared_ptr<const ReflectionProbeSnapshot> snapshot);
+    const std::shared_ptr<const ReflectionProbeSnapshot>& reflectionProbe() const { return reflectionProbe_; }
     void setFog(std::optional<FogSettings> fog) { if(fog) fog->validate();fog_=std::move(fog); }
     const std::optional<FogSettings>& fog() const { return fog_; }
     void setSky(std::optional<SkyBackground> sky) { if(sky) sky->validate();sky_=std::move(sky); }
@@ -98,7 +112,11 @@ protected:
 private:
     std::optional<SkyBackground> sky_;
     std::optional<FogSettings> fog_;
+    std::vector<LightingZone> lightingZones_;
+    std::shared_ptr<const DiffuseGiSnapshot> diffuseGi_;
+    std::shared_ptr<const ReflectionProbeSnapshot> reflectionProbe_;
     friend class Application;
+    friend class CinematicRuntime;
     SceneLifecycleState lifecycleState_=SceneLifecycleState::Detached;
     friend class Node;
     friend class Actor;
@@ -111,6 +129,7 @@ private:
     std::vector<ComponentSlot> components_;
     std::vector<std::uint32_t> freeComponents_;
     std::uint64_t identity_;
+    CinematicRuntime* cinematicPlayback_=nullptr; // Cleared on either owner's teardown.
     bool pendingDestroy_=false,shuttingDown_=false;
     std::unique_ptr<PhysicsWorld> physics_;
     std::unique_ptr<SelectionSystem> selection_;
@@ -119,7 +138,10 @@ private:
     void reserveSubtreeHandles(const Node& node);
     void detachSubtree(Node& node) noexcept;
     void queueRemoval(Node& node);
+    void sweepPendingChildren(Node& node);
     void prepareNodes(Node& node);
-    void updateNodes(Node& node,double delta,bool fixed);
+    void updateNodes(Node& node,double delta,bool fixed,bool presentationEffectRoot=false);
+    void advancePresentationEffect(ComponentId,double);
+    void requireCinematicSubtreeMovable(const Node&) const;
 };
 } // namespace engine

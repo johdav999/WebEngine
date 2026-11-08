@@ -33,6 +33,7 @@ add_library(engine_core
   src/texture_bundle.cpp
   src/audio.cpp
   src/cinematic_sequence.cpp
+  src/cinematic_runtime.cpp
   src/replay.cpp
   src/replay_ghost.cpp
   src/application.cpp
@@ -64,6 +65,9 @@ add_library(engine_core
   src/material_graph.cpp
   src/material_showcase.cpp
   src/environment.cpp
+  src/environment_lighting.cpp
+  src/dynamic_gi.cpp
+  src/dynamic_reflections.cpp
   src/fog.cpp
   src/sky.cpp
   src/water.cpp
@@ -90,6 +94,8 @@ add_library(engine_core
   src/orbit_controller.cpp
   src/scene.cpp
   src/render_frame.cpp
+  src/cluster_lod.cpp
+  src/cluster_stream.cpp
   src/mesh_detail.cpp
   src/render_view.cpp)
 target_sources(engine_core PRIVATE src/animation.cpp src/skeleton_component.cpp
@@ -210,6 +216,19 @@ if(EMSCRIPTEN)
       -sALLOW_MEMORY_GROWTH=1 -sSTACK_SIZE=1048576 -sEXIT_RUNTIME=1)
     set_target_properties(movement_wasm_tests PROPERTIES SUFFIX ".js")
   endif()
+
+  add_executable(material_delivery_archive_wasm EXCLUDE_FROM_ALL tests/material_delivery_archive_tests.cpp)
+  target_link_libraries(material_delivery_archive_wasm PRIVATE engine_core)
+  target_compile_options(material_delivery_archive_wasm PRIVATE -fexceptions)
+  target_link_options(material_delivery_archive_wasm PRIVATE -fexceptions -sENVIRONMENT=node -sALLOW_MEMORY_GROWTH=1 -sSTACK_SIZE=1048576 -sEXIT_RUNTIME=1)
+  set_target_properties(material_delivery_archive_wasm PROPERTIES SUFFIX ".js")
+
+
+  add_executable(material_delivery_wasm EXCLUDE_FROM_ALL tests/material_delivery_tests.cpp)
+  target_link_libraries(material_delivery_wasm PRIVATE engine_core)
+  target_compile_options(material_delivery_wasm PRIVATE -fexceptions)
+  target_link_options(material_delivery_wasm PRIVATE -fexceptions -sENVIRONMENT=node -sALLOW_MEMORY_GROWTH=1 -sSTACK_SIZE=1048576 -sEXIT_RUNTIME=1)
+  set_target_properties(material_delivery_wasm PROPERTIES SUFFIX ".js")
   target_compile_options(engine_editor PRIVATE -fexceptions -Wall -Wextra -Wpedantic)
   target_compile_options(engine_gui PRIVATE -fexceptions -Wall -Wextra -Wpedantic)
   target_compile_options(meshoptimizer PRIVATE -fexceptions)
@@ -257,6 +276,8 @@ if(EMSCRIPTEN)
     COMMAND ${CMAKE_COMMAND} -E copy_directory
       "${CMAKE_SOURCE_DIR}/web" "${CMAKE_SOURCE_DIR}/dist"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_SOURCE_DIR}/dist/assets"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+      "${CMAKE_SOURCE_DIR}/assets/stone-arch-lod" "${CMAKE_SOURCE_DIR}/dist/assets/stone-arch-lod"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
       "${CMAKE_SOURCE_DIR}/tests/fixtures/Knarr.fbx" "${CMAKE_SOURCE_DIR}/dist/assets/Knarr.fbx"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -294,6 +315,8 @@ if(EMSCRIPTEN)
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
       "${CMAKE_SOURCE_DIR}/third_party/meshoptimizer/LICENSE.md" "${CMAKE_SOURCE_DIR}/dist/meshoptimizer-LICENSE.txt")
 else()
+  add_executable(stone_arch_cook tools/stone_arch_cook.cpp)
+  target_link_libraries(stone_arch_cook PRIVATE engine_core)
   add_executable(texture_tool tools/texture_tool.cpp)
   target_link_libraries(texture_tool PRIVATE engine_core)
   include(CTest)
@@ -393,6 +416,9 @@ else()
     add_test(NAME replay COMMAND replay_tests)
     target_link_libraries(cinematic_sequence_tests PRIVATE engine_editor)
     add_test(NAME cinematic_sequence COMMAND cinematic_sequence_tests)
+    add_executable(cinematic_runtime_tests tests/cinematic_runtime_tests.cpp)
+    target_link_libraries(cinematic_runtime_tests PRIVATE engine_core)
+    add_test(NAME cinematic_runtime COMMAND cinematic_runtime_tests)
     target_link_libraries(audio_tests PRIVATE engine_core)
     add_test(NAME audio COMMAND audio_tests)
     add_executable(selection_tests tests/selection_tests.cpp)
@@ -418,6 +444,14 @@ else()
     target_link_libraries(scene_archive_tests PRIVATE engine_core)
     target_compile_definitions(scene_archive_tests PRIVATE FBX_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures")
     add_test(NAME scene_archive COMMAND scene_archive_tests)
+    add_executable(material_delivery_archive_tests tests/material_delivery_archive_tests.cpp)
+    target_link_libraries(material_delivery_archive_tests PRIVATE engine_core)
+    add_test(NAME material_delivery_archive COMMAND material_delivery_archive_tests)
+    add_executable(material_delivery_tests tests/material_delivery_tests.cpp)
+    target_link_libraries(material_delivery_tests PRIVATE engine_core)
+    add_test(NAME material_delivery COMMAND material_delivery_tests)
+
+
     add_executable(material_graph_tests tests/material_graph_tests.cpp)
     target_link_libraries(material_graph_tests PRIVATE engine_core)
     add_test(NAME material_graph COMMAND material_graph_tests)
@@ -436,6 +470,15 @@ else()
     target_link_libraries(ship_stress_tests PRIVATE engine_core)
     target_compile_definitions(ship_stress_tests PRIVATE FBX_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures")
     add_test(NAME ship_stress COMMAND ship_stress_tests)
+    add_executable(dynamic_reflections_tests tests/dynamic_reflections_tests.cpp)
+    target_link_libraries(dynamic_reflections_tests PRIVATE engine_core)
+    add_test(NAME dynamic_reflections COMMAND dynamic_reflections_tests)
+    add_executable(dynamic_gi_tests tests/dynamic_gi_tests.cpp)
+    target_link_libraries(dynamic_gi_tests PRIVATE engine_core)
+    add_test(NAME dynamic_gi COMMAND dynamic_gi_tests)
+    add_executable(environment_lighting_tests tests/environment_lighting_tests.cpp)
+    target_link_libraries(environment_lighting_tests PRIVATE engine_core)
+    add_test(NAME environment_lighting COMMAND environment_lighting_tests)
     add_executable(shadow_tests tests/shadow_tests.cpp)
     target_link_libraries(shadow_tests PRIVATE engine_core)
     add_test(NAME shadow COMMAND shadow_tests)
@@ -547,6 +590,13 @@ else()
     target_link_libraries(render_frame_tests PRIVATE engine_core)
     add_test(NAME render_frame COMMAND render_frame_tests)
     add_executable(mesh_optimizer_tests tests/mesh_optimizer_tests.cpp third_party/meshoptimizer/indexanalyzer.cpp)
+    add_executable(cluster_lod_tests tests/cluster_lod_tests.cpp)
+    add_executable(cluster_stream_feedback_tests tests/cluster_stream_feedback_tests.cpp)
+    target_link_libraries(cluster_stream_feedback_tests PRIVATE engine_core)
+    target_compile_definitions(cluster_stream_feedback_tests PRIVATE CLUSTER_STREAM_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/assets/stone-arch-lod")
+    add_test(NAME cluster_stream_feedback COMMAND cluster_stream_feedback_tests)
+    target_link_libraries(cluster_lod_tests PRIVATE engine_core)
+    add_test(NAME cluster_lod COMMAND cluster_lod_tests)
     target_link_libraries(mesh_optimizer_tests PRIVATE engine_core meshoptimizer)
     target_compile_definitions(mesh_optimizer_tests PRIVATE FBX_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures")
     add_test(NAME mesh_optimizer COMMAND mesh_optimizer_tests)

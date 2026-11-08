@@ -1,6 +1,10 @@
 #pragma once
 #include "engine/renderer.hpp"
 #include "engine/gui.hpp"
+#include "engine/view_lighting.hpp"
+#include "lighting_zones_render.hpp"
+#include "fog_light_cache.hpp"
+#include "cloud_render.hpp"
 #include <emscripten/html5.h>
 #include <GLES3/gl3.h>
 #include <unordered_map>
@@ -16,7 +20,7 @@ public:
     void retryRecovery();
     void simulateDeviceLoss();
     void setScene(Scene& scene,std::span<const RenderView> views);
-    void setViews(std::span<const RenderView> views) { views_.set(views); }
+    void setViews(std::span<const RenderView> views);
     std::span<const RenderView> views() const { return views_.views(); }
     void setQuality(const RenderQuality& quality);
     void setWaterTime(double seconds) { validateWaterTime(seconds);waterTime_=seconds; }
@@ -46,8 +50,9 @@ private:
     GLuint shadowTexture_=0,shadowFramebuffer_=0;
     std::uint32_t shadowSize_=0,shadowLayers_=0;
     bool shadowPass_=false,shadowsEnabled_=true,shadowCasting_=true,shadowReceiving_=true,shadowCulling_=true;
-    ShadowPlan shadowPlan_;
-    void drawShadows(const CameraComponent&,float,const SceneFrame&);
+    std::vector<ViewLightSelection> lightSelection_;
+    ViewLighting activeLighting_,reportedLighting_;
+    void drawShadows(const ClusterPageUpload&);
     void releaseShadows(bool lost=false);
     double waterTime_=0;
     WaterInteractions waterInteractions_;
@@ -64,20 +69,59 @@ private:
         bool deformed=false;
     };
     struct GpuTexture { std::weak_ptr<const Texture> source;GLuint image=0;std::uint64_t bytes=0; };
+    struct GpuSurface {
+        std::weak_ptr<const RenderSurface> source;
+        GLuint framebuffer=0,color=0,depth=0;
+        bool captured=false;
+    };
     Scene* scene_;
     GuiSystem* gui_=nullptr;
     RenderViews views_;
     std::vector<ResolvedRenderView> resolved_;
+    std::vector<ResolvedRenderView> resolvedSurfaces_;
     RenderFrame frame_;
     FxFrame fx_;
     std::vector<Vertex> deformed_;
     std::unordered_map<const Mesh*,GpuMesh> meshes_;
     std::unordered_map<const Texture*,GpuTexture> textures_;
+    std::unordered_map<const RenderSurface*,GpuSurface> surfaces_;
+    GLuint environmentAtlas_=0;
+    std::shared_ptr<const Environment> environmentSource_;
+    LightingZoneSources environmentZones_;
+    std::shared_ptr<const Environment> reflectionProbeSource_;
+    std::array<std::array<float,4>,9> environmentRects_{};
+    std::uint64_t environmentBytes_=0;
+    bool effectiveCompactPbr_=false,environmentUnavailable_=false;
+    bool screenReflectionUnavailable_=false;
+    void bindCompactLighting();
+    void releaseCompactLighting(bool lost=false);
+    GLuint diffuseGiTexture_=0;
+    std::array<std::array<float,4>,3> diffuseGiMetadata_{};
+    std::shared_ptr<const DiffuseGiSnapshot> diffuseGiSource_;
+    void uploadDiffuseGi();
     RenderQuality quality_;
     RenderCapabilities capabilities_;
     EMSCRIPTEN_WEBGL_CONTEXT_HANDLE context_=0;
-    GLuint meshProgram_=0,guiProgram_=0,guiVao_=0,guiVertices_=0,guiIndices_=0,particleVao_=0,particleBuffer_=0,ribbonVao_=0,ribbonBuffer_=0;
+    GLuint meshProgram_=0,basicMeshProgram_=0,compactMeshProgram_=0,screenReflectionMeshProgram_=0;
+    GLuint guiProgram_=0,guiVao_=0,guiVertices_=0,guiIndices_=0,particleVao_=0,particleBuffer_=0,ribbonVao_=0,ribbonBuffer_=0;
     GLuint skyProgram_=0,skyVao_=0,skySampler_=0;
+    GLuint cloudGridProgram_=0,cloudShadowProgram_=0;
+    SkyUniform activeSky_{};
+    CloudUniform activeCloud_{};
+    Mat4 cloudViewProjection_=Mat4::identity(),cloudInverseVp_=Mat4::identity();
+    std::array<float,4> cloudViewport_{};
+    bool cloudAtlas_=false,fogCacheAtlas_=false,cloudGridUnavailable_=false,cloudShadowsFrame_=false;
+    void bindClouds(GLuint program);
+    void cloudProducerUniforms(GLuint program);
+    void drawCloudGrid();
+    void drawCloudShadow();
+    GLuint fogGridProgram_=0,fogGridTexture_=0,fogGridFramebuffer_=0;
+    GLuint fogGridCachedProgram_=0,fogGridBuildTexture_=0,fogGridBuildFramebuffer_=0,fogLightCacheProgram_=0;
+    std::uint32_t fogAtlasWidth_=0,fogAtlasHeight_=0;
+    fog_light_cache::Cache fogLightCache_;
+    FogUniform activeFog_;
+    bool fogLightCacheUnavailable_=false;
+    bool fogGridUnavailable_=false;
     bool hdr_=false,targetHdr_=false;
     bool waterCapture_=false;
     GLuint postProgram_=0,postVao_=0,bloomFramebuffer_=0,bloomTexture_=0;
@@ -112,9 +156,19 @@ private:
     void fail(const std::string& message);
     GpuMesh& mesh(const MeshDraw& draw);
     GLuint texture(const std::shared_ptr<const Texture>& source);
-    void drawMesh(const MeshDraw& draw,const Mat4& vp,const SceneFrame& frame);
+    static void deleteSurface(const GpuSurface& surface);
+    GpuSurface* prepareSurface(const RenderSurfaceHandle& target);
+    GLuint surfaceTexture(const RenderSurfaceHandle& target) const;
+    void drawSurfaces(const ClusterPageUpload& uploadCluster,FrameTiming& timing);
+    void drawMesh(const MeshDraw& draw,const Mat4& vp,bool capturingSurface=false);
+    void bindFogLights(GLuint program);
+    void releaseFogGrid(bool lost=false);
+    bool prepareFogGrid(bool required,bool cacheRequired,bool cloudRequired=false);
+    bool drawFogLightCache(FogUniform& fog);
+    void drawFogGrid(const CameraComponent& camera,float aspect,const FogUniform& fog);
+    void bindFogGrid(GLuint program,const CameraComponent& camera,float aspect);
     void drawGui(double now);
-    void drawSky(const RenderView& view,float aspect);
+    void drawSky(const RenderView& view,float aspect,bool capturingSurface=false);
     void drawRibbon(const FxBatch& batch,const Mat4& vp);
     void drawParticles(const FxBatch& batch,const CameraComponent& camera,const Mat4& vp);
     static bool lost(int,const void*,void* data);

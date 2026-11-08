@@ -29,6 +29,7 @@
   <script src="input.js" defer></script>
   <script src="gamepad.js" defer></script>
   <script src="quality.js" defer></script>
+  <script src="mobile-preview.js" defer></script>
   <script src="crowd.js" defer></script>
   <script src="app.js" defer></script>
   <script src="ship-stress.js" defer></script>
@@ -69,13 +70,44 @@
   <header><a class="brand" href="./"><span class="brand-icon">W</span> WebEngine <span class="tag">PLAYGROUND / 001</span></a><a href="?gui=1">In-engine GUI demo</a><a href="?gui=1&amp;guiSettings=1">GUI settings demo</a><a href="?gui=1&amp;guiTheme=1">GUI themes demo</a><a href="?gui=1&amp;guiLayout=1">GUI layout demo</a><span class="stack">C++20 <span>→</span> WebAssembly <span>→</span> WebGPU</span></header>
   <main>
     <section class="viewport-panel" aria-label="Interactive 3D scene">
-      <div class="scene-title"><span class="eyebrow">LIVE SCENE</span><h1>A small world.<br>A solid foundation.</h1><p id="scene-description">Loading Knarr…</p></div>
-      <canvas id="viewport" aria-label="Drag or use arrow keys to orbit. Shift-drag to pan. Scroll or pinch to zoom." tabindex="0"></canvas>
-      <div class="camera-touch-controls" aria-label="Camera controls">
-        <button id="camera-zoom-in" type="button" aria-label="Zoom in">+</button>
-        <button id="camera-zoom-out" type="button" aria-label="Zoom out">−</button>
+      <div class="mobile-preview-toolbar" id="mobile-preview-toolbar" aria-label="Mobile preview" role="group" hidden>
+        <label for="mobile-preview-device">Device</label>
+        <select id="mobile-preview-device" data-preview-control>
+          <option value="phone">Phone</option>
+          <option value="tablet">Tablet</option>
+        </select>
+        <button id="mobile-preview-rotate" type="button" data-preview-control>Rotate</button>
+        <button id="mobile-preview-close" type="button" data-preview-control>Exit preview</button>
+        <output id="mobile-preview-size" role="status"></output>
       </div>
-      <div class="view-footer"><span><span class="dot" id="status-dot"></span><span id="status" role="status">Preparing engine…</span></span><span>DRAG / ARROWS TO ORBIT <b>·</b> SHIFT TO PAN <b>·</b> SCROLL / PINCH TO ZOOM</span></div>
+      <div class="viewport-stage">
+        <div class="viewport-slot">
+          <div class="viewport-frame">
+            <div class="scene-title"><span class="eyebrow">LIVE SCENE</span><h1>A small world.<br>A solid foundation.</h1><p id="scene-description">Loading Knarr…</p></div>
+            <canvas id="viewport" aria-label="Drag or use arrow keys to orbit. Shift-drag to pan. Scroll or pinch to zoom." tabindex="0"></canvas>
+            <p id="cutscene-game-caption" class="cutscene-game-caption" aria-live="polite" hidden></p>
+            <div class="camera-touch-controls" aria-label="Camera controls">
+              <button id="camera-zoom-in" type="button" aria-label="Zoom in">+</button>
+              <button id="camera-zoom-out" type="button" aria-label="Zoom out">−</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="view-footer"><span><span class="dot" id="status-dot"></span><span id="status" role="status">Preparing engine…</span></span><button id="mobile-preview-open" type="button" aria-controls="mobile-preview-toolbar" data-preview-control>Mobile preview</button><span>DRAG / ARROWS TO ORBIT <b>·</b> SHIFT TO PAN <b>·</b> SCROLL / PINCH TO ZOOM</span></div>
+      <section id="cutscene-game-controls" class="inspector-section" aria-label="The Gate controls" hidden>
+        <p id="cutscene-game-status" role="status">Gate closed. Move with A/D or the buttons.</p>
+        <div class="buttons">
+          <button type="button" data-cutscene-command="1">Play 3D</button>
+          <button type="button" data-cutscene-command="2">Play 2D</button>
+          <button type="button" data-cutscene-command="3">Play mixed</button>
+          <button type="button" data-cutscene-command="4" disabled>Skip</button>
+          <button type="button" data-cutscene-command="8" disabled>Cancel</button>
+          <button type="button" data-cutscene-command="9" hidden disabled>Resume audio</button>
+          <button type="button" data-cutscene-command="5">Reset gate</button>
+          <button type="button" data-cutscene-command="6">Move left</button>
+          <button type="button" data-cutscene-command="7">Move right</button>
+        </div>
+      </section>
     </section>
     <aside>
       <div class="aside-heading"><span class="eyebrow">ENGINE INSPECTOR</span><h2>Scene essentials</h2></div>
@@ -111,6 +143,25 @@
         <input id="scene-archive-file" type="file" accept=".wescene" hidden>
         <input id="asset-archive-file" type="file" accept=".weassets" hidden>
         <p id="archive-status" role="status" aria-live="polite">Save the scene with its meshes, materials, textures and audio. Files stay on your device.</p>
+      </section>
+      <section id="stone-arch" class="inspector-section" aria-labelledby="stone-arch-heading" hidden>
+        <h3 id="stone-arch-heading">Stone arch LOD comparison</h3>
+        <p>Compare triangles, draw calls and timings in Performance.</p>
+        <label for="stone-arch-mode">Geometry</label>
+        <select id="stone-arch-mode">
+          <option value="0">Full mesh</option><option value="1">Whole-mesh LOD</option>
+          <option value="2">Clustered LOD</option><option value="3" selected>Streamed LOD</option>
+        </select>
+        <label for="stone-arch-shot">Camera</label>
+        <select id="stone-arch-shot">
+          <option value="0">Near</option><option value="1">Middle</option><option value="2">Far</option>
+        </select>
+        <button id="stone-arch-clear" type="button">Clear fine pages</button>
+        <label><input id="stone-arch-gpu" type="checkbox"> GPU cluster submission</label>
+        <label><input id="stone-arch-hierarchy" type="checkbox"> GPU LOD traversal</label>
+        <label><input id="stone-arch-occluder" type="checkbox"> Occlusion test wall</label>
+        <p id="stone-arch-gpu-status"></p>
+        <p id="stone-arch-stream-status">Loading coarse geometry…</p>
       </section>
       <section class="inspector-section ship-stress-panel" aria-labelledby="ship-stress-heading">
         <h3 id="ship-stress-heading">Hansa ship stress test</h3>
@@ -204,6 +255,8 @@
             <label for="sky-rotation">Rotation</label><input id="sky-rotation" type="range" min="-180" max="180" step="1" value="0">
             <button id="sky-load" type="button">Choose sky panorama</button><input id="sky-file" type="file" accept="image/png,image/jpeg,.tga,.bmp" hidden>
             <label for="sky-clouds">Clouds <input id="sky-clouds" type="checkbox" checked></label>
+            <label for="sky-volumetric">Volumetric clouds <input id="sky-volumetric" type="checkbox" disabled></label>
+            <label for="sky-cloud-quality">Cloud quality</label><select id="sky-cloud-quality" disabled><option value="16">Low</option><option value="24" selected>Medium</option><option value="48">High</option></select>
             <label for="sky-coverage">Cloud coverage</label><input id="sky-coverage" type="range" min="0" max="1" step="0.01" value="0.58">
             <label for="sky-density">Cloud density</label><input id="sky-density" type="range" min="0" max="5" step="0.05" value="1">
             <label for="sky-rayleigh">Rayleigh scattering</label><input id="sky-rayleigh" type="range" min="0.01" max="5" step="0.01" value="1">
@@ -380,7 +433,7 @@
         <label><span>Object interactions</span><select id="water-interactions"><option value="1">Ripples and wakes</option><option value="2">Contact ripples</option><option value="3">Moving wake</option><option value="0">Off</option></select></label>
         <label><span>Water surface</span><select id="water-preset"><option value="0">Animated lake</option><option value="1">Still water</option><option value="29">Calm interaction pool</option><option value="2">Reflections off</option><option value="3">Environment reflections (WebGPU)</option><option value="25">Caustics off</option><option value="26">Still caustics</option><option value="19">Underwater effects off</option><option value="20">Underwater absorption off</option><option value="21">Underwater fog off</option><option value="14">Planar reflections off</option><option value="15">Still planar mirror</option><option value="8">Refraction off</option><option value="9">Shoreline foam off</option><option value="10">Reflective surface only</option></select></label>
       </section><section class="inspector-section controls"><h3>Scene controls</h3><label><span>Directional light</span><input id="sun" type="checkbox" checked disabled></label><label><span>Sun shadows</span><input id="shadows" type="checkbox" checked disabled></label><label><span>Moving point light</span><input id="point" type="checkbox" checked disabled></label><div class="buttons"><button id="pause" disabled>Pause motion</button><button id="reset" disabled>Reset camera</button></div></section>
-      <section class="inspector-section importer"><h3>3D model</h3><div class="buttons"><button id="import-fbx" disabled>Import FBX / GLB</button><button id="restore-demo" disabled>Restore demo</button></div><input id="fbx-file" type="file" accept=".fbx,.glb,.png,.jpg,.jpeg,.tga,.bmp" multiple hidden disabled><p id="import-status" role="status">Select an FBX or GLB with companion images · 32 MB each</p><p id="texture-info" role="status">Embedded base-color textures load automatically.</p><button id="apply-texture" disabled>Override texture</button><input id="texture-file" type="file" accept=".png,.jpg,.jpeg,.tga,.bmp" hidden disabled></section>
+      <section class="inspector-section importer"><h3>3D model</h3><div class="buttons"><button id="import-fbx" disabled>Import model</button><button id="restore-demo" disabled>Restore demo</button></div><input id="fbx-file" type="file" accept=".fbx,.glb,.webengine.zip,.png,.jpg,.jpeg,.tga,.bmp" multiple hidden disabled><p id="import-status" role="status">Select an FBX, GLB, or WebEngine bundle · 32 MB each</p><p id="texture-info" role="status">Embedded base-color textures load automatically.</p><button id="apply-texture" disabled>Override texture</button><input id="texture-file" type="file" accept=".png,.jpg,.jpeg,.tga,.bmp" hidden disabled></section>
       <section class="inspector-section animation-panel"><h3>Skeletal animation</h3><button id="skeletal-demo" disabled>Load animated FBX demo</button><p id="animation-info">Import a skeletal FBX or GLB with animation clips.</p>
         <div id="animation-controls">
           <label for="animation-clip">Clip A / crossfade target</label><select id="animation-clip" disabled></select>

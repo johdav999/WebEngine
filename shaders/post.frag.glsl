@@ -4,6 +4,19 @@ uniform sampler2D sourceColor,bloomColor;
 uniform vec4 params,grade;
 uniform bool extractBloom;
 out vec4 outputColor;
+// Khronos PBR Neutral. Nonnegative linear Rec.709 in, bounded linear Rec.709 out.
+vec3 pbrNeutral(vec3 color) {
+    float low=min(color.r,min(color.g,color.b));
+    float toe=low<.08 ? low*(1.0-6.25*low) : .04;
+    vec3 adjusted=color-vec3(toe);
+    float peak=max(adjusted.r,max(adjusted.g,adjusted.b));
+    const float shoulder=.76;
+    if(peak<shoulder) return adjusted;
+    const float headroom=1.0-shoulder;
+    float compressed=1.0-headroom*headroom/(peak+headroom-shoulder);
+    float desaturate=1.0-1.0/(1.0+.15*(peak-compressed));
+    return mix(adjusted*(compressed/peak),vec3(compressed),desaturate);
+}
 void main() {
     ivec2 size=textureSize(sourceColor,0);
     if(extractBloom) {
@@ -22,7 +35,8 @@ void main() {
         }glow/=weight;
     }
     vec3 c=max(texelFetch(sourceColor,ivec2(gl_FragCoord.xy),0).rgb+glow*params.y,vec3(0))*params.x;
-    c=c/(vec3(1)+c);c=mix(vec3(dot(c,vec3(.2126,.7152,.0722))),c,grade.x);
+    c=grade.z==1.0 ? pbrNeutral(c) : c/(vec3(1)+c);
+    c=mix(vec3(dot(c,vec3(.2126,.7152,.0722))),c,grade.x);
     c=clamp((c-vec3(.18))*grade.y+vec3(.18),vec3(0),vec3(1));
     outputColor=vec4(mix(12.92*c,1.055*pow(c,vec3(1.0/2.4))-.055,greaterThan(c,vec3(.0031308))),1);
 }

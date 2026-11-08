@@ -11,6 +11,7 @@ $buildTargets = if ($Backend -eq 'D3D12') { @('webengine_windows','windows_backe
 $buildTargets += @('webengine_lighting_windows','windows_lighting_smoke','windows_environment_smoke','webengine_animation_windows','windows_animation_smoke','webengine_terrain_windows','windows_terrain_smoke','webengine_water_windows','windows_water_smoke')
 $buildTargets += @('desktop_pointer_tests','desktop_accessibility_tests')
 $buildTargets += @('webengine_fx_windows','windows_fx_smoke')
+$buildTargets += @('webengine_render_surface_windows','webengine_cutscene_windows')
 $buildTargets += @('windows_performance_smoke','desktop_recovery_tests')
 $buildTargets += @('windows_gpu_profile_smoke','performance_tests')
 cmake --build $buildRoot --config Release --target @buildTargets --parallel 6

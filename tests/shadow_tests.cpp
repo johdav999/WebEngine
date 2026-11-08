@@ -4,6 +4,7 @@
 #include "engine/render_frame.hpp"
 #include "engine/mesh_component.hpp"
 #include "engine/performance.hpp"
+#include "engine/view_lighting.hpp"
 #include <cstring>
 #include <iostream>
 #include <limits>
@@ -55,6 +56,39 @@ int main() {
         }
         quality.maxShadowMaps=2;check(planShadows(collected.lights,cam,1.5f,quality,1024).count==2,"Bounded map budget");
         quality.maxShadowMaps=0;check(planShadows(collected.lights,cam,1.5f,quality,1024).count==0,"Zero budget disables maps");
+        Scene ranked;
+        auto& eye=ranked.addChild<CameraComponent>();
+        for(int i=0;i<7;++i)ranked.addChild<LightComponent>("Prioritized fill",LightType::Point).priority=1;
+        auto& left=ranked.addChild<LightComponent>("Left",LightType::Point);
+        auto& right=ranked.addChild<LightComponent>("Right",LightType::Point);
+        left.transform.position={-4,0,-4};right.transform.position={4,0,-4};left.range=right.range=6;
+        ViewLightSelection selection;
+        auto selected=[&](bool shadows=false){return selection.prepare(ranked.collect().lights,eye,1.5f,quality,1024,shadows);};
+        quality=RenderQuality{};quality.rankedLights=true;
+        auto lighting=selected();
+        check(lighting.eligibleCount==9&&lighting.lightCount==8&&lighting.lights[7].component==left.id(),"Ranked light ties use stable scene handles");
+        eye.transform.position.x=.1f;
+        check(selected().lights[7].component==left.id(),"Small camera motion does not replace a close-ranked light");
+        eye.transform.position.x=3;
+        check(selected().lights[7].component==right.id(),"More influential local lights replace the incumbent past hysteresis");
+        auto& rankedSun=ranked.addChild<LightComponent>("Prioritized sun",LightType::Directional);
+        auto& leftBeam=ranked.addChild<LightComponent>("Left beam",LightType::Spot);
+        auto& rightBeam=ranked.addChild<LightComponent>("Right beam",LightType::Spot);
+        rankedSun.priority=100;leftBeam.priority=99;rightBeam.priority=98;
+        rankedSun.shadow.enabled=leftBeam.shadow.enabled=rightBeam.shadow.enabled=true;
+        quality.directionalCascades=3;quality.localShadowReserve=2;
+        lighting=selected(true);
+        check(lighting.eligibleCount==12&&lighting.lights[0].component==rankedSun.id()&&lighting.shadows.count==4,"Late priority lights enter the bounded view");
+        check(lighting.shadows.maps[0].cascade&&lighting.shadows.maps[1].cascade&&lighting.shadows.maps[2].light==1&&lighting.shadows.maps[3].light==2,
+              "Two local shadow reservations clamp sun cascades and preserve both compact spotlight slots");
+        quality.maxShadowMaps=1;
+        lighting=selected(true);
+        check(lighting.shadows.count==1&&lighting.shadows.maps[0].light==1,"Spotlight reservations respect reduced map budgets");
+        quality.rankedLights=false;quality.localShadowReserve=0;
+        lighting=selected(true);
+        check(lighting.lights[7].component==left.id()&&lighting.shadows.count==0,"Default selection retains traversal order and legacy map behavior");
+        rankedSun.priority=101;rejects([&] { ranked.collect(); });
+        quality.localShadowReserve=5;rejects([&] { quality.validate(); });
         Scene scene;auto& parent=scene.addChild<Actor>("Light parent");parent.transform.position={5,6,7};parent.transform.rotation.z=pi/2;
         auto& light=parent.addComponent<LightComponent>("Sun",LightType::Directional);light.shadow=settings;light.shadow.center={1,0,0};
         auto& caster=scene.addChild<MeshComponent>("Caster",Mesh::cube());

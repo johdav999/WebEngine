@@ -38,7 +38,7 @@ if(WEBENGINE_WINDOWS_D3D12)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
   set(_d3d_shaders "${CMAKE_CURRENT_BINARY_DIR}/generated/d3d12_shaders.hpp")
   set(_d3d_binary)
-  foreach(_entry meshVS meshPS guiVS guiPS shadowVS shadowPS fullVS skyVS skySphereVS skyPS bloomPS compositePS skinVS skinShadowVS waterCapturePS waterCaptureMsPS underwaterPS particleVS ribbonVS fxPS instanceVS instanceShadowVS instanceSkinVS instanceSkinShadowVS)
+  foreach(_entry meshVS meshPS guiVS guiPS shadowVS shadowPS fullVS skyVS skySphereVS skyPS skyVolumePS cloudGridPS cloudShadowPS bloomPS compositePS skinVS skinShadowVS waterCapturePS waterCaptureMsPS underwaterPS particleVS ribbonVS fxPS instanceVS instanceShadowVS instanceSkinVS instanceSkinShadowVS fogGridPS fogLightCachePS)
     if(_entry MATCHES "VS$")
       set(_profile vs_6_0)
     else()
@@ -48,7 +48,9 @@ if(WEBENGINE_WINDOWS_D3D12)
     add_custom_command(OUTPUT "${_binary}"
       COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/generated"
       COMMAND "${WEBENGINE_DXC_DIR}/bin/x64/dxc.exe" -T ${_profile} -E ${_entry} -O3 -WX -Fo "${_binary}" "${_desktop_engine_root}/shaders/desktop_d3d12.hlsl"
-      DEPENDS "${_desktop_engine_root}/shaders/desktop_d3d12.hlsl" "${_desktop_engine_root}/shaders/desktop_fog.hlsli" "${_desktop_engine_root}/shaders/desktop_environment.hlsli" "${_desktop_engine_root}/shaders/desktop_layers.hlsli" "${_desktop_engine_root}/shaders/desktop_water_surface.hlsli" "${_desktop_engine_root}/shaders/desktop_water_passes.hlsli" "${_desktop_engine_root}/shaders/desktop_fx.hlsli" VERBATIM)
+      DEPENDS "${_desktop_engine_root}/shaders/desktop_diffuse_gi.hlsli"
+              "${_desktop_engine_root}/shaders/desktop_screen_reflections.hlsli"
+              "${_desktop_engine_root}/shaders/desktop_d3d12.hlsl" "${_desktop_engine_root}/shaders/desktop_fog.hlsli" "${_desktop_engine_root}/shaders/desktop_fog_volume.hlsli" "${_desktop_engine_root}/shaders/desktop_fog_grid.hlsli" "${_desktop_engine_root}/shaders/desktop_environment.hlsli" "${_desktop_engine_root}/shaders/desktop_layers.hlsli" "${_desktop_engine_root}/shaders/desktop_water_surface.hlsli" "${_desktop_engine_root}/shaders/desktop_water_passes.hlsli" "${_desktop_engine_root}/shaders/desktop_fx.hlsli" VERBATIM)
     list(APPEND _d3d_binary "${_binary}")
   endforeach()
   add_custom_command(OUTPUT "${_d3d_shaders}"
@@ -90,10 +92,26 @@ add_custom_command(TARGET webengine_editor POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_directory "$<TARGET_FILE_DIR:webengine_windows>/assets" "$<TARGET_FILE_DIR:webengine_editor>/assets")
 add_executable(webengine_windows examples/windows_vehicle.cpp)
 add_executable(webengine_lighting_windows examples/windows_lighting.cpp)
+add_executable(webengine_clouds_windows examples/windows_clouds.cpp)
+target_link_libraries(webengine_clouds_windows PRIVATE WebEngine::Desktop)
+target_compile_options(webengine_clouds_windows PRIVATE /W4 /utf-8)
+add_dependencies(webengine_clouds_windows webengine_windows)
 add_executable(webengine_animation_windows examples/windows_animation.cpp)
 add_executable(webengine_terrain_windows examples/windows_terrain.cpp)
 add_executable(webengine_water_windows examples/windows_water.cpp)
 add_executable(webengine_fx_windows examples/windows_fx.cpp)
+add_executable(webengine_render_surface_windows examples/windows_render_surface.cpp)
+target_link_libraries(webengine_render_surface_windows PRIVATE WebEngine::Desktop)
+target_compile_options(webengine_render_surface_windows PRIVATE /W4 /utf-8)
+add_executable(webengine_cutscene_windows examples/windows_cutscene.cpp)
+target_link_libraries(webengine_cutscene_windows PRIVATE WebEngine::Desktop)
+target_compile_options(webengine_cutscene_windows PRIVATE /W4 /utf-8)
+add_dependencies(webengine_cutscene_windows webengine_windows)
+add_custom_command(TARGET webengine_cutscene_windows POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:webengine_cutscene_windows>/assets"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${_desktop_engine_root}/tests/fixtures/audio-tone.mp3"
+    "$<TARGET_FILE_DIR:webengine_cutscene_windows>/assets/audio-stream-preview.mp3")
 target_link_libraries(webengine_fx_windows PRIVATE WebEngine::Desktop)
 target_compile_options(webengine_fx_windows PRIVATE /W4 /utf-8)
 add_dependencies(webengine_fx_windows webengine_windows)
@@ -111,6 +129,9 @@ add_custom_command(TARGET webengine_animation_windows POST_BUILD
 target_link_libraries(webengine_lighting_windows PRIVATE WebEngine::Desktop)
 target_compile_options(webengine_lighting_windows PRIVATE /W4 /utf-8)
 add_dependencies(webengine_lighting_windows webengine_windows)
+add_custom_command(TARGET webengine_lighting_windows POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/assets/stone-arch-lod"
+    "$<TARGET_FILE_DIR:webengine_lighting_windows>/assets/stone-arch-lod")
 add_executable(webengine_content_windows examples/windows_content_iteration.cpp)
 target_link_libraries(webengine_content_windows PRIVATE WebEngine::Desktop engine_editor)
 target_compile_options(webengine_content_windows PRIVATE /W4 /utf-8)

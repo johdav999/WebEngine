@@ -55,6 +55,11 @@ int main(int argc,char** argv){try{
     sky={};sky.geometry=SkyGeometry::Sphere;g.world->setSky(sky);capture("orthographic-sphere");
     g.camera->setPerspective(pi/3,.1f,60);g.world->setSky(SkyBackground{});g.world->setFog(std::nullopt);
     auto q=host.quality();q.post.enabled=true;q.post.bloomStrength=0;host.setQuality(q);capture("hdr");
+    q.post.toneMapper=ToneMapper::PbrNeutral;host.setQuality(q);capture("pbr-neutral");
+    auto invalidToneMapper=q;invalidToneMapper.post.toneMapper=static_cast<ToneMapper>(-1);bool rejectedToneMapper=false;
+    try{host.setQuality(invalidToneMapper);}catch(const std::invalid_argument&){rejectedToneMapper=true;}
+    check(rejectedToneMapper&&host.quality().post.toneMapper==ToneMapper::PbrNeutral,"Invalid tone mapper changed quality");capture("pbr-neutral-retained");
+    q.post.toneMapper=ToneMapper::Reinhard;host.setQuality(q);capture("reinhard-restored");
     q.post.bloomStrength=.8f;host.setQuality(q);capture("bloom");
     q.post.bloomThreshold=20;host.setQuality(q);capture("threshold");
     q.post.bloomThreshold=1;q.post.exposure=1;host.setQuality(q);capture("exposure");

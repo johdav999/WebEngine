@@ -16,15 +16,19 @@ void waterVertex(inout float3 p,inout float3 n,inout float3 t,inout float3 b){
 float3 linearDisplay(float3 c){if(outputOptions.x>.5)return c;return float3(c.x>.04045?pow((c.x+.055)/1.055,2.4):c.x/12.92,c.y>.04045?pow((c.y+.055)/1.055,2.4):c.y/12.92,c.z>.04045?pow((c.z+.055)/1.055,2.4):c.z/12.92);}
 float3 surfaceFog(float3 color,MeshOutput input){
     if(maps.z<.5)return color;
-    if(reflectionOptions.y>.5&&frameFog.colorDensity.w>0){
+    if(reflectionOptions.y>.5&&(frameFog.colorDensity.w>0||frameFog.volumeMinSteps.w>0)){
         const float3 n=reflectionPlane.xyz,p=input.world,reflectedForward=reflect(frameFog.forward.xyz,n);
         const float3 virtualEye=frameFog.eye.w>.5?p-reflectedForward*(dot(p-cameraEnvironment.xyz,reflectedForward)-frameFog.forward.w):cameraEnvironment.xyz;
         const float3 delta=p-virtualEye;const float denom=dot(n,delta),amount=saturate(-dot(reflectionPlane,float4(virtualEye,1))/(abs(denom)>1e-6?denom:1e-6));
         const float3 hit=virtualEye+delta*amount,eye=virtualEye-2*dot(reflectionPlane,float4(virtualEye,1))*n;
+        if(frameFog.volumeMinSteps.w>0){
+            const float4 a=fogVolumeSegment(eye,hit,0),b=fogVolumeSegment(hit,p,length(hit-eye));
+            return color*a.a*b.a+(maps.z>1.5?0:a.rgb+a.a*b.rgb);
+        }
         const float first=length(hit-eye),depth=fogDepth(frameFog,eye,hit,frameFog.height.x)+fogDepth(frameFog,hit,p,max(0,frameFog.height.x-first));
         return lerp(frameFog.colorDensity.rgb,color,exp(-depth));
     }
-    return fogApply(frameFog,color,input.world,maps.z>1.5);
+    return fogVolumeApply(color,input.world,maps.z>1.5);
 }
 float3 scenePoint(float2 pixel,float depth){const float2 ndc=(pixel-waterViewport.xy)/waterViewport.zw*float2(2,-2)+float2(-1,1);const float4 position=mul(inverseViewProjection,float4(ndc,depth,1));return position.xyz/position.w;}
 float3 waterComposite(MeshOutput input,float3 normal,float3 body,float3 display,float time,float nv){
@@ -40,9 +44,9 @@ float3 waterComposite(MeshOutput input,float3 normal,float3 body,float3 display,
     const float thickness=clamp(dot(samplePoint-input.world,viewForward.xyz)/max(dot(ray,viewForward.xyz),.1),0,100);
     const float3 transmitted=linearDisplay(sceneWaterColor.SampleLevel(clampClamp,pixel/waterExtent.xy,0).rgb),attenuation=exp(-absorptionFoam.rgb*thickness);
     const float fresnel=.02+.98*pow(1-saturate(nv),5);
-    float3 result=lerp(display,transmitted*attenuation+surfaceFog(saturate(body),input)*(1-attenuation),transmission.x*(1-fresnel*waterHorizon.w));
+    float3 result=lerp(display,transmitted*attenuation+surfaceFog(cloudApply(saturate(body),input.world,false),input)*(1-attenuation),transmission.x*(1-fresnel*waterHorizon.w));
     const float gap=max(dot(input.world-background,input.planeNormal),0),pattern=.65+.35*sin(input.uv.x*absorptionFoam.w*6.2831853+time*.8)*sin(input.uv.y*absorptionFoam.w*5.1-time*.6);
-    const float foam=transmission.z*(1-smoothstep(0,transmission.w,gap))*pattern;return lerp(result,surfaceFog(foamColor.rgb,input),foam);
+    const float foam=transmission.z*(1-smoothstep(0,transmission.w,gap))*pattern;return lerp(result,surfaceFog(cloudApply(foamColor.rgb,input.world,false),input),foam);
 }
 float interactionHeight(float3 p,float3 n){
     float height=0;

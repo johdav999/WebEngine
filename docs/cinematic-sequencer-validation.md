@@ -91,3 +91,35 @@ Safari, native rendering/audio output, physical speakers or sustained performanc
 README, architecture, feature contracts and both installed/CatGame engine-skill
 copies were updated. CatGame dependency/pin guidance remains intact; no gitlink
 change or consumer implementation is implied. See [feature contracts](cinematic-sequencer.md).
+
+## Live 2D, 3D and mixed cutscenes — 2026-11-06
+
+The isolated build and capture root was `F:/WebEngine-cutscene-validation-01a1b1d0`.
+The workspace C: drive ran out of space during linking. The browser build used
+the repository-local Emscripten 6.0.11. Its staged site combined the freshly
+built main and worker with the current browser host files and demo assets.
+
+- **Portable core:** Windows Release CTest passed `cinematic_runtime` and
+  `cinematic_sequence`. The sequencer's Wasm build passed 228 checks under Node.
+  A separate native retained-editor build passed `editor_authoring` and
+  `cinematic_sequence`.
+- **Windows:** `webengine_cutscene_windows --smoke` ran against Dawn and direct
+  D3D12. Each run verified 3D playback and an owned streamed voice, the same
+  gate outcome on skip and completion, the gameplay input gate and camera
+  restoration, the orthographic shot, the mixed overlay and cancellation.
+  Native captures are in `evidence/windows-dawn` and `evidence/windows-d3d12`.
+- **Desktop browser:** Chrome 156 WebGPU passed `cutscene-game-smoke.cjs` and
+  `cinematic-sequence-smoke.cjs`. The live test verified blocked and restored
+  movement including a held key, gate passage after skip, the 2D atlas frame
+  change, the overlaid card and the cut to an orthographic shot. Authoring
+  verified both file versions, visual sprite frames, timed subtitles, real
+  streamed audio, and byte-for-byte source preservation after isolated preview.
+  Browser reports and images are in `evidence/game-browser` and `evidence/authoring`.
+- **WebGL2 fallback:** the complete live smoke passed using Chrome's software
+  ANGLE backend with shadows disabled. The report is in
+  `evidence/game-browser-webgl2-no-shadows`. Default headless WebGL2 encountered
+  framebuffer creation and context loss before the authoring checks. The same
+  build reproduced the context loss on the lighting and physics routes.
+
+The browser run used desktop Chrome. Physical mobile, Safari and sustained
+performance remain outside this validation.

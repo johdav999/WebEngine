@@ -26,8 +26,34 @@ try{for(const backend of ['webgpu','webgl2']){
  const beforeBad=await snapshot();await p.locator('#cine-duration').fill('1');await p.locator('#cine-settings-apply').click();assert.deepEqual((await snapshot()).data,beforeBad.data,'Invalid duration retains the document');
  await action(1);await seek(7.9);await p.locator('#cine-play').click();await p.waitForFunction(()=>!EngineCinematic.snapshot().playing&&EngineCinematic.snapshot().time===8);assert.equal((await snapshot()).audioVoices,0);await p.locator('#cine-stop').click();assert.equal((await snapshot()).time,0);assert.equal((await snapshot()).particles,0);await action(5);assert.equal(await sourceHash(),original);
  await p.locator('#editor-toggle').click();await p.waitForFunction(()=>EngineEditor.active());const editorSource=await sourceHash();await p.locator('#cine-open').click();await p.waitForFunction(()=>EngineCinematic.snapshot().preview);await p.locator('#cine-close').waitFor({state:'visible'});assert.equal(await p.evaluate(()=>document.querySelector('.dock-top').inert),true);assert.equal(await p.evaluate(()=>Module._engine_editor_play(1)),0);assert.equal(await p.evaluate(()=>Module._engine_editor_fx_preview(1)),0);assert.equal(await p.evaluate(()=>Module._engine_editor_mode(0)),0);await seek(3);await p.locator('#cine-close').click();assert.equal(await sourceHash(),editorSource,'Editor preview preserves authoring state');await p.locator('#editor-toggle').click();assert.equal(await p.evaluate(()=>EngineEditor.active()),false);
+ const spriteSource=await sourceHash();
+ await p.locator('#cine-add-type').selectOption('5');
+ await p.locator('#cine-add-target').selectOption('cine.card');await p.locator('#cine-add').click();
+ await p.locator('#cine-atlasColumns').fill('2');await p.locator('#cine-start').fill('.5');await p.locator('#cine-end').fill('2');await p.locator('#cine-track-apply').click();
+ assert.equal((await snapshot()).data.tracks[6].atlasColumns,2);
+ await seek(1.25);const firstSprite=await shot('sprite-first');await action(5);
+ await p.locator('#cine-key').selectOption('0');await p.locator('#cine-sprite-frame').fill('1');await p.locator('#cine-key-apply').click();
+ assert.equal((await snapshot()).data.tracks[6].keys[0].spriteFrame,1);
+ await seek(1.25);const secondSprite=await shot('sprite-second');await action(5);
+ const spriteFramePixels=diff(firstSprite,secondSprite);assert(spriteFramePixels>100,'Atlas frame key must change rendered sprite pixels');
+ await p.locator('#cine-add-type').selectOption('6');await p.locator('#cine-add').click();
+ await p.locator('#cine-resource').fill('Take the <left> gate.');await p.locator('#cine-start').fill('1');await p.locator('#cine-end').fill('2');await p.locator('#cine-track-apply').click();
+ assert.equal((await snapshot()).data.tracks[7].target,'');
+ const authored2d=await p.evaluate(()=>EngineCinematic.encode(EngineCinematic.snapshot().data));
+ assert(authored2d.startsWith('WECINE 2\n'));
+ await p.locator('#cine-file').setInputFiles({name:'2d.wecin',mimeType:'text/plain',buffer:Buffer.from(authored2d)});
+ await p.waitForFunction(()=>document.querySelector('#cine-status').textContent.includes('Cinematic file opened'));
+ await seek(1.25);await p.locator('#cine-captions').waitFor({state:'visible'});assert.equal(await p.locator('#cine-captions').textContent(),'Take the <left> gate.');
+ await seek(2);await p.locator('#cine-captions').waitFor({state:'hidden'});
+ await action(5);const afterSpriteSource=await sourceHash();
+ if(afterSpriteSource!==spriteSource){
+  const [before,after]=await p.evaluate(()=>__sourceHistory.slice(-2));
+  await fs.writeFile(path.join(out,backend+'-sprite-source-before.scene'),Buffer.from(before));
+  await fs.writeFile(path.join(out,backend+'-sprite-source-after.scene'),Buffer.from(after));
+ }
+ assert.equal(afterSpriteSource,spriteSource,'2D preview preserves authoring state');
  await p.locator('#cine-expand').click();await p.setViewportSize({width:390,height:844});await p.locator('#cine-open').scrollIntoViewIfNeeded();await frames();assert(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Compact sequencer must not overflow the document');await p.screenshot({path:path.join(out,backend+'-compact.png')});
  await p.locator('#cine-open').click();await seek(3);await p.evaluate(()=>Module._engine_shutdown());assert.equal(await p.evaluate(()=>EngineAudioDevices.devices.size),0);assert.equal(await p.evaluate(()=>document.body.dataset.engine),'stopped');const now=await p.evaluate(()=>performance.now());await p.waitForFunction(t=>performance.now()>t+350,now);
- result.backends[backend]={wideToFx:diff(early,fountain),wideToClose:diff(fountain,close),checks:['all five track types','camera cuts and object/animation pixels','deterministic FX scrubbing','silent seek and exact source restoration','real streamed audio on Play and stop on Pause','GPU recovery','native key edit/undo/redo','one-command key drag','Escape cancels clip drag','file roundtrip/corrupt retention','invalid duration retention','end and rewind','looped source offset wrapping','editor preview exclusion and inert source controls','compact layout','shutdown cleanup']};await p.close();console.log(backend+' cinematic sequencer passed');
+ result.backends[backend]={wideToFx:diff(early,fountain),wideToClose:diff(fountain,close),spriteFramePixels,checks:['all seven track types','camera cuts and object/animation pixels','deterministic FX scrubbing','silent seek and exact source restoration','real streamed audio on Play and stop on Pause','GPU recovery','native key edit/undo/redo','one-command key drag','Escape cancels clip drag','file roundtrip/corrupt retention','invalid duration retention','end and rewind','looped source offset wrapping','editor preview exclusion and inert source controls','2D atlas authoring and rendered frames','plain-text subtitle authoring and timed preview','WECINE 2 import','compact layout','shutdown cleanup']};await p.close();console.log(backend+' cinematic sequencer passed');
 }assert.deepEqual(result.errors,[]);}catch(e){result.failure=String(e.stack||e);throw e;}finally{await fs.writeFile(path.join(out,'results.json'),JSON.stringify(result,null,2));await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

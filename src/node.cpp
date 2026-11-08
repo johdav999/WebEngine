@@ -133,6 +133,7 @@ std::unique_ptr<Node> Node::detachChild(Node& child) {
     requireIdle();
     if(child.parent_!=this || child.protectedChild_ || child.subtreePending())
         throw std::invalid_argument("Cannot detach this child");
+    if(scene_) scene_->requireCinematicSubtreeMovable(child);
     TraversalGuard guard(*this);
     if(scene_) scene_->detachSubtree(child);
     // Cleanup hooks may append siblings, so find the child after those hooks.
@@ -163,6 +164,7 @@ void Node::reparent(Node& newParent,ReparentMode mode) {
         if(node==this) throw std::invalid_argument("Hierarchy cycles are not allowed");
     if(parent_==&newParent) return;
     if(mode!=ReparentMode::KeepLocal && mode!=ReparentMode::KeepWorld) throw std::invalid_argument("Invalid reparent mode");
+    if(scene_&&scene_!=newParent.scene_) scene_->requireCinematicSubtreeMovable(*this);
     auto next=transform;
     if(mode==ReparentMode::KeepWorld) next=decomposeTransform(inverseAffine(newParent.worldMatrix())*worldMatrix());
     newParent.children_.reserve(newParent.children_.size()+1);

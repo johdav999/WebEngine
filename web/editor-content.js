@@ -8,7 +8,7 @@
   autosave.innerHTML=`<summary>Autosave & recovery</summary><label><input id="editor-autosave-enabled" type="checkbox" checked> Autosave committed edits</label><label>Delay (seconds)<input id="editor-autosave-delay" type="number" value="3" min="1" max="300" step="1"></label><div class="editor-content-buttons"><button id="editor-autosave-now">Save recovery now</button><button id="editor-recover" disabled>Recover autosave</button></div><p id="editor-autosave-status" role="status">Checking browser recovery…</p><small>One recovery slot in this browser. Recovery replaces the current scene when you choose it. Download a scene file to keep a separate copy.</small>`;
   tools.after(autosave);
   const assets=document.createElement('details');assets.className='editor-content-section';assets.id='editor-assets';assets.open=true;
-  assets.innerHTML=`<summary>Assets</summary><div class="editor-content-buttons"><button id="editor-import">Import assets</button><button id="editor-place" aria-pressed="false">Place in viewport</button></div><input id="editor-import-files" type="file" accept=".glb,.fbx,.png,.jpg,.jpeg,.bmp,.tga,.weassets" multiple hidden><label>Asset library<select id="editor-asset" aria-label="Asset library"></select></label><p id="editor-asset-info">Import GLB, FBX, images, or an asset library. Drop files on the viewport to import and place a model.</p>`;
+  assets.innerHTML=`<summary>Assets</summary><div class="editor-content-buttons"><button id="editor-import">Import assets</button><button id="editor-place" aria-pressed="false">Place in viewport</button></div><input id="editor-import-files" type="file" accept=".glb,.webengine.zip,.fbx,.png,.jpg,.jpeg,.bmp,.tga,.weassets" multiple hidden><label>Asset library<select id="editor-asset" aria-label="Asset library"></select></label><p id="editor-asset-info">Import GLB, WebEngine bundles, FBX, images, or an asset library. Drop files on the viewport to import and place a model.</p>`;
   autosave.after(assets);
   const inspector=document.createElement('details');inspector.className='editor-content-section';inspector.id='editor-component-inspector';inspector.open=true;
   inspector.innerHTML=`<summary>Components & properties</summary><label>Inspect component<select id="editor-component"><option value="">Choose a component…</option></select></label><p id="editor-property-reason"></p><div id="editor-properties"></div>`;
@@ -130,7 +130,7 @@
     editor().cancel();const token=generation;editor().setBusy(true);let placed=null,failures=[];
     try{
       for(const file of files){
-        const suffix=file.name.split('.').at(-1).toLowerCase(),kind=suffix==='glb'?0:suffix==='fbx'?1:['png','jpg','jpeg','bmp','tga'].includes(suffix)?2:suffix==='weassets'?3:-1;
+        const suffix=file.name.split('.').at(-1).toLowerCase(),kind=(suffix==='glb'||/\.webengine\.zip$/i.test(file.name))?0:suffix==='fbx'?1:['png','jpg','jpeg','bmp','tga'].includes(suffix)?2:suffix==='weassets'?3:-1;
         if(kind<0||!file.size||file.size>(kind===3?512:32)*1024*1024){failures.push(`${file.name}: unsupported or oversized file`);continue;}
         const bytes=new Uint8Array(await file.arrayBuffer());if(token!==generation)throw Error('The scene changed while the import was loading.');
         const ok=withText(file.name,name=>withData(bytes,p=>Module._engine_editor_import(kind,p,bytes.length,name)));

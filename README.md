@@ -274,6 +274,12 @@ Open [the demo](http://localhost:8080) in a browser supporting WebGPU or WebGL 2
 
 The setup script does not install global SDK environment settings. `.tools`, `build`, and `dist` are ignored by Git. First setup downloads the compiler toolchain; the first browser build also downloads the SDK-pinned Dawn port.
 
+Choose **Mobile preview** in the browser viewport footer to try the live scene
+at phone or tablet dimensions. Use **Rotate** to switch orientation and
+**Exit preview** to return to the full viewport. The playground and browser
+scene editor support the preview on WebGPU and WebGL 2. See
+[mobile preview](docs/mobile-preview.md) for presets, pixel budgets and scope.
+
 ```powershell
 ./scripts/build.ps1 -Configuration Release
 ./scripts/serve.ps1 -Port 8081
@@ -325,6 +331,13 @@ and opt-in day/night lighting use explicit caller-owned clock steps. See
 inspector has a **Sky background** section. The playground starts with a mesh
 sphere, atmosphere, moving clouds and a 180-second day/night cycle. Its controls
 include cloud coverage, haze, time of day and cycle speed; Pause freezes the cycle.
+
+Opt-in volumetric clouds add world-space parallax, a 3D density layer and sunlight
+self-shadowing on WebGPU, WebGL2, Dawn and D3D12. Active volumes also compose at
+World fragment depth; optional sun-aligned terrain shadows attenuate direct
+sunlight. Open `?scene=volumetric-clouds`
+or run `webengine_clouds_windows --backend dawn`. The legacy 2D cloud layer remains
+the default. See [volumetric cloud settings and checks](docs/sky.md#volumetric-cloud-layer).
 
 ## Rendering quality and browser resilience
 
@@ -589,8 +602,8 @@ Views draw in list order. Each view completes Background, World, and Overlay bef
 its successor. `clearColor` clears only that camera's viewport; `std::nullopt` loads
 earlier color. Depth starts fresh for each camera/layer, so later cameras can draw
 over earlier geometry regardless of its depth. GUI renders once over the completed
-canvas. This is direct viewport compositing; it does not provide camera render
-textures, whole-view opacity, postprocessing, or shared depth between cameras.
+canvas. For a view that needs to appear as a texture on a mesh, use a camera
+[render surface](docs/render-surfaces.md).
 
 Cameras remain caller-owned and must stay alive until removed from the renderer's
 view list. `setViews()` validates and copies the list atomically. Disabled cameras
@@ -1398,10 +1411,17 @@ See [workflow, APIs and limits](docs/replay-recording.md).
 ## Cinematic sequencer
 
 Open **`?scene=cinematic`** to author camera shots, object motion, skeletal
-animation, sound and FX together on a scrubbable timeline. Drag clips/keys, edit
+animation, sound, FX, sprite atlas frames and subtitles on a scrubbable timeline. Drag clips/keys, edit
 exact values, undo/redo and save `.wecin` assets. Isolated preview preserves the
 source scene; scrubbing and frame stepping are silent. The sequencer panel also
 works with scenes in the editor. See [usage, APIs and limits](docs/cinematic-sequencer.md).
+
+Open **`?scene=cutscene-game`** in the browser or run
+`build/windows/Release/webengine_cutscene_windows.exe` to play the same gate
+encounter in 3D, orthographic 2D or a mixed sequence. A/D moves the player.
+Choose a sequence, then let it finish or skip with Escape to open the gate.
+Games can use [live playback](docs/cinematic-sequencer.md#in-game-playback)
+to bind their own scene, controls and completion logic.
 
 ## Audio system
 
@@ -1569,6 +1589,28 @@ Perfetto/Chrome trace export. Use `WEBENGINE_GPU_TIMING=0` for native profiling-
 comparisons; browser WebGPU retains `?gpuTiming=off`.
 
 ### Screen-size mesh detail and shadow budgets
+
+The [stone arch comparison](docs/clustered-lod.md) demonstrates optional
+clustered LOD for opaque static meshes. Open `?scene=stone-arch` in the browser
+or run `webengine_lighting_windows.exe --stone-arch streamed` on Windows.
+Compare full detail, whole-mesh, resident clustered and streamed LOD at fixed
+camera positions. Streamed LOD pins a coarse root and loads finer pages on demand.
+Enable GPU cluster submission in the demo on WebGPU or native Dawn to compare
+hierarchical depth culling and indirect indexed draws with CPU submission.
+Enable **GPU LOD traversal** as well to let the GPU choose camera detail and
+request fine pages. Open `?scene=stone-arch&gpuHierarchy=1` to select both
+options. On Windows, pass `--backend dawn --stone-arch streamed --arch-gpu-hierarchy`.
+Press **H** to toggle GPU traversal. Add
+`--arch-no-shadows` when comparing camera page demand independently from the
+CPU shadow selector.
+
+The GPU hierarchy path admits 511 nodes through depth eight per material part,
+64 plans and 4096 total nodes per view. It keeps a parent visible until both
+children are ready and retains the coarse root when a view exceeds its
+capacity. WebGL 2, direct D3D12, MSAA and offscreen captures use the CPU path.
+The [browser hierarchy smoke](scripts/stone-arch-hierarchy-smoke.cjs) and
+[Windows hierarchy smoke](scripts/stone-arch-hierarchy-windows-smoke.py)
+compare traversal, demand and coarse-to-fine rendering.
 
 The fleet demo prepares three shared static mesh LODs once per asset. The renderer
 selects them by projected bounds in each camera viewport, with 10% hysteresis.
@@ -1746,6 +1788,16 @@ GitHub Actions builds native core tests and a release browser artifact. Browser 
 
 Scene-wide exponential height fog is optional on both browser backends, with per-view opt-out, material/particle distances and archive support. Use **Height fog** in the playground. See [fog settings and composition](docs/fog.md).
 
+Scenes can opt into shadowed volumetric fog for World geometry,
+sky and FX on WebGPU, WebGL2, Dawn and direct D3D12. Open `?scene=fog-doorway` or launch
+`webengine_lighting_windows --backend dawn --fog-doorway volumetric`. Compare
+the beam with analytic fog and with shadows disabled. See [volumetric fog](docs/fog.md#opt-in-volumetric-fog).
+
+`RenderQuality::volumetricFogLightCache` optionally caches spotlight optical
+depth on WebGPU, WebGL2, Dawn and D3D12. It defaults off and retains direct
+integration as the fallback. Compare the intended scene with the
+[fog profiling fixtures](docs/fog-profiling.md) before enabling it.
+
 
 ### Ribbon trails
 
@@ -1838,6 +1890,18 @@ history/Play and v30 persistence are integrated in the editor. Open
 shadowed headlights, a torch and cascaded sunlight with HDR bloom/color grading. See
 [spotlight contracts](docs/spotlights.md) and [validation](docs/spotlights-validation.md).
 
+The lighting gallery's **Light budget** preset demonstrates view-ranked lights
+and reserved spotlight shadow maps. Open `?scene=lighting-zone` to compare a
+global bake with a local workshop probe on ceramic and polished metal. Rendering
+quality also exposes PBR Neutral HDR highlights and optional compact PBR on
+WebGL2. Windows gallery switches and build checks are listed in the
+[lighting guide](docs/lighting-improvements.md).
+
+Open `?scene=dynamic-gi` to compare one to four diffuse bounces while opening
+and closing a workshop door. The angled mirror uses a geometry-traced off-screen
+reflection cache, and screen-space reflections add visible detail on the floor.
+[Dynamic lighting controls and checks](docs/dynamic-lighting.md)
+
 Driving Stage 8 adds optional general static region streaming: immutable manifests,
 separate visual/collision readiness, staged publication, bounded admissions and body
 pins, editor history/bounds/source files and isolated vehicle traversal preview.
@@ -1907,3 +1971,10 @@ Shared game hosts can consume [WebEngine::Browser and the desktop integration se
 The [compiled module SDK handoff](docs/module-sdk.md) covers reusable non-quest
 plugins, an independent custom quest-binding consumer, native/Wasm CTest and
 feature-omission builds. These consumers configure without renderer downloads.
+
+## Unreal material delivery
+
+Import AssetManager `.webengine.zip` bundles or their extracted GLBs through the
+normal model import. Portable manifests retain advanced material factors/maps,
+alpha settings and recognized effects alongside embedded PBR textures. See
+[material delivery](docs/material-delivery.md) and [acceptance evidence](docs/material-delivery-validation.md).

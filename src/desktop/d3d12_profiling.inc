@@ -73,7 +73,8 @@ void collectGpuTimings(){
         if(!valid){++gpuInvalid_;gpuProfileCached_=gpuProfileJson();continue;}
         std::array<double,3> layers{};double shadows=0;
         for(const auto& event:sample.events){
-            if(std::string_view(event.name)=="Shadow map")shadows+=event.durationMs;
+            if(std::string_view(event.name)=="Shadow map"||std::string_view(event.name)=="Cloud shadow")shadows+=event.durationMs;
+            if(std::string_view(event.name)=="Cloud grid")layers[std::size_t(RenderLayer::World)]+=event.durationMs;
             // Disjoint layer work only; parent view/frame spans are never summed.
             if(event.layer>=0&&(std::string_view(event.name)=="Opaque"||std::string_view(event.name)=="Transparent / FX"||std::string_view(event.name)=="Water snapshot"||std::string_view(event.name)=="Water surface"||std::string_view(event.name)=="Underwater"))layers[std::size_t(event.layer)]+=event.durationMs;
         }

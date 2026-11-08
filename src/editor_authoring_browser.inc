@@ -6,7 +6,7 @@ std::uint32_t authoringGeneration=0;
 std::unique_ptr<EditorAuthoringPanel> authoringPanel;
 void advanceAuthoringPanel(){
     if(!authoringPanel)return;
-    double w=0,h=0;emscripten_get_element_css_size("#viewport",&w,&h);
+    const double w=browser::canvasCssWidth(),h=browser::canvasCssHeight();
     authoringPanel->setBounds({8,8,float(std::max(900.,w-16)),float(std::max(200.,h-16))});
     authoringPanel->update(!EM_ASM_INT({return !!window.EngineEditor?.isBusy();})&&browserEditorActive()&&!browserEditorPlaying()&&!browserEditorFxActive()&&!browserEditorRegionActive());
     const auto& s=authoringPanel->status();EM_ASM({window.authoringState={};window.authoringState.status=UTF8ToString($0);window.authoringState.visible=!!$1;window.authoringState.dirty=!!$2;window.authoringState.area=$3;window.authoringState.generation=$4;document.body.classList.toggle('shared-authoring-visible',!!$1);},s.c_str(),authoringPanel->visible(),authoringPanel->dirty(),int(authoringPanel->area()),authoringGeneration);

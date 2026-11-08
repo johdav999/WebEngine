@@ -1,11 +1,63 @@
 #include "water_gallery.hpp"
+#include "volumetric_water_fixture.hpp"
 #include "engine/desktop.hpp"
 #include <iostream>
 using namespace engine;
+
+static int captureVolumetricWater(DesktopHost& host,const std::filesystem::path& directory) {
+    using namespace volumetric_water_example;
+    std::filesystem::create_directories(directory);
+    auto scene=std::make_unique<Scene>("Volumetric water acceptance");
+    auto& world=*scene;
+    auto& camera=world.addChild<CameraComponent>("Camera");
+    auto* root=&world.spawn("Fixture");
+    configure(world,*root,camera,BedClear,false);
+    const auto id=host.application().loadScene(std::move(scene));
+    const DesktopView view{camera.id()};
+    host.setViews(id,{&view,1});
+    host.application().start(id);
+    host.setPaused(true);
+    for(int profile=0;profile<3;++profile) {
+        auto quality=host.quality();
+        quality.msaaSamples=profile==2?4:1;
+        host.setQuality(quality);
+        for(int mode=0;mode<Count;++mode) {
+            root->destroy();
+            world.flushPendingDestroy();
+            root=&world.spawn("Fixture");
+            configure(world,*root,camera,static_cast<Case>(mode),profile==1);
+            const auto until=host.nowSeconds()+60;
+            const auto firstFrame=host.diagnostics().presentedFrames;
+            auto step=[&]{
+                if(!host.step())throw std::runtime_error("Water fixture closed during capture");
+                const auto info=host.diagnostics();
+                if(!info.error.empty())throw std::runtime_error(info.error);
+                if(host.nowSeconds()>until)throw std::runtime_error("Volumetric water fixture timed out");
+                return info;
+            };
+            DesktopDiagnostics info;
+            do {info=step();} while(!info.ready||info.presentedFrames<firstFrame+3);
+            host.captureFrame(directory/(std::to_string(profile)+"-"+std::to_string(mode)+".ppm"));
+            do {info=step();} while(host.capturePending());
+            if(!host.captureError().empty())throw std::runtime_error(host.captureError());
+            if(mode==Count-1)std::cout<<info.renderState<<'\n';
+        }
+    }
+    return 0;
+}
+
 int main(int argc,char** argv){try{
-    DesktopSettings settings;settings.title="WebEngine | Water";settings.quality.post.enabled=true;std::filesystem::path capture;
+    DesktopSettings settings;settings.title="WebEngine | Water";settings.quality.post.enabled=true;std::filesystem::path capture,volumetricSmoke;
     for(int i=1;i<argc;i++){const std::string key=argv[i];if(key=="--backend"&&i+1<argc){const std::string value=argv[++i];if(value=="d3d12")settings.backend=DesktopBackend::Direct3D12;else if(value=="dawn")settings.backend=DesktopBackend::Dawn;else throw std::invalid_argument("Backend must be dawn or d3d12");}
-        else if(key=="--capture"&&i+1<argc){capture=argv[++i];settings.hidden=true;}else{std::cout<<"webengine_water_windows [--backend dawn|d3d12] [--capture image.ppm]\n";return key=="--help"?0:1;}}
+        else if(key=="--capture"&&i+1<argc){capture=argv[++i];settings.hidden=true;}
+        else if(key=="--volumetric-smoke"&&i+1<argc){volumetricSmoke=argv[++i];settings.hidden=true;}
+        else{std::cout<<"webengine_water_windows [--backend dawn|d3d12] [--capture image.ppm] [--volumetric-smoke output-directory]\n";return key=="--help"?0:1;}}
+    if(!volumetricSmoke.empty()){
+        settings.quality.post.enabled=false;
+        settings.width=640;settings.height=480;
+        DesktopHost host(settings);
+        return captureVolumetricWater(host,volumetricSmoke);
+    }
     DesktopFiles files;DesktopHost host(settings);auto g=water_example::makeGallery();auto m=g.defaults;m.water.speed=1;g.apply(m);
     auto& boat=lighting_example::object(*g.world,"Moving wake",Mesh::cube(),{},{.5f,.2f,.8f},lighting_example::material({1,.65f,.06f}));boat.castsShadow=false;
     const auto id=host.application().loadScene(std::move(g.scene));const DesktopView view{g.camera->id()};host.setViews(id,{&view,1});host.application().start(id);

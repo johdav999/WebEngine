@@ -51,6 +51,8 @@ struct DesktopView {
     ComponentId camera;
     std::optional<std::array<float,4>> clearColor=std::array<float,4>{.018f,.026f,.042f,1};
     bool skyEnabled=true,fogEnabled=true;
+    RenderSurfaceHandle target{};
+    bool refreshSurface=true;
 };
 struct DesktopDiagnostics {
     bool ready=false;

@@ -1,5 +1,13 @@
 // Matches the portable FogUniform and fog.wgsl analytic integration.
-struct Fog {float4 colorDensity,height,eye,forward;};
+struct FogVolumeData {float4 minimumFade,maximumDistance,colorDensity;};
+struct CloudData {float4 layer,eye,sun,shadow;};
+struct FogLightCacheData {float4 minimumIndex,maximum;};
+struct Fog {
+    float4 colorDensity,height,eye,forward,volumeMinSteps,volumeMaxDistance,volumeColorDensity,volumeOptions;
+    FogVolumeData additionalVolumes[3];
+    float4 volumeLighting;
+    FogLightCacheData lightCache[4];
+};
 float fogDepth(Fog f,float3 origin,float3 endpoint,float start) {
     const float distance=length(endpoint-origin);
     if(f.colorDensity.w<=0||distance<=start)return 0;

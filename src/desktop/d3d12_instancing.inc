@@ -14,7 +14,7 @@ D3D12_GPU_VIRTUAL_ADDRESS instanceObjects(Frame& frame,RenderFrame& collected,st
     return gpu.image->GetGPUVirtualAddress();
 }
 void drawBatch(Frame& frame,const RenderFrame& collected,const InstanceBatch& batch,D3D12_GPU_VIRTUAL_ADDRESS objects,bool shadow=false,const ShadowBatch* selected=nullptr){
-    auto source=collected.instanceDraw(batch.firstInstance);
+    auto source=collected.batchDraw(batch);
     if(selected){source.mesh=selected->mesh;source.firstIndex=selected->firstIndex;source.indexCount=selected->indexCount;}
     draw(frame,source,shadow,batch.instanceCount,objects+std::size_t(batch.firstInstance)*RenderFrame::objectStride);
 }

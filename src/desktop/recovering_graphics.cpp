@@ -16,10 +16,10 @@ class RecoveringGraphics final:public DesktopGraphics {
     std::string terminal_,reason_,captureError_;
     std::vector<DesktopView> handles(Scene* scene,std::span<const RenderView> views)const{
         RenderViews checked;checked.set(views);if(views.size()>32)throw std::invalid_argument("D3D12 view budget exceeded");
-        std::vector<DesktopView> result;for(const auto& v:views){if(!scene||v.camera->scene()!=scene)throw std::invalid_argument("Recovery camera must belong to its scene");result.push_back({v.camera->id(),v.clearColor,v.skyEnabled,v.fogEnabled});}return result;
+        std::vector<DesktopView> result;for(const auto& v:views){if(!scene||v.camera->scene()!=scene)throw std::invalid_argument("Recovery camera must belong to its scene");result.push_back({v.camera->id(),v.clearColor,v.skyEnabled,v.fogEnabled,v.target,v.refreshSurface});}return result;
     }
     std::vector<RenderView> resolve()const{
-        std::vector<RenderView> result;if(scene_)for(const auto& v:views_)if(auto* c=dynamic_cast<CameraComponent*>(scene_->findComponent(v.camera)))result.push_back({c,v.clearColor,v.skyEnabled,v.fogEnabled});return result;
+        std::vector<RenderView> result;if(scene_)for(const auto& v:views_)if(auto* c=dynamic_cast<CameraComponent*>(scene_->findComponent(v.camera)))result.push_back({c,v.clearColor,v.skyEnabled,v.fogEnabled,v.target,v.refreshSurface});return result;
     }
     void retire(){
         if(!active_)return;frames_+=active_->diagnostics().presentedFrames;

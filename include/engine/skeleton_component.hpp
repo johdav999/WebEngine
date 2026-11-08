@@ -16,6 +16,7 @@ public:
 private:
     friend class ArchiveCodec;
     friend class SkeletalMeshComponent;
+    friend class CinematicRuntime;
     std::shared_ptr<const Skeleton> skeleton_;
     std::shared_ptr<SkinPose> skinPose_=std::make_shared<SkinPose>();
     std::vector<Mat4> worlds_;

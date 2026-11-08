@@ -1,4 +1,13 @@
 // FOG_FUNCTIONS
+// FOG_FRAME
+@group(2) @binding(0) var<uniform> frame: Frame;
+@group(2) @binding(1) var shadowMaps: texture_depth_2d_array;
+@group(2) @binding(2) var shadowSampler: sampler_comparison;
+@group(2) @binding(4) var fogLightCache:texture_3d<f32>;
+@group(2) @binding(5) var fogLightCacheSampler:sampler;
+// FOG_VOLUME
+@group(2) @binding(3) var<storage,read> fogGrid:array<vec2u>;
+// FOG_GRID_SAMPLING
 struct Camera { viewProjection: mat4x4f, right: vec4f, up: vec4f, fog:Fog, inverseVp:mat4x4f, viewport:vec4f, forward:vec4f };
 @group(0) @binding(0) var<uniform> camera: Camera;
 @group(0) @binding(1) var opaqueDepth: texture_2d<f32>;
@@ -58,8 +67,8 @@ struct Output {
         }
     }
     let alpha=texel.a*in.color.a*fade;
-    let linear=texel.rgb*in.color.rgb;
+    let linear=cloudApply(texel.rgb*in.color.rgb,in.world,in.additive>0.5);
     let mapped=select(linear/(vec3f(1)+linear),linear,hdrOutput);
     // Match the current mesh renderer's display conversion, premultiply for blending.
-    return vec4f(hdrEncode(fogApply(camera.fog,mapped,in.world,in.additive>0.5))*alpha,alpha);
+    return vec4f(hdrEncode(fogVolumeApply(mapped,in.world,in.additive>0.5))*alpha,alpha);
 }

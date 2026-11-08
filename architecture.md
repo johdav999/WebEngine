@@ -1067,6 +1067,15 @@ users can continue supplying their own scheduler.
 
 See [input validation and device scope](docs/input-validation.md).
 
+The playground and docked browser editor share a live viewport. The optional
+[mobile preview](docs/mobile-preview.md) in `web/mobile-preview.js` owns device,
+orientation and fit-to-pane state. It scales the displayed frame independently
+of its logical CSS dimensions. The private browser canvas adapter supplies
+those dimensions and the requested pixel ratio to the WebGPU and WebGL 2
+renderers. Both apply their existing quality budgets. Browser GUI layout uses
+the same logical size, and the input and editor adapters map the displayed
+rectangle back to logical or backing pixels as appropriate.
+
 Portable `InputBindings` maps application-defined control IDs to the same queued
 actions through an ordered context stack. It borrows `InputSystem` or owns a
 submission callback to `Application::submitInput`, preserving the runtime's
@@ -1077,6 +1086,23 @@ and DOM semantics remain outside portable controllers. See
 [UI/input integration](docs/ui-input-integration.md).
 
 ### Assets, animation and effects
+
+Optional [clustered mesh LOD](docs/clustered-lod.md) attaches an immutable
+derived asset to an existing static `Mesh`. The portable builder preserves
+material parts and patch perimeters and packs vertex/index data once per asset.
+Archives and simulation retain base geometry. Cluster data is rebuilt
+explicitly after load or geometry edits.
+
+The optional streamed representation cooks a validated manifest with embedded
+coarse geometry and independently loadable compact fine pages. An owner-thread
+`ClusterPageStream` keeps the root pinned and runs a bounded page-residency
+policy over `AssetManager`. The owner pumps publication before rendering.
+Browser HTTP and native worker file I/O supply the same portable page loader
+contract. GPU camera traversal can return page demand through asynchronous
+renderer readback. Each report carries weak source references and a stream
+generation, and publication checks the current scene, view and component before
+applying it. Clearing a stream invalidates outstanding demand reports.
+Residency and in-flight requests stay outside scene persistence.
 
 Mesh components share geometry through `shared_ptr<const Mesh>`; textures, materials, skeletons, clips and effect definitions also have shared resource representations. Per-instance transforms, material overrides, morph weights and playback state remain separate from shared assets. Treat published geometry as immutable; deliberate geometry changes must follow the existing bounds/cache invalidation contracts.
 
@@ -1458,6 +1484,95 @@ are reconstructed by applications after archive loading. See
 
 ### Rendering and presentation
 
+Optional `DynamicDiffuseGi` builds bounded CPU BVHs from caller-owned world-space
+render proxies and incrementally publishes immutable probe snapshots. `Scene`
+retains the last validated snapshot as transient presentation state. Backends
+upload it on publication, interpolate its irradiance and hit-distance moments
+inside the volume, and blend with existing diffuse environment lighting at the
+boundary. Applications own geometry updates and scheduling. Neither scene
+collection nor physics advances the probe field. One to four staged diffuse
+sweeps use the previous complete sweep as a frozen transport source. Shared
+immutable `DiffuseGiTraceScene` leases retain accepted BVHs for longer
+camera-independent captures, without scene borrows or BVH duplication.
+
+Optional `DynamicReflectionCapture` incrementally traces and filters an
+environment cube through those geometry leases. It coalesces later input
+changes at cycle boundaries and publishes complete immutable
+`ReflectionProbeSnapshot` values. `Scene` retains at most one reflection volume.
+Renderers append the cache to the existing environment cube array or GL atlas
+and apply position-based box projection and edge fading to specular light.
+The capture settings and scheduling belong to the application, and runtime
+snapshots remain transient.
+
+Opt-in screen-space reflections consume a linear HDR color/depth snapshot for
+eligible perspective World views. The opaque pass draws participating glossy
+receivers after the snapshot to avoid feedback. Existing water and soft-particle
+inputs can capture the completed opaque pass. Rays that miss retain environment
+specular lighting, including the active off-screen reflection cache. GPU
+bindings, scratch targets and device restoration remain
+backend-owned. See [dynamic lighting](docs/dynamic-lighting.md).
+
+Opt-in `ViewLightSelection` ranks collected lights for each view and retains only
+runtime handles for selection hysteresis. The portable shadow planner allocates
+maps against the compact light list and can reserve maps for shadowed spotlights.
+Backend shaders and volumetric fog consume the same light-slot mapping. Default
+quality retains scene order, and no presentation decisions modify the scene's
+light hierarchy or simulation. The first canvas view publishes slot diagnostics.
+
+`Scene` owns up to two validated baked `LightingZone` values that reference
+immutable `Environment` assets. Shaders blend irradiance and prefiltered radiance
+by surface position and retain the global environment outside the zones.
+Portable packing aligns local cubemap dimensions and mips with the global bake.
+WebGPU and direct D3D12 reuse existing environment bindings as cube arrays. The
+opt-in compact WebGL2 PBR tier uses a private 2D-array atlas and the same authored
+zones. Environment uploads, binding replacement and context or device recovery
+remain backend responsibilities. The opt-in PBR Neutral curve uses the existing
+HDR composition pass. See [lighting improvements](docs/lighting-improvements.md).
+
+`RenderViews` resolves window and offscreen views separately. A portable,
+immutable `RenderSurface` handle identifies an offscreen view's fixed extent and
+its opaque unlit material consumers. Each backend allocates color and depth for
+its own live producers. Captures run before window views and sample static
+fallbacks for all surface bindings, so a capture can safely see its own monitor.
+Window views sample the latest completed color on the same device. Desktop
+scene binding and recovery retain view descriptions through scene-scoped camera
+IDs. GPU images are recreated after graphics recovery and never enter scene
+archives. The application controls camera placement and refresh cadence. See
+[render surface contracts](docs/render-surfaces.md).
+
+For opted-in opaque static World parts, `RenderFrame` selects clustered index
+ranges independently per camera or shadow map and coalesces adjacent ranges.
+Ranges use the original transform slot and material binding. Browser WebGPU,
+WebGL 2, native Dawn and direct D3D12 share CPU selection and use their private
+indexed draw paths. Streamed traversal retains the parent until both children
+are CPU-resident and their uploads are admitted by the active backend. Pass
+batches hold their selected immutable page meshes. Fixed levels and planar
+reflections use ordinary mesh batches. Range-budget overflow can keep the
+streamed root.
+
+The optional `RenderQuality::gpuClusterCulling` color path in browser WebGPU
+and native Dawn builds a conservative current-view depth pyramid from
+preceding opaque draws. Compute culls and compacts compatible range runs into
+bounded indirect indexed draws in original order. Adding
+`RenderQuality::gpuClusterHierarchy` moves camera LOD selection and fine-page
+demand onto the GPU. Eligible views submit tree metadata, page readiness and
+the coarse roots through `RenderFrame`. GPU traversal chooses a complete cut
+and retains each parent until both child pages can draw. CPU shadow-map
+selection and demand remain independent.
+
+GPU hierarchy plans admit up to 511 nodes through depth eight per material
+part, 64 plans and 4096 total nodes per view. The renderer owns metadata,
+selection, depth, compaction and feedback buffers. It samples page demand from
+one rotating window view per frame with at most two pending readbacks. Reports
+apply only to the current source identity and generation. Unsupported limits,
+missing fine uploads or failed depth preparation retain complete coarse geometry.
+WebGL 2, direct D3D12, MSAA and offscreen captures use CPU selection, as do
+other unsupported WebGPU passes. Visibility-buffer rasterization remains an
+extension. The stone arch comparison lives in `examples/`. Its
+[browser hierarchy check](scripts/stone-arch-hierarchy-smoke.cjs) and
+[Windows hierarchy check](scripts/stone-arch-hierarchy-windows-smoke.py)
+exercise GPU traversal and streaming together.
+
 Optional [animated water](docs/water.md) uses portable `WaterSettings` on existing
 shared meshes/materials and slot instances. Both backends render bounded Gerstner
 waves, analytic normals, moving ripples, Fresnel reflection and direct highlights.
@@ -1500,8 +1615,8 @@ atomically and omit future/expired inputs. Application code owns contact detecti
 object motion and emission/history policy; renderer time never advances itself.
 World-space ring/V fields perturb World water normals and crest highlights on both
 backends, adding no vertices, textures or passes and changing no simulation bounds,
-physics or picking. The WebGPU frame payload grows to 2400 bytes with cached
-per-view numeric staging; WebGL 2 uploads matching bounded fragment uniforms.
+physics or picking. WebGPU caches per-view numeric staging, and WebGL 2 uploads
+matching bounded fragment uniforms.
 CPU snapshots survive GPU recovery, are retained across view changes, and clear on
 successful scene replacement. They borrow no scene objects and are excluded from
 material identity and scene archives. The playground sources live in WaterDemo.
@@ -1542,7 +1657,8 @@ shared immutable panorama remain independent of `Scene::environment` lighting.
 Each `RenderView` can suppress sky drawing independently of clearing. Both browser
 backends draw camera-direction sky triangles or inward mesh spheres before Background objects,
 without depth writes or participation in scene collection, shadows, picking or
-simulation. Camera translation is excluded; orthographic cameras use parallel rays.
+simulation. Camera translation is excluded from the legacy backdrop; opt-in
+volumetric cloud density uses world camera origins. Orthographic cameras use parallel rays.
 Backends own pipelines, per-view bindings and cached/admission-budgeted texture
 uploads and recreate them after device/context loss. Format-5 archives retain
 sky settings, shared panorama pixels and per-view sky flags. Format 6 adds optional
@@ -1556,10 +1672,34 @@ time step and an optional scene-scoped directional-light handle; it validates
 candidates and light transforms before publishing sky phase, ambient light, IBL
 intensity and sun/moon light settings. Applications choose clock, target light and
 whether to enable this policy. The playground supplies simulation delta after
-simulation, so pause/suspension freeze the cycle and cloud wind. No IBL rebaking,
-volumetric clouds/cloud shadows, multiple scattering or object aerial perspective
-is implemented. Formats 1-4 load without visible sky; format 5 retains its original
+simulation, so pause/suspension freeze the cycle and cloud wind. No IBL rebaking or multiple scattering is implemented. Formats 1-4 load without visible sky; format 5 retains its original
 gradient/panorama behavior with the new weather/cycle settings disabled.
+
+Optional volumetric clouds extend `SkyClouds` with a world-height slab, extinction,
+range and shaping controls. `RenderQuality::volumetricCloudSteps` defaults zero,
+preserving the legacy cloud fallback; positive budgets up to 64 enable authored
+volumetric clouds. `prepareSky` appends world/noise-domain origin and layer data
+to the unchanged 672-byte sky prefix. `SkyUniform` is 784 bytes including a
+64-byte transient `CloudUniform`; the same metadata is appended to frame data.
+Standard immutable texture resources carry a shared 528-square periodic density
+atlas. Renderers own lazy linear uploads, bindings and shader variants; default
+variants remove the marching path. Active cloud depth composition builds a
+64×36×32 camera integral in the existing fog storage buffer/atlas after its fog
+prefix. Sky, World materials and FX sample the same cumulative L/T at actual
+fragment depth; additive colors receive transmission only. Background/Overlay
+and GUI stay outside this medium. Per-view sky suppression disables both cloud
+fields; rendering never advances phase. Reflected views build a virtual-camera
+field before reflection draws and restore the main field afterwards. This
+approximates a physical two-leg path when the first leg crosses clouds.
+Optional cloud shadows integrate sunlight transmission into layer 4 of the
+existing geometric shadow depth array. Only direct sun-matching directional
+light on receiving World surfaces below the slab is attenuated. The texel-snapped
+bounded map fades at its outer edge. `RenderQuality` owns depth/shadow enablement,
+shadow map half-range and strength; these policies do not persist. Shared private
+preparation validates metadata and disables unrepresentable shadow projections.
+There is no new scene traversal, application clock, simulation phase or light
+ownership. Scene format 41 retains authored cloud fields; old archives default
+them off. Applications continue to own `advanceSky` and pause semantics.
 
 WebGPU material pipelines specialize shader family, alpha mode, optional map
 presence, terrain-layer use and reflection clipping through pipeline constants.
@@ -1570,7 +1710,7 @@ formats and application policy do not change. See
 
 `Scene::collect()` fills reusable `SceneFrame` descriptions of meshes, lights and particles. `RenderFrame` and `FxFrame` prepare per-view draw data, batching and presentation decisions. [Renderer](include/engine/renderer.hpp) selects a backend and borrows its scene, cameras and optional GUI, which callers must keep alive. Each backend owns its GPU resources, pipelines, upload caches and submission. WebGPU is preferred; automatic mode uses WebGL 2 when the API is missing or initial adapter/device acquisition fails before the canvas acquires a context. Explicit backend query options support diagnosis. Selection is permanent once a canvas context is acquired, preserving DOM/input ownership; later WebGPU loss retains bounded WebGPU recovery.
 
-Ordered camera views compose into one canvas. Each view draws Background, World and Overlay with independent layer depth; GUI draws once afterward. WebGPU uses layer depth ranges; WebGL 2 clears depth between layers and converts the shared zero-to-one clip depth in its vertex shader. The fallback reuses `RenderFrame`, `FxFrame`, materials, RGBA textures, immutable LOD chains, CPU skeletal/morph poses and the GUI draw list. It provides basic directional/point/spot lighting and individual draws; PBR maps/environment lighting, instancing, compressed uploads and GPU timing are reported unavailable; directional/spot shadows are supported. WebGL context loss releases invalid handles and restoration rebuilds resources at host frame boundaries while retaining borrowed state. See [fallback contracts](docs/rendering-fallback.md). Cameras provide projection, viewport, masks, coordinate conversion and frustum data. WebGPU rendering includes instancing, frustum culling, material pipelines, directional shadow maps and shared GPU asset caches. Current code also includes projected-size mesh LOD, independent shadow-detail controls and configurable shadow resolution/filter taps. Portable `RenderQuality` profiles and resolution/shadow budgets compose these controls; applications choose their quality policy. The WebGPU backend reports actual device limits/features and constrains canvas dimensions without changing CSS layout or simulation.
+Ordered camera views compose into one canvas. Each view draws Background, World and Overlay with independent layer depth; GUI draws once afterward. WebGPU uses layer depth ranges; WebGL 2 clears depth between layers and converts the shared zero-to-one clip depth in its vertex shader. The fallback reuses `RenderFrame`, `FxFrame`, materials, RGBA textures, immutable LOD chains, CPU skeletal/morph poses and the GUI draw list. It provides individual draws with basic directional/point/spot lighting or opt-in compact PBR. It supports directional and spot shadows. Instancing, compressed uploads, full PBR and GPU timing are reported unavailable. WebGL context loss releases invalid handles and restoration rebuilds resources at host frame boundaries while retaining borrowed state. See [fallback contracts](docs/rendering-fallback.md). Cameras provide projection, viewport, masks, coordinate conversion and frustum data. WebGPU rendering includes instancing, frustum culling, material pipelines, directional shadow maps and shared GPU asset caches. Current code also includes projected-size mesh LOD, independent shadow-detail controls and configurable shadow resolution/filter taps. Portable `RenderQuality` profiles and resolution/shadow budgets compose these controls; applications choose their quality policy. The WebGPU backend reports actual device limits/features and constrains canvas dimensions without changing CSS layout or simulation.
 
 Optional `RenderQuality::msaaSamples` selects 1 or 4 independently of simulation
 and scene archives. Backends report attachment support and effective samples.
@@ -1860,7 +2000,50 @@ exclusive to prevent sharing an occupied listener.
 
 ### Scene atmospheric fog
 
-Optional `FogSettings` in `Scene` owns validated presentation state; `RenderView::fogEnabled` gates each camera. Portable `fog.cpp` provides validation, backend-neutral payloads and analytic ray transmission. Shared WGSL/GLSL fog helpers are composed into material, particle and sky shaders, in linear display light before encoding. World geometry uses per-surface distances; sky rays end at the far plane. Background meshes, Overlay and GUI are excluded. Fog adds no passes/textures or simulation dependencies. Water mixes fogged intrinsic shading with already fogged refraction and two-leg planar captures without repeat atmospheric attenuation. Underwater retains its existing separate composite and limits. Format 16 archives/clones persist scene fog and per-view opt-out; older archives default fog off. Local volumes and volumetric lighting remain future work. See [fog contracts](docs/fog.md).
+Optional `FogSettings` in `Scene` owns validated presentation state and
+`RenderView::fogEnabled` gates each camera. Portable `fog.cpp` provides
+validation, backend-neutral payloads and analytic ray transmission. The
+analytic path integrates per-surface and per-sky-ray distances in material,
+FX and sky shaders. Background meshes, Overlay and GUI are excluded.
+Water mixes fogged intrinsic shading with already-fogged refraction and
+two-leg planar captures. Underwater retains its separate composite.
+Format 16 archives introduced scene fog and per-view opt-out.
+
+Format 37 adds an optional axis-aligned fog box to the scene value contract.
+Format 39 adds up to three additional authored boxes and preserves the primary
+box and the version 38 lighting zone contract.
+Browser WebGPU, WebGL2, Windows Dawn and direct D3D12 reuse per-view light
+collection and shadow resources. A private integration pass follows the shadow
+passes and prepares cumulative scattering and transmission over a bounded
+64×36×16 camera grid. WebGPU/Dawn use a compute storage buffer. WebGL2/D3D12
+use a raster atlas. Renderer-owned scratch storage is reused serially by the
+ordered views and recreated with the backend on recovery. World meshes, sky
+and dedicated FX sample by endpoint depth. Reflected paths, multiple active
+boxes and unsupported float targets use bounded direct integration. Overlap
+adds extinction and combines each medium's scattering. Analytic height fog remains
+the default and zero-step fallback. No simulation changes are required.
+Up to four directional or spot lights contribute to scattering, with mapped
+lights first and one light by default. Optional spotlight self-shadowing
+integrates extinction along the light-to-sample segment. Optional surface
+shadows use the same transmission for direct World and water lighting. The
+soft-shadow policy filters existing geometric shadow maps and blends the end
+of a directional cascade with its successor. These policies travel with
+the per-view quality payload and reuse existing shadow resources.
+An optional light-space optical-depth cache adds a dirty-only GPU pass for
+up to four spotlights. The private portable `fog_light_cache.hpp` computes
+light-space bounds and value keys from local media and selected light poses.
+WebGPU/Dawn retain a filterable RGBA16F 3D texture per view, while raster
+backends use FP16 atlases. Camera movement alone preserves the light-space data. Fog
+optical changes and spotlight pose or slot changes rebuild complete data
+before consumers run. WebGL2 stages its camera grid separately while sampling
+the cache and then blits it into the shared atlas. Device recovery recreates
+the GPU data. Unsupported or uncached lights use direct integration.
+WebGPU/Dawn specialize material, sky, FX and grid pipelines by cache policy
+so disabled cache lookup code is removed from their default shaders.
+Their cache requires a 64-cell 3D texture and 17 sampled textures per shader
+stage. Adapters with lower limits retain the direct path. Optional resource
+creation uses scoped asynchronous errors before publishing GPU state.
+See [fog contracts](docs/fog.md).
 
 
 ### Particle FX evolution (2026-10-17)
@@ -2316,8 +2499,8 @@ flags retain existing archive fields; renderer quality/post settings stay transi
 Both private browser backends own bounded depth-array shadow passes, caster LOD
 and bias/filtering; WebGL2 now supports directional and spot maps as well as WebGPU.
 The eight light slots and four total map budget remain independent. A directional
-light consumes its requested cascade count up to the remaining budget. WebGPU's
-private FrameUniform is 2336 bytes with four 96-byte map records; shaders and cached
+light consumes its requested cascade count up to the unreserved map budget. WebGPU's
+private FrameUniform includes four 96-byte map records. The shaders and cached
 staging use the same layout. Point cubemaps remain unimplemented.
 
 Optional PostProcessing switches all scene-color, water and reflection targets to
@@ -2331,8 +2514,8 @@ float color-buffer extension and independently checks float MSAA, retaining requ
 policy while reporting effective availability. Default post is off. Native Dawn
 feature acceptance now includes the combined gallery and pixel comparisons in
 [Windows acceptance](docs/windows-acceptance.md). This is scoped evidence on one
-adapter, not a complete driver/hardware matrix. HDR display output, auto-exposure
-or LUT grading is not implied. See
+adapter, with broader driver/hardware coverage remaining open. PBR Neutral is
+available as an opt-in tone mapper alongside Reinhard. See
 [lighting contracts](docs/lighting-post-processing.md) and validation.
 
 The application-only lighting showcase (`?scene=lighting` and the existing spotlight
@@ -2615,13 +2798,23 @@ status callbacks. Terrain inspector polling observes that terminal state; its na
 probe also guards ApplicationState::Stopped before borrowing displayedScene. This
 prevents post-teardown timers from following released scene/camera ownership.
 
-### Cinematic assets, authoring and isolated playback
+### Cinematic assets, authoring and live playback
 
-engine_core owns immutable CinematicSequence values, strict separate WECINE 1
+engine_core owns immutable CinematicSequence values, separate WECINE 1 and 2
 files, validated track/key sampling and an explicitly advanced CinematicPlayer
-clock. Assets refer to saved node identities, existing animation clip names and
-audio URIs; they contain no scene, executable callbacks or gameplay completion
-policy. Runtime applications own binding and handoff. Scene archives stay unchanged.
+clock. WECINE 2 adds sprite atlas sampling and subtitle cues. Assets refer to
+saved node identities, existing animation clips and audio URIs. Scene archives
+stay unchanged.
+
+CinematicRuntime binds a sequence to a live scene by saved ID and resolves
+those bindings to scene-scoped handles. It samples dedicated visual targets and
+owns only the audio and effects it starts. Sprite evaluation changes existing
+mesh presentation through per-instance material and visibility state. Hosts
+own camera views and subtitle widgets, choose the presentation clock and decide
+whether to pause simulation. The runtime restores owned state on terminal paths.
+Applications retain input, gameplay consequences and scene transitions. They can
+apply the same outcome for Completed and Skipped and leave Cancelled and Failed
+without a gameplay commit.
 
 engine_editor owns independent bounded CinematicSequenceEditor history and optional
 CinematicPreview. Preview borrows the source only while cloning it, shares immutable
@@ -2637,8 +2830,10 @@ It pauses the source, excludes conflicting previews/input, advances the preview 
 afterSimulation and skips ordinary source camera/audio policies while it is active.
 Scrubbing is silent; gesture Play owns sound activation, suspension and cancellation.
 Close/shutdown rebind source views before releasing the preview, and source changes
-invalidate it. Runtime camera handles are resolved again on return. No new automatic
-frame phase, archive codec, game event track or callback subscription is introduced.
+invalidate it. Runtime camera handles are resolved again on return. The browser
+and Windows gate examples use the portable runtime in an active gameplay scene.
+Browser audio resolves project URLs through Web Audio. Windows resolves the same
+references to packaged local files for the desktop streaming backend.
 See [cinematic contracts](docs/cinematic-sequencer.md).
 
 ### Windows audio and scene authoring parity (2026-10-21)
@@ -2782,3 +2977,17 @@ post-GUI notifications do not also reach gameplay input. Native water overrides
 feed the existing private DesktopGraphics interface for either backend, with
 null preserving the host simulation clock. Sessions borrow the host Application; the engine gains no game save
 or quest policy. See [consumer host contracts](docs/consumer-hosts.md).
+
+### Unreal material delivery (2026-11-07)
+
+The portable GLB importer also validates data-only WebEngine ZIP bundles without
+filesystem extraction. Versioned material-index manifests extend standard glTF
+surface data; workers and both hosts publish the same immutable material resources.
+MaterialAdvanced supplies bounded multilobe shading approximations, packed maps,
+UV panning and presentation wind on browser WebGPU/WebGL2 and Windows Dawn/D3D12.
+Existing scene captures supply view-local transmission; unavailable/reflected inputs
+use environment fallback. Bounds include wind and clustered selection bypasses it.
+Archive v40 retains advanced parameters/maps and per-instance overrides, preserving
+older reader defaults. Import rejects malformed contracts before publication.
+Shader code and source paths are never executed. See [delivery contracts](docs/material-delivery.md)
+and [validation](docs/material-delivery-validation.md) for limitations and evidence.

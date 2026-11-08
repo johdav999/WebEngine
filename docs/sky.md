@@ -94,10 +94,125 @@ Clouds are an optional two-dimensional procedural layer on any sky mode. Five
 value-noise octaves form density; coverage controls the threshold, density
 controls opacity, and scale controls frequency. Wind advances an explicit,
 bounded noise-domain offset through `advanceSky`. Sun elevation tints clouds at
-dawn/dusk/night. The cloud layer fades near the horizon to bound projection
-frequency. It is not volumetric, does not cast world shadows, and does not add
-physics or precipitation simulation. Multiple scattering and object aerial
-perspective are also outside this implementation.
+dawn/dusk/night. The legacy layer fades near the horizon to bound projection
+frequency. It remains the default and the zero-budget fallback. Optional
+volumetric clouds are described below. Neither path adds world cloud shadows,
+physics or precipitation. Multiple scattering and object aerial perspective
+remain outside this implementation.
+
+## Volumetric cloud layer
+
+WebGPU, WebGL2, native Dawn and D3D12 support an opt-in world-height cloud layer.
+Enable both authored volume settings and a renderer sample budget:
+
+```cpp
+auto sky=scene.sky().value_or(engine::SkyBackground{});
+sky.mode=engine::SkyMode::Atmosphere;
+sky.clouds.enabled=true;
+sky.clouds.volumetric=true;
+sky.clouds.baseHeight=1200; // World units, interpreted as metres.
+sky.clouds.thickness=800;
+sky.clouds.extinction=.006f; // Per metre, multiplied by procedural density.
+sky.clouds.wind={.001f,.0004f};
+scene.setSky(sky);
+auto quality=renderer.quality();
+quality.volumetricCloudSteps=24; // 1..64; zero selects the legacy 2D layer.
+renderer.setQuality(quality);
+```
+
+Both defaults are off (`SkyClouds::volumetric=false`, budget zero). Existing
+presets retain the legacy path. The sky inspector exposes **Volumetric clouds**
+and Low/Medium/High cloud quality (16/24/48 steps). Its values reflect scene and
+renderer state. Cloud coverage and density controls apply to both paths.
+
+The volume intersects each view ray with `[baseHeight, baseHeight+thickness]`,
+clipped to `maxDistance` (default 30000 metres). Camera position and orthographic
+pixel origins sample the same world density; moving the camera produces parallax.
+Fullscreen and sphere geometry share this model. Camera-relative atmosphere
+altitude remains separate from world cloud height. The cloud sky ignores the
+camera's geometry far clip, as the existing sky does.
+
+Midpoint ray marching integrates front-to-back Beer–Lambert transmission and
+single scattering, with four quadratic sunlight intervals for cloud self-shadowing,
+a Henyey–Greenstein forward lobe, warm low sun and night ambient illumination.
+Early termination bounds nearly opaque rays. A vertical envelope and detail
+erosion shape the density. Coverage/density zero produce clear sky; extinction
+zero also produces clear sky rather than reverting to a 2D cloud image.
+
+The immutable shared `skyCloudNoiseTexture()` supplies periodic 3D noise in an
+ordinary linear RGBA8 texture atlas. There are 64 slices in eight columns, each
+64×64 with a wrapped one-pixel border (528×528 total). R contains base fractal
+noise and G detail. Two bilinear level-zero samples interpolate Z. The CPU source
+is about 1.06 MiB; existing backend texture caches may retain mip chains (about
+1.42 MiB) although cloud sampling explicitly uses level zero. No new texture type,
+external asset, worker or clock is introduced. Backends upload it lazily and
+recreate it after device/context loss. Disabled shader variants compile out
+volumetric sampling.
+
+`scale/8000` converts world coordinates to repeating noise-domain units. Existing
+`offset` and caller-driven `advanceSky` own wind phase. Use slower wind values
+than the legacy defaults when modelling ordinary weather. Preparing a view wraps
+large horizontal coordinates before narrowing to GPU floats. Inactive cloud
+origins remain zero, preserving the legacy translation-invariant payload.
+
+Validated settings allow base height -10000..100000, thickness 1..20000,
+extinction 0..1, distance 1..200000, detail 0..1 and anisotropy 0..0.95.
+Invalid data is rejected before scene replacement. These settings persist in
+archive format 41; earlier formats load with volumetric clouds disabled. Renderer
+quality and the generated noise resource are not serialized.
+
+`RenderQuality::volumetricCloudDepth=true` (default) extends an active volume to
+World surfaces. A camera-space 64×36×32 cumulative radiance/transmission field
+composes clouds at each fragment's actual world depth before tone mapping.
+Objects before the layer remain clear; objects within or behind it receive the
+bounded cloud integral. Opaque, masked and alpha surfaces use `L + T * color`;
+additive emission uses transmission only. Background/Overlay objects and GUI do
+not participate. Set this policy false for the previous sky-only presentation.
+It has no effect with the default zero sample budget or a disabled scene volume.
+The sky and surfaces share the same integral, including orthographic pixel origins,
+HDR and MSAA. The grid interpolates a low-resolution volume; small density features
+and silhouettes may show smoothing. It uses the existing fog storage binding and
+reserves 864 KiB on WebGPU/Dawn including the fog prefix, without another material
+texture. Raster backends pack the field into their existing fog atlas.
+
+Enable `quality.volumetricCloudShadows=true` to attenuate direct sunlight on
+terrain and other receiving World surfaces below the cloud base. A sun-aligned
+map integrates 16 density samples along each light ray, storing transmission in
+an additional layer of the existing shadow depth array. It uses the effective
+`shadowResolution`, including when geometric `maxShadowMaps=0`. The policy defaults
+off. `volumetricCloudShadowDistance` is the map half-range (default 8000 metres,
+128..100000); `volumetricCloudShadowStrength` defaults .8 (0..1). The map center is
+snapped to texels and its outer 20 percent fades to unshadowed light. Receivers
+outside the map, above the cloud base, or illuminated by point/spot lights remain
+unaffected. Directional lights must point toward the sky sun (dot product > .995).
+Ambient light and IBL remain unchanged. Global shadow suppression, a hidden sky,
+zero extinction and a sun at/below the horizon disable this map. WebGL2 recovers
+transmission through eight comparison queries to the existing shadow sampler;
+WebGPU/Dawn and D3D12 filter raw transmission values. Cloud-prefix production
+counts toward World GPU time and transmission-map production toward Shadow time;
+total GPU timing includes both.
+
+Ordered views regenerate their own camera field. Planar water reflection draws
+use a reflected camera field and then restore the main field; the virtual-eye
+path is an approximation when the camera-to-water leg crosses clouds. Existing
+water/refraction screen-space color composition remains approximate. No IBL
+rebake, temporal reprojection, multiple cloud layers, multiple scattering or
+planetary curvature is provided. Sample budgets trade detail and banding against
+cost; mobile performance needs physical-device checks. These renderer policies
+are transient and do not change archive format 41.
+
+Open `?scene=volumetric-clouds` or run `webengine_clouds_windows --backend dawn`
+(`d3d12` also supported). Browser camera controls explore parallax; native
+Left/Right cycles views, Space pauses wind, F11 toggles fullscreen and Escape exits.
+Run `node scripts/clouds-smoke.cjs browser` or
+`node scripts/clouds-smoke.cjs windows <webengine_clouds_windows.exe>` for the
+34 cloud fixtures, terrain shadows, foreground depth, planar reflections,
+fallback, orthographic/sphere, HDR/MSAA,
+wind and browser recovery checks. Artifacts are in `build/evidence/clouds/`.
+Run `node scripts/clouds-fog-coexistence-smoke.cjs` to check that adding the cloud
+field preserves fog-grid and spotlight optical-cache output on both browser
+backends. See [cloud validation](clouds-validation.md) for the completed desktop checks and
+their limits.
 
 ## Day/night ownership, clocks and lighting
 

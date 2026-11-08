@@ -1,6 +1,7 @@
 #include "engine/cinematic_sequence.hpp"
 #include "engine/node.hpp"
 #include "engine/audio.hpp"
+#include "engine/mesh_component.hpp"
 #include <iomanip>
 #include <locale>
 #include <set>
@@ -19,6 +20,13 @@ void pose(const Transform& t){
 }
 bool overlaps(const CinematicTrack& a,const CinematicTrack& b){return a.start<b.end&&b.start<a.end;}
 float angle(float a,float b,float t){return a+float(std::remainder(double(b)-a,2*double(pi)))*t;}
+bool atlasGrid(std::uint32_t columns,std::uint32_t rows){
+    return columns>=1&&columns<=64&&rows>=1&&rows<=64;
+}
+void spriteKey(const CinematicKey& key,std::uint32_t frames){
+    if(key.spriteFrame>=frames||!std::isfinite(key.opacity)||key.opacity<0||key.opacity>1)
+        throw std::invalid_argument("Invalid cinematic sprite frame or opacity");
+}
 }
 std::shared_ptr<const CinematicSequence> CinematicSequence::create(CinematicSequenceData data){
     text(data.name);if(!std::isfinite(data.duration)||data.duration<.01||data.duration>3600||data.framesPerSecond<1||data.framesPerSecond>120||data.tracks.size()>64)
@@ -26,16 +34,24 @@ std::shared_ptr<const CinematicSequence> CinematicSequence::create(CinematicSequ
     std::set<std::string> ids;std::size_t keys=0;
     for(const auto& t:data.tracks){
         text(t.id);text(t.name);text(t.target,256,true);text(t.resource,4096,true);
-        if(!ids.insert(t.id).second||int(t.type)<0||int(t.type)>4||!std::isfinite(t.start)||!std::isfinite(t.end)||t.start<0||t.end<=t.start||t.end>data.duration||
+        if(!ids.insert(t.id).second||int(t.type)<0||t.type>CinematicTrackType::Subtitle||!std::isfinite(t.start)||!std::isfinite(t.end)||t.start<0||t.end<=t.start||t.end>data.duration||
             !std::isfinite(t.offset)||t.offset<0||t.offset>86400||!std::isfinite(t.speed)||t.speed<.125f||t.speed>8||!std::isfinite(t.volume)||t.volume<0||t.volume>1)
             throw std::invalid_argument("Invalid cinematic track");
         if(t.type==CinematicTrackType::Audio){if(!t.target.empty())throw std::invalid_argument("Sound tracks bind a URI, not a scene node");AudioStreamAsset::create(t.resource);}
+        else if(t.type==CinematicTrackType::Subtitle){
+            if(!t.target.empty())throw std::invalid_argument("Subtitles use the screen-space caption lane");
+            text(t.resource,1024);
+        }
         else if(!Node::validSavedId(t.target))throw std::invalid_argument("Cinematic target must be a saved node ID");
         if(t.type==CinematicTrackType::Animation&&t.resource.empty())throw std::invalid_argument("Select a cinematic animation clip");
-        if(t.type!=CinematicTrackType::Animation&&t.type!=CinematicTrackType::Audio&&(t.offset!=0||t.speed!=1||t.volume!=1||t.loop||!t.resource.empty()))
+        if(t.type!=CinematicTrackType::Animation&&t.type!=CinematicTrackType::Audio&&(t.offset!=0||t.speed!=1||t.volume!=1||t.loop||
+            (t.type!=CinematicTrackType::Subtitle&&!t.resource.empty())))
             throw std::invalid_argument("Source offset, speed and looping apply only to animation and sound clips");
         if(t.type==CinematicTrackType::Animation&&t.volume!=1)throw std::invalid_argument("Volume applies only to sound clips");
-        const bool keyed=t.type==CinematicTrackType::Transform||t.type==CinematicTrackType::Camera;
+        const bool sprite=t.type==CinematicTrackType::Sprite;
+        if(!atlasGrid(t.atlasColumns,t.atlasRows)||(!sprite&&(t.atlasColumns!=1||t.atlasRows!=1)))
+            throw std::invalid_argument("Invalid cinematic atlas grid");
+        const bool keyed=t.type==CinematicTrackType::Transform||t.type==CinematicTrackType::Camera||sprite;
         if(t.keys.size()>256||(keyed&&t.keys.empty())||(!keyed&&!t.keys.empty())||(keys+=t.keys.size())>4096)
             throw std::invalid_argument("Invalid cinematic key budget");
         if(t.type==CinematicTrackType::Effect&&t.end-t.start>10)throw std::invalid_argument("FX clips are limited to ten seconds of replay");
@@ -44,6 +60,9 @@ std::shared_ptr<const CinematicSequence> CinematicSequence::create(CinematicSequ
             if(!std::isfinite(k.time)||k.time<t.start||k.time>t.end||k.time<=previous||!std::isfinite(k.lens)||k.lens<=0||k.lens>10000||int(k.interpolation)<0||int(k.interpolation)>2)
                 throw std::invalid_argument("Invalid cinematic key time, lens or interpolation");
             pose(k.transform);previous=k.time;
+            spriteKey(k,t.atlasColumns*t.atlasRows);
+            if(!sprite&&(k.opacity!=1||!k.visible))
+                throw std::invalid_argument("Opacity and visibility keys apply only to sprites");
         }
     }
     for(std::size_t i=0;i<data.tracks.size();++i)for(std::size_t j=0;j<i;++j){
@@ -69,26 +88,82 @@ CinematicKey CinematicSequence::sample(std::size_t index,double time) const {
     float t=float((time-a.time)/(b.time-a.time));if(a.interpolation==CinematicInterpolation::Smooth)t=t*t*(3-2*t);if(a.interpolation==CinematicInterpolation::Step)t=0;
     CinematicKey out=a;out.time=time;out.transform.position=a.transform.position*(1-t)+b.transform.position*t;out.transform.scale=a.transform.scale*(1-t)+b.transform.scale*t;
     out.transform.rotation={angle(a.transform.rotation.x,b.transform.rotation.x,t),angle(a.transform.rotation.y,b.transform.rotation.y,t),angle(a.transform.rotation.z,b.transform.rotation.z,t)};
-    out.lens=a.lens*(1-t)+b.lens*t;return out;
+    out.lens=a.lens*(1-t)+b.lens*t;
+    out.opacity=a.opacity*(1-t)+b.opacity*t;
+    return out;
+}
+std::string_view CinematicSequence::subtitle(double time) const {
+    if(!std::isfinite(time)||time<0||time>data_.duration)throw std::invalid_argument("Invalid cinematic sample time");
+    for(const auto& track:data_.tracks)
+        if(track.type==CinematicTrackType::Subtitle&&active(track,time))return track.resource;
+    return {};
 }
 std::string CinematicSequenceArchive::save(const CinematicSequence& asset){
-    std::ostringstream out;out.imbue(std::locale::classic());out<<std::setprecision(17)<<"WECINE 1\n";const auto& d=asset.data();out<<std::quoted(d.name)<<' '<<d.duration<<' '<<d.framesPerSecond<<' '<<d.tracks.size()<<'\n';
-    for(const auto& t:d.tracks){out<<int(t.type)<<' '<<std::quoted(t.id)<<' '<<std::quoted(t.name)<<' '<<std::quoted(t.target)<<' '<<std::quoted(t.resource)<<' '<<t.start<<' '<<t.end<<' '<<t.offset<<' '<<t.speed<<' '<<t.volume<<' '<<t.loop<<' '<<t.enabled<<' '<<t.keys.size()<<'\n';
-        for(const auto& k:t.keys){const auto& v=k.transform;out<<k.time<<' '<<v.position.x<<' '<<v.position.y<<' '<<v.position.z<<' '<<v.rotation.x<<' '<<v.rotation.y<<' '<<v.rotation.z<<' '<<v.scale.x<<' '<<v.scale.y<<' '<<v.scale.z<<' '<<k.lens<<' '<<int(k.interpolation)<<'\n';}}
+    const auto& d=asset.data();
+    const bool has2d=std::any_of(d.tracks.begin(),d.tracks.end(),[](const auto& t){return t.type>=CinematicTrackType::Sprite;});
+    std::ostringstream out;out.imbue(std::locale::classic());out<<std::setprecision(17)<<"WECINE "<<(has2d?2:1)<<'\n';
+    out<<std::quoted(d.name)<<' '<<d.duration<<' '<<d.framesPerSecond<<' '<<d.tracks.size()<<'\n';
+    for(const auto& t:d.tracks){
+        out<<int(t.type)<<' '<<std::quoted(t.id)<<' '<<std::quoted(t.name)<<' '<<std::quoted(t.target)<<' '<<std::quoted(t.resource)<<' '<<t.start<<' '<<t.end<<' '<<t.offset<<' '<<t.speed<<' '<<t.volume<<' '<<t.loop<<' '<<t.enabled<<' '<<t.keys.size();
+        if(t.type==CinematicTrackType::Sprite)out<<' '<<t.atlasColumns<<' '<<t.atlasRows;
+        out<<'\n';
+        for(const auto& k:t.keys){
+            const auto& v=k.transform;out<<k.time<<' '<<v.position.x<<' '<<v.position.y<<' '<<v.position.z<<' '<<v.rotation.x<<' '<<v.rotation.y<<' '<<v.rotation.z<<' '<<v.scale.x<<' '<<v.scale.y<<' '<<v.scale.z<<' '<<k.lens<<' '<<int(k.interpolation);
+            if(t.type==CinematicTrackType::Sprite)out<<' '<<k.spriteFrame<<' '<<k.opacity<<' '<<k.visible;
+            out<<'\n';
+        }
+    }
     auto result=out.str();if(result.size()>1024*1024)throw std::invalid_argument("Cinematic file exceeds one MiB");return result;
 }
 std::shared_ptr<const CinematicSequence> CinematicSequenceArchive::load(std::string_view source){
     if(source.empty()||source.size()>1024*1024)throw std::invalid_argument("Invalid cinematic file size");
     std::istringstream in{std::string(source)};in.imbue(std::locale::classic());std::string magic;int version;std::size_t count,totalKeys=0;CinematicSequenceData data;
-    if(!(in>>magic>>version)||magic!="WECINE"||version!=1||!(in>>std::quoted(data.name)>>data.duration>>data.framesPerSecond>>count)||count>64)throw std::invalid_argument("Invalid cinematic header");
+    if(!(in>>magic>>version)||magic!="WECINE"||(version!=1&&version!=2)||!(in>>std::quoted(data.name)>>data.duration>>data.framesPerSecond>>count)||count>64)throw std::invalid_argument("Invalid cinematic header");
     for(std::size_t i=0;i<count;++i){CinematicTrack t;int type;std::size_t n;
         if(!(in>>type>>std::quoted(t.id)>>std::quoted(t.name)>>std::quoted(t.target)>>std::quoted(t.resource)>>t.start>>t.end>>t.offset>>t.speed>>t.volume>>t.loop>>t.enabled>>n)||n>256||(totalKeys+=n)>4096)throw std::invalid_argument("Invalid cinematic track record");
+        if(type<0||type>(version==1?int(CinematicTrackType::Effect):int(CinematicTrackType::Subtitle)))throw std::invalid_argument("Unknown cinematic track type");
         t.type=CinematicTrackType(type);
+        const bool sprite=t.type==CinematicTrackType::Sprite;
+        if(sprite&&!(in>>t.atlasColumns>>t.atlasRows))throw std::invalid_argument("Invalid cinematic atlas record");
         for(std::size_t j=0;j<n;++j){CinematicKey k;auto& v=k.transform;int interpolation;
             if(!(in>>k.time>>v.position.x>>v.position.y>>v.position.z>>v.rotation.x>>v.rotation.y>>v.rotation.z>>v.scale.x>>v.scale.y>>v.scale.z>>k.lens>>interpolation))throw std::invalid_argument("Invalid cinematic key record");
+            if(sprite&&!(in>>k.spriteFrame>>k.opacity>>k.visible))throw std::invalid_argument("Invalid cinematic sprite key record");
             k.interpolation=CinematicInterpolation(interpolation);t.keys.push_back(k);}
         data.tracks.push_back(std::move(t));}
     in>>std::ws;if(!in.eof())throw std::invalid_argument("Trailing cinematic data");return CinematicSequence::create(std::move(data));
+}
+CinematicSpriteBinding::CinematicSpriteBinding(const MeshComponent& sprite,std::uint32_t columns,std::uint32_t rows)
+    :mesh_(sprite.mesh),originalSize_(sprite.materialOverrides.size()),columns_(columns),rows_(rows),originalEnabled_(sprite.enabled){
+    if(!atlasGrid(columns,rows)||!mesh_||mesh_->materials.size()>1||!sprite.children().empty()||
+        typeid(sprite)!=typeid(MeshComponent)||sprite.isProtectedChild()||sprite.blend==BlendMode::Additive)
+        throw std::invalid_argument("Cinematic sprites require a dedicated single-material mesh and a valid atlas grid");
+    auto material=sprite.resolvedMaterial(0);
+    const auto& atlas=material.baseColorTexture;
+    if(!atlas||!atlas->width||!atlas->height||atlas->width%columns||atlas->height%rows||material.baseColorSurface)
+        throw std::invalid_argument("Cinematic sprites require a textured material with equal-sized atlas cells");
+    material.shader=MaterialShader::Unlit;
+    material.alphaMode=AlphaMode::Blend;
+    material.uvScale={1,1};
+    material.uvOffset={};
+    material_=std::make_shared<const Material>(std::move(material));
+    if(originalSize_)original_=sprite.materialOverrides.front();
+}
+void CinematicSpriteBinding::apply(MeshComponent& sprite,const CinematicKey& key) const {
+    if(sprite.mesh!=mesh_)throw std::logic_error("Cinematic sprite mesh changed during playback");
+    spriteKey(key,columns_*rows_);
+    MaterialInstance frame(material_);
+    frame.uvScale={1.f/columns_,1.f/rows_};
+    frame.uvOffset={float(key.spriteFrame%columns_)/columns_,float(key.spriteFrame/columns_)/rows_};
+    frame.opacity=key.visible?key.opacity:0;
+    sprite.setMaterial(0,std::move(frame));
+    sprite.enabled=true;
+}
+void CinematicSpriteBinding::restore(MeshComponent& sprite) const noexcept {
+    sprite.enabled=originalEnabled_;
+    if(sprite.mesh==mesh_&&!sprite.materialOverrides.empty()){
+        if(originalSize_)sprite.materialOverrides.front()=original_;
+        else sprite.materialOverrides.clear();
+    }
 }
 CinematicPlayer::CinematicPlayer(std::shared_ptr<const CinematicSequence> sequence):sequence_(std::move(sequence)){if(!sequence_)throw std::invalid_argument("Missing cinematic asset");}
 void CinematicPlayer::seek(double value){if(!std::isfinite(value)||value<0||value>sequence_->data().duration)throw std::invalid_argument("Cinematic seek outside duration");time_=value;}

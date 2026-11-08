@@ -54,6 +54,66 @@ struct Fixture {
 };
 std::vector<Vec3> particles(CinematicPreview& p){std::vector<Vec3> points;auto* e=dynamic_cast<EffectComponent*>(p.scene().findSavedNode("effect"));for(auto* emitter:e->emitters())for(const auto& particle:emitter->particles())points.push_back(particle.position);return points;}
 void same(const std::vector<Vec3>& a,const std::vector<Vec3>& b){check(a.size()==b.size(),"Particle seek count differs");for(std::size_t i=0;i<a.size();++i){near(a[i].x,b[i].x);near(a[i].y,b[i].y);near(a[i].z,b[i].z);}}
+void run2d(){
+    Fixture fixture;
+    fixture.b->setOrthographic(4,.1f,100);
+    auto& sprite=fixture.actor->addComponent<MeshComponent>("Sprite",Mesh::plane());
+    sprite.setSavedId("sprite");
+    auto atlas=std::make_shared<Texture>();
+    atlas->width=atlas->height=4;
+    atlas->pixels.resize(64,255);
+    sprite.texture=atlas;
+    sprite.enabled=false;
+    fixture.scene.synchronize();
+
+    auto data=fixture.data();
+    data.tracks[2].keys[0].lens=data.tracks[2].keys[1].lens=4;
+    CinematicTrack sprites;
+    sprites.id="sprite-frames";
+    sprites.target=sprite.savedId();
+    sprites.type=CinematicTrackType::Sprite;
+    sprites.atlasColumns=sprites.atlasRows=2;
+    sprites.start=1;sprites.end=6;sprites.keys={{1},{3},{5}};
+    sprites.keys[0].interpolation=CinematicInterpolation::Linear;
+    sprites.keys[1].spriteFrame=3;sprites.keys[1].opacity=.5f;
+    sprites.keys[2].visible=false;
+    data.tracks.push_back(sprites);
+    CinematicTrack caption;
+    caption.id="caption";caption.type=CinematicTrackType::Subtitle;
+    caption.resource="Take the left gate.";caption.start=2;caption.end=5;
+    data.tracks.push_back(caption);
+
+    const auto asset=CinematicSequence::create(data);
+    const auto frame=asset->sample(6,2);
+    check(frame.spriteFrame==0&&frame.visible,"Sprite frame and visibility must hold between keys");
+    near(frame.opacity,.75);
+    check(asset->sample(6,3).spriteFrame==3&&!asset->sample(6,5).visible,"Sprite keys do not cut at key times");
+    check(asset->subtitle(1.99).empty()&&asset->subtitle(2)==caption.resource&&asset->subtitle(5).empty(),"Subtitle clip boundaries");
+    auto file=CinematicSequenceArchive::save(*asset);
+    check(file.starts_with("WECINE 2\n")&&CinematicSequenceArchive::save(*CinematicSequenceArchive::load(file))==file,"WECINE 2 round trip");
+    file[7]='1';rejects([&]{CinematicSequenceArchive::load(file);});
+    check(CinematicSequenceArchive::save(*CinematicSequence::create(fixture.data())).starts_with("WECINE 1\n"),"Existing tracks must retain WECINE 1");
+
+    auto invalid=data;
+    invalid.tracks[6].keys[0].spriteFrame=4;rejects([&]{CinematicSequence::create(invalid);});
+    invalid=data;invalid.tracks[6].keys[0].opacity=NAN;rejects([&]{CinematicSequence::create(invalid);});
+    invalid=data;invalid.tracks[7].target=sprite.savedId();rejects([&]{CinematicSequence::create(invalid);});
+    invalid=data;caption.id="overlapping-caption";invalid.tracks.push_back(caption);rejects([&]{CinematicSequence::create(invalid);});
+    rejects([&]{CinematicSpriteBinding(sprite,3,2);});
+    const auto source=SceneArchive::save(fixture.scene,fixture.views());
+    CinematicPreview preview(fixture.scene,fixture.views(),asset);
+    auto& clone=dynamic_cast<MeshComponent&>(*preview.scene().findSavedNode(sprite.savedId()));
+    check(!clone.enabled&&clone.materialOverrides.empty(),"Inactive sprite gap must retain baseline");
+    preview.seek(4);
+    check(clone.enabled&&preview.subtitle()==caption.resource,"Sprite and subtitle did not evaluate together");
+    check(preview.views()[0].camera->projectionMode()==ProjectionMode::Orthographic,"2D shot lost orthographic projection");
+    const auto material=clone.resolvedMaterial(0);
+    check(material.shader==MaterialShader::Unlit&&material.alphaMode==AlphaMode::Blend&&material.baseColorTexture,"Sprite did not use existing atlas material");
+    near(material.uvScale.x,.5);near(material.uvScale.y,.5);near(material.uvOffset.x,.5);near(material.uvOffset.y,.5);
+    preview.seek(5);near(clone.resolvedMaterial(0).opacity,0);check(preview.subtitle().empty(),"Subtitle persisted past clip");
+    preview.seek(6);check(!clone.enabled&&clone.materialOverrides.empty(),"Sprite did not restore baseline at clip end");
+    check(SceneArchive::save(fixture.scene,fixture.views())==source,"2D preview changed authoring scene");
+}
 void run(){
     Fixture f;auto data=f.data();auto asset=CinematicSequence::create(data);near(asset->sample(0,4).transform.position.x,0);
     auto angular=data;angular.tracks[0].keys[0].transform.rotation.y=3;angular.tracks[0].keys[1].transform.rotation.y=-3;near(CinematicSequence::create(angular)->sample(0,4).transform.rotation.y,pi);
@@ -82,4 +142,4 @@ void run(){
     std::unique_ptr<CinematicPreview> detached;{Fixture temporary;detached=std::make_unique<CinematicPreview>(temporary.scene,temporary.views(),CinematicSequence::create(temporary.data()));}detached->seek(4);check(detached->views()[0].camera->savedId()=="camera.b","Preview retained source pointer");
 }
 }
-int main(){try{run();std::cout<<checks<<" cinematic checks passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+int main(){try{run();run2d();std::cout<<checks<<" cinematic checks passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

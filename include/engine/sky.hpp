@@ -12,6 +12,8 @@ struct SkyClouds {
     bool enabled=false;
     float coverage=0.5f,density=1,scale=0.7f;
     Vec2 wind{0.015f,0.006f},offset{}; // Noise-domain units/second; explicit accumulated phase.
+    bool volumetric=false;
+    float baseHeight=1200,thickness=800,extinction=.006f,maxDistance=30000,detail=.35f,anisotropy=.55f;
 };
 struct SkyAtmosphere {
     Vec3 sunDirection{0.4f,0.8f,0.2f}; // World-space direction towards the sun.
@@ -34,15 +36,24 @@ struct SkyBackground {
     SkyDayNight dayNight;
     void validate() const;
 };
-// Shared backend-neutral shader payload. No camera position or simulation state.
+struct CloudUniform {
+    std::array<float,4> layer{},eye{},sun{},shadow{};
+};
+static_assert(sizeof(CloudUniform)==64);
+// Shared backend-neutral shader payload. Active volumetric clouds add camera translation data.
+// Inactive cloud origins stay zero so legacy sky payloads retain translation invariance.
 struct SkyUniform {
     std::array<float,4> right,up,forward,horizon,zenith,nadir;
     Mat4 clipFromDirection;
     std::array<float,4> sun,air,clouds,cloudWind;
     FogUniform fog;
     std::array<float,4> fogRight{},fogUp{};
+    std::array<float,4> cloudLayer{},cloudShape{},cloudOrigin{};
+    CloudUniform cloud{};
 };
-SkyUniform prepareSky(const SkyBackground& sky,const CameraComponent& camera,float aspect);
+static_assert(sizeof(SkyUniform)==784 && offsetof(SkyUniform,cloudLayer)==672 && offsetof(SkyUniform,cloud)==720);
+SkyUniform prepareSky(const SkyBackground& sky,const CameraComponent& camera,float aspect,std::uint32_t cloudSteps=0);
+std::shared_ptr<const Texture> skyCloudNoiseTexture(); // Shared immutable linear RGBA8, bordered 528x528 atlas of 64 depth slices.
 std::shared_ptr<const Mesh> skySphereMesh(); // Shared inward-facing unit sphere, unlit material.
 struct SkyDaylight { Vec3 sunDirection,color,ambient;float intensity,environmentIntensity;bool moon; };
 SkyDaylight evaluateDayNight(const SkyDayNight& settings);

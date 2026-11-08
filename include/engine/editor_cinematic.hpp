@@ -29,6 +29,7 @@ public:
     std::span<const RenderView> views() const;
     CinematicPlayer& player();
     const CinematicPlayer& player() const;
+    std::string_view subtitle() const;
     AudioSystem* audio();
     void seek(double); // Silent, pauses, reconstructs only bounded active FX windows.
     void play();void pause();void stop();

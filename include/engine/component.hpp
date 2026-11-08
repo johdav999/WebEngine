@@ -86,12 +86,14 @@ protected:
 private:
     friend class Scene;
     friend class Node;
+    friend class CinematicRuntime;
     void refreshOwner() noexcept;
     void visitOwnerComponents(const std::function<bool(const Component&)>& visitor) const;
     void validateSnapshot(const ComponentSnapshot& snapshot) const;
     ComponentId id_;
     Actor* notifiedOwner_=nullptr;
     bool initialized_=false,effectiveEnabled_=false,tickEnabled_=false,fixedTickEnabled_=false;
+    bool presentationClockOwned_=false; // Transient subtree tick ownership.
     std::vector<std::string> tags_;
 };
 } // namespace engine

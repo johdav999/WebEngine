@@ -24,6 +24,7 @@ void PerformanceMonitor::recordFrame(const FrameTiming& timing,const FrameCounte
     totalUploadBytes_+=counters.uploadBytes; totalUploadCalls_+=counters.uploadCalls;
     totalFrameStorageGrowths_+=counters.frameStorageGrowths;totalObjectBufferGrowths_+=counters.objectBufferGrowths;
     totalObjectUploadBytes_+=counters.objectUploadBytes;
+    totalFogLightCacheBuilds_+=counters.fogLightCacheBuilds;
     totalResourceMs_+=timing.resourceMs;
     if(counters.newMeshes || counters.newTextures) lastResourceMs_=timing.resourceMs;
 }
@@ -40,6 +41,7 @@ void PerformanceMonitor::reset() {
     totalResourceMs_=lastResourceMs_=0;
     totalFrameStorageGrowths_=totalObjectBufferGrowths_=0;
     totalObjectUploadBytes_=0;
+    totalFogLightCacheBuilds_=0;
 }
 std::string PerformanceMonitor::json(double nowMs,const char* gpuState) const {
     std::ostringstream out; out.imbue(std::locale::classic()); out<<std::fixed<<std::setprecision(6);
@@ -62,12 +64,21 @@ std::string PerformanceMonitor::json(double nowMs,const char* gpuState) const {
         }
         metric(std::span(values).first(count));
     }
-    out<<"},\"current\":{";
+    out<<"},\"totalFogLightCacheBuilds\":"<<totalFogLightCacheBuilds_<<",\"current\":{";
     constexpr const char* counters[]={"meshes","lights","passes","drawCalls","triangles","uploadCalls","uploadBytes","newMeshes","newTextures","cachedMeshes","cachedTextures","cpuAssetBytes","gpuMeshBytes","gpuTextureBytes","gpuBufferBytes","gpuDepthBytes","frameStorageBytes","frameStorageGrowths","objectBufferGrowths","changedObjects","objectUploadCalls","objectUploadBytes","frameUploadCalls","frameUploadBytes","localTransformBuilds","worldTransformBuilds","normalTransformBuilds","submittedInstances","instancedDrawCalls","maxInstancesPerDraw","skinnedInstances","cachedSkeletons","gpuSkinBytes","boneUploadCalls","boneUploadBytes"};
     constexpr std::array countMembers={&FrameCounters::meshes,&FrameCounters::lights,&FrameCounters::passes,&FrameCounters::drawCalls,&FrameCounters::triangles,&FrameCounters::uploadCalls,&FrameCounters::uploadBytes,&FrameCounters::newMeshes,&FrameCounters::newTextures,&FrameCounters::cachedMeshes,&FrameCounters::cachedTextures,&FrameCounters::cpuAssetBytes,&FrameCounters::gpuMeshBytes,&FrameCounters::gpuTextureBytes,&FrameCounters::gpuBufferBytes,&FrameCounters::gpuDepthBytes,&FrameCounters::frameStorageBytes,&FrameCounters::frameStorageGrowths,&FrameCounters::objectBufferGrowths,&FrameCounters::changedObjects,&FrameCounters::objectUploadCalls,&FrameCounters::objectUploadBytes,&FrameCounters::frameUploadCalls,&FrameCounters::frameUploadBytes,&FrameCounters::localTransformBuilds,&FrameCounters::worldTransformBuilds,&FrameCounters::normalTransformBuilds,&FrameCounters::submittedInstances,&FrameCounters::instancedDrawCalls,&FrameCounters::maxInstancesPerDraw,&FrameCounters::skinnedInstances,&FrameCounters::cachedSkeletons,&FrameCounters::gpuSkinBytes,&FrameCounters::boneUploadCalls,&FrameCounters::boneUploadBytes};
     for(std::size_t c=0;c<countMembers.size();++c) { if(c) out<<',';out<<'"'<<counters[c]<<"\":"<<(latest_.*countMembers[c]); }
     out<<",\"assetUploadBytes\":"<<latest_.assetUploadBytes<<",\"assetUploadResources\":"<<latest_.assetUploadResources
-       <<",\"deferredAssetUploads\":"<<latest_.deferredAssetUploads<<",\"deferredAssetDraws\":"<<latest_.deferredAssetDraws;
+       <<",\"deferredAssetUploads\":"<<latest_.deferredAssetUploads<<",\"deferredAssetDraws\":"<<latest_.deferredAssetDraws
+       <<",\"screenReflectionSnapshots\":"<<latest_.screenReflectionSnapshots
+       <<",\"gpuClusterBins\":"<<latest_.gpuClusterBins<<",\"gpuClusterCandidates\":"<<latest_.gpuClusterCandidates
+       <<",\"gpuClusterCandidateTriangles\":"<<latest_.gpuClusterCandidateTriangles
+       <<",\"gpuClusterSampleTriangles\":"<<latest_.gpuClusterSampleTriangles
+       <<",\"gpuClusterVisibleTriangles\":"<<latest_.gpuClusterVisibleTriangles
+       <<",\"gpuClusterSampleSerial\":"<<latest_.gpuClusterSampleSerial
+       <<",\"gpuHierarchyPlans\":"<<latest_.gpuHierarchyPlans<<",\"gpuHierarchyVisited\":"<<latest_.gpuHierarchyVisited
+       <<",\"gpuHierarchySelected\":"<<latest_.gpuHierarchySelected<<",\"gpuHierarchyRequests\":"<<latest_.gpuHierarchyRequests
+       <<",\"gpuHierarchySampleSerial\":"<<latest_.gpuHierarchySampleSerial;
     out<<",\"visibleMeshes\":"<<latest_.visibleMeshes<<",\"culledMeshes\":"<<latest_.culledMeshes;
     out<<",\"trailSegments\":"<<latest_.trailSegments<<",\"trailDrawCalls\":"<<latest_.trailDrawCalls<<",\"trailUploadBytes\":"<<latest_.trailUploadBytes;
     out<<",\"meshParticles\":"<<latest_.meshParticles;
@@ -80,6 +91,12 @@ std::string PerformanceMonitor::json(double nowMs,const char* gpuState) const {
     out<<",\"cachedMaterials\":"<<latest_.cachedMaterials<<",\"cachedMaterialPipelines\":"<<latest_.cachedMaterialPipelines
        <<",\"materialUploadCalls\":"<<latest_.materialUploadCalls<<",\"materialUploadBytes\":"<<latest_.materialUploadBytes;
     out<<",\"shadowPasses\":"<<latest_.shadowPasses<<",\"shadowDrawCalls\":"<<latest_.shadowDrawCalls<<",\"shadowInstances\":"<<latest_.shadowInstances;
+    out<<",\"fogGridPasses\":"<<latest_.fogGridPasses;
+    out<<",\"cloudGridPasses\":"<<latest_.cloudGridPasses<<",\"cloudShadowPasses\":"<<latest_.cloudShadowPasses;
+    out<<",\"fogLightCacheBuilds\":"<<latest_.fogLightCacheBuilds
+       <<",\"fogLightCacheBytes\":"<<latest_.fogLightCacheBytes
+       <<",\"fogLightCacheSlots\":"<<latest_.fogLightCacheSlots;
+    out<<",\"renderSurfacePasses\":"<<latest_.renderSurfacePasses<<",\"renderSurfaceBytes\":"<<latest_.renderSurfaceBytes;
     out<<",\"shadowTriangles\":"<<latest_.shadowTriangles<<",\"cameraLodParts\":"<<latest_.cameraLodParts
        <<",\"shadowLodParts\":"<<latest_.shadowLodParts<<",\"shadowCulledParts\":"<<latest_.shadowCulledParts
        <<",\"shadowMapResolution\":"<<latest_.shadowMapResolution<<",\"shadowFilterTaps\":"<<latest_.shadowFilterTaps;

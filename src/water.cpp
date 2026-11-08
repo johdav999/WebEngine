@@ -63,7 +63,7 @@ bool waterSceneInputsRequired(const Scene& scene,std::uint32_t mask) {
         if(required||!mesh||!mesh->mesh||!mesh->isActiveInHierarchy()||mesh->layer!=RenderLayer::World||!(mesh->visibilityMask&mask)) return;
         for(std::size_t slot=0;slot<std::max<std::size_t>(1,mesh->mesh->materials.size());++slot) {
             const auto m=mesh->resolvedMaterial(slot,false);
-            if(m.shader==MaterialShader::Water&&m.water.usesSceneInputs()) {required=true;break;}
+            if((m.shader==MaterialShader::Water&&m.water.usesSceneInputs())||m.advanced.usesSceneInputs()) {required=true;break;}
         }
     });return required;
 }

@@ -31,11 +31,12 @@ renderer.setQuality(quality);
 
 ## Shadows
 
-The first eight enabled, masked lights retain their shared lighting budget.
+The default path uses the first eight enabled, masked lights.
 `maxShadowMaps` remains 0..4 per view; eligible positive-intensity lights consume
 maps in scene order. A directional light takes up to `directionalCascades` of the
 remaining maps; each spotlight takes one. For example, three sun cascades leave
-one map for a headlight. There is no automatic priority/ranking or point cubemap.
+one map for a headlight. Opt in to view-based ranking and spotlight reservations
+to allocate that budget by priority. [Light selection](lighting-improvements.md#light-and-shadow-budgets)
 
 `directionalCascades=1` preserves the authored fixed, texel-snapped orthographic
 volume. Values 2..4 fit camera-frustum slices, supporting perspective and
@@ -69,7 +70,8 @@ extraction (16 source taps) and a 25-tap tent bloom/composite. Zero bloom streng
 skips extraction and bloom sampling. Exposure precedes Reinhard tone mapping,
 then saturation and contrast around linear .18, clipping and sRGB output.
 The browser canvas remains SDR; HDR refers to internal radiance, not HDR display
-output. This is numeric grading, not LUTs, auto-exposure or a filmic curve.
+output. The optional PBR Neutral curve replaces Reinhard at the same stage.
+[Filmic highlights](lighting-improvements.md#filmic-highlights)
 
 The effect applies to the complete composited canvas, including Overlay meshes;
 bloom may cross adjacent view boundaries. GUI and DOM controls render afterwards
@@ -81,7 +83,8 @@ WebGPU supports the float targets directly. WebGL2 requires
 `EXT_color_buffer_float`; `RenderCapabilities::hdrPostProcessing` reports it.
 Unavailable devices keep the requested setting and render the standard path.
 Float-target MSAA is checked separately; requested 4x falls back to 1x if needed.
-The existing WebGL basic-lighting/no-IBL/no-instancing limits remain.
+WebGL2 defaults to basic lighting and supports an opt-in compact PBR tier with
+baked environment lighting. [WebGL2 compact PBR](lighting-improvements.md#webgl2-compact-pbr)
 
 All fields validate together before replacing quality: exposure -8..8, bloom
 strength 0..2, threshold 0..32, saturation/contrast 0..2, cascades 1..4, finite

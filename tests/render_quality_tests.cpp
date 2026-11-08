@@ -7,12 +7,55 @@
 using namespace engine;
 template<class F> void rejects(F f) { bool threw=false;try { f(); } catch(const std::invalid_argument&) { threw=true; }assert(threw); }
 int main() {
-    { RenderQuality post;assert(!post.post.enabled&&post.directionalCascades==1);
+    { RenderQuality post;assert(!post.post.enabled&&post.post.toneMapper==ToneMapper::Reinhard&&post.directionalCascades==1);
     post.post.enabled=true;post.post.exposure=2;post.directionalCascades=4;post.validate();
+    post.post.toneMapper=ToneMapper::PbrNeutral;post.validate();
     auto invalid=post;invalid.post.exposure=std::numeric_limits<float>::quiet_NaN();rejects([&]{invalid.validate();});
     invalid=post;invalid.post.bloomStrength=-1;rejects([&]{invalid.validate();});
+    invalid=post;invalid.post.toneMapper=static_cast<ToneMapper>(-1);rejects([&]{invalid.validate();});
     invalid=post;invalid.directionalCascades=5;rejects([&]{invalid.validate();});
     invalid=post;invalid.shadowDistance=0;rejects([&]{invalid.validate();}); }
+    {
+        RenderQuality clouds;
+        assert(clouds.volumetricCloudSteps==0&&clouds.volumetricCloudDepth&&!clouds.volumetricCloudShadows&&
+               clouds.volumetricCloudShadowDistance==8000&&clouds.volumetricCloudShadowStrength==.8f);
+        for(const auto budget:{0u,1u,32u,64u}) {
+            clouds.volumetricCloudSteps=budget;
+            clouds.validate();
+        }
+        for(const auto invalid:{65u,std::numeric_limits<std::uint32_t>::max()}) {
+            clouds.volumetricCloudSteps=invalid;
+            rejects([&]{clouds.validate();});
+        }
+        clouds.volumetricCloudSteps=32;
+        for(const auto distance:{128.f,100000.f}) {
+            clouds.volumetricCloudShadowDistance=distance;
+            clouds.validate();
+        }
+        for(const auto distance:{127.f,100001.f,std::numeric_limits<float>::infinity(),std::numeric_limits<float>::quiet_NaN()}) {
+            auto invalid=clouds;invalid.volumetricCloudShadowDistance=distance;
+            rejects([&]{invalid.validate();});
+        }
+        for(const auto strength:{0.f,1.f}) {
+            clouds.volumetricCloudShadowStrength=strength;
+            clouds.validate();
+        }
+        for(const auto strength:{-.001f,1.001f,std::numeric_limits<float>::infinity(),std::numeric_limits<float>::quiet_NaN()}) {
+            auto invalid=clouds;invalid.volumetricCloudShadowStrength=strength;
+            rejects([&]{invalid.validate();});
+        }
+    }
+    {
+        RenderQuality fog;
+        assert(!fog.volumetricFogSurfaceShadows&&!fog.volumetricFogSoftShadows&&
+               !fog.volumetricFogLightCache&&fog.volumetricFogMaxLights==1);
+        fog.volumetricFogMaxLights=4;
+        fog.validate();
+        for(const auto invalidBudget:{0u,5u}) {
+            fog.volumetricFogMaxLights=invalidBudget;
+            rejects([&]{fog.validate();});
+        }
+    }
     RenderCapabilities caps;
     assert(caps.backend==RenderBackend::WebGpu&&caps.shadowMaps&&caps.pbr&&caps.instancing);
     const auto low=RenderQuality::profile(QualityProfile::Low), balanced=RenderQuality::profile(QualityProfile::Balanced);

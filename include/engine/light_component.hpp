@@ -16,6 +16,7 @@ public:
     float innerAngle=pi/9,outerAngle=pi/6; // Half angles in radians; 0 <= inner < outer < pi/2.
     Vec3 direction{0,-1,0}; // Local direction of emitted light, transformed by the hierarchy.
     std::uint32_t visibilityMask=1;
+    std::int32_t priority=0; // Ranked lighting override, -100..100. Higher values win.
     ShadowSettings shadow; // Supported for Directional and Spot lights; opt in per light.
     void validate() const override;
     void validateSettings() const; // Allocation-free light data check, also used during collection.

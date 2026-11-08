@@ -58,6 +58,8 @@ struct EditorAuthoringPanel::Impl {
     TextInput *prefabNode,*prefabName,*prefabX,*prefabY,*prefabZ;
     TextInput *emitter,*rate,*lifeMin,*lifeMax,*sizeMin,*sizeMax;
     TextInput *trackIndex,*trackType,*trackName,*trackResource,*trackStart,*trackEnd,*keyTime;
+    TextInput *atlasColumns,*atlasRows,*spriteFrame,*spriteOpacity,*spriteVisible,*spriteEase;
+    TextLabel* cineSample=nullptr;
     Impl(GuiSystem& g,Scene& s,EditorSession& e):gui(g),scene(s),editor(e) {
         StateMachineData graph;graph.states={{0,"Idle","idle",{80,80}}};ai=std::make_unique<AiGraphEditor>(StateMachineDefinition::create(graph));
         cinematic=std::make_unique<CinematicSequenceEditor>(CinematicSequence::create({}));
@@ -125,8 +127,73 @@ struct EditorAuthoringPanel::Impl {
         action(p,"Apply FX emitter",[this]{auto a=std::make_shared<EffectAsset>(*effect);const auto i=index(emitter,a->emitters.size());auto d=std::make_shared<ParticleEmitterDefinition>(*a->emitters[i].definition);d->spawnRate=float(numeric(rate));d->lifetimeMin=float(numeric(lifeMin));d->lifetimeMax=float(numeric(lifeMax));d->size={{0,float(numeric(sizeMin))},{1,float(numeric(sizeMax))}};a->emitters[i].definition=d;effectEdit(a);});
         action(p,"Place FX",[this]{if(!editor.createEffect(effect))throw std::runtime_error("Effect placement rejected");});action(p,"Assign FX to selection",[this]{if(!editor.setEffectAsset(effect))throw std::runtime_error("Select an editable effect");});files(p);
     }
-    void cinematics(){auto& p=*pages[5];cinematicOverview=&p.add<DocumentOverview>();cinematicOverview->timeline=true;cinematicOverview->setSize({820,150});cinematicOverview->setAccessibleName("Cinematic timeline");cineSummary=summary(p);trackIndex=field(p,"Cinematic track index","0");cinematicOverview->select=[this](std::size_t i){trackIndex->setText(std::to_string(i));};trackType=field(p,"Track type (0 transform, 1 camera, 2 animation, 3 audio, 4 FX)","0");trackName=field(p,"Track name","Track");trackResource=field(p,"Track resource (clip name or audio URI)","");trackStart=field(p,"Track start seconds","0");trackEnd=field(p,"Track end seconds","8");keyTime=field(p,"Key / sample time seconds","0");
-        action(p,"Add cinematic track for selection",[this]{auto d=cinematic->asset()->data();CinematicTrack t;t.id="track-"+Node().savedId();t.name=trackName->text();t.type=CinematicTrackType(index(trackType,5));if(t.type!=CinematicTrackType::Audio){if(!editor.selected())throw std::runtime_error("Select the track target first");t.target=editor.selected()->savedId();}t.resource=trackResource->text();t.start=numeric(trackStart);t.end=numeric(trackEnd);if(t.type==CinematicTrackType::Transform||t.type==CinematicTrackType::Camera){t.keys={{t.start,editor.selected()->transform},{t.end,editor.selected()->transform}};}d.tracks.push_back(t);cinematic->replace(std::move(d));trackIndex->setText(std::to_string(cinematic->asset()->data().tracks.size()-1));});
+    void cinematics(){auto& p=*pages[5];cinematicOverview=&p.add<DocumentOverview>();cinematicOverview->timeline=true;cinematicOverview->setSize({820,150});cinematicOverview->setAccessibleName("Cinematic timeline");cineSummary=summary(p);trackIndex=field(p,"Cinematic track index","0");cinematicOverview->select=[this](std::size_t i){trackIndex->setText(std::to_string(i));};trackType=field(p,"Track type (0 motion, 1 camera, 2 anim, 3 audio, 4 FX, 5 sprite, 6 subtitle)","0");trackName=field(p,"Track name","Track");trackResource=field(p,"Clip name, audio URI or subtitle text","");trackStart=field(p,"Track start seconds","0");trackEnd=field(p,"Track end seconds","8");keyTime=field(p,"Key / sample time seconds","0");
+        atlasColumns=field(p,"Sprite atlas columns","1");atlasRows=field(p,"Sprite atlas rows","1");
+        action(p,"Add cinematic track for selection",[this]{
+            auto d=cinematic->asset()->data();
+            CinematicTrack t;t.id="track-"+Node().savedId();t.name=trackName->text();t.type=CinematicTrackType(index(trackType,7));
+            if(t.type!=CinematicTrackType::Audio&&t.type!=CinematicTrackType::Subtitle){
+                if(!editor.selected())throw std::runtime_error("Select the track target first");
+                t.target=editor.selected()->savedId();
+            }
+            t.resource=trackResource->text();t.start=numeric(trackStart);t.end=numeric(trackEnd);
+            if(t.type==CinematicTrackType::Transform||t.type==CinematicTrackType::Camera)
+                t.keys={{t.start,editor.selected()->transform},{t.end,editor.selected()->transform}};
+            if(t.type==CinematicTrackType::Sprite){
+                auto* mesh=dynamic_cast<MeshComponent*>(editor.selected());
+                if(!mesh)throw std::runtime_error("Select a textured sprite mesh component");
+                t.atlasColumns=std::uint32_t(index(atlasColumns,65));t.atlasRows=std::uint32_t(index(atlasRows,65));
+                CinematicSpriteBinding(*mesh,t.atlasColumns,t.atlasRows);
+                t.keys={{t.start},{t.end}};
+            }
+            d.tracks.push_back(std::move(t));cinematic->replace(std::move(d));
+            trackIndex->setText(std::to_string(cinematic->asset()->data().tracks.size()-1));
+        });
+        action(p,"Read selected cinematic track",[this]{
+            const auto& tracks=cinematic->asset()->data().tracks;
+            const auto& t=tracks.at(index(trackIndex,tracks.size()));
+            trackType->setText(std::to_string(int(t.type)));trackName->setText(t.name);trackResource->setText(t.resource);
+            trackStart->setText(std::to_string(t.start));trackEnd->setText(std::to_string(t.end));
+            atlasColumns->setText(std::to_string(t.atlasColumns));atlasRows->setText(std::to_string(t.atlasRows));
+        });
+        action(p,"Apply sprite or subtitle track settings",[this]{
+            auto d=cinematic->asset()->data();auto& t=d.tracks.at(index(trackIndex,d.tracks.size()));
+            if(t.type!=CinematicTrackType::Sprite&&t.type!=CinematicTrackType::Subtitle)
+                throw std::runtime_error("Choose a sprite or subtitle track");
+            const double start=numeric(trackStart),end=numeric(trackEnd);
+            for(auto& k:t.keys)k.time=start+(k.time-t.start)/(t.end-t.start)*(end-start);
+            t.name=trackName->text();t.start=start;t.end=end;
+            if(t.type==CinematicTrackType::Subtitle)t.resource=trackResource->text();
+            else{
+                t.atlasColumns=std::uint32_t(index(atlasColumns,65));t.atlasRows=std::uint32_t(index(atlasRows,65));
+            }
+            cinematic->replace(std::move(d));
+        });
+        spriteFrame=field(p,"Sprite atlas frame (zero-based)","0");spriteOpacity=field(p,"Sprite opacity","1");
+        spriteVisible=field(p,"Sprite visible (0 or 1)","1");spriteEase=field(p,"Opacity interpolation (0 linear, 1 smooth, 2 hold)","1");
+        action(p,"Set sprite key at time",[this]{
+            auto d=cinematic->asset()->data();auto& t=d.tracks.at(index(trackIndex,d.tracks.size()));
+            if(t.type!=CinematicTrackType::Sprite)throw std::runtime_error("Choose a sprite track");
+            CinematicKey k;k.time=numeric(keyTime);k.spriteFrame=std::uint32_t(index(spriteFrame,t.atlasColumns*t.atlasRows));
+            k.opacity=float(numeric(spriteOpacity));k.visible=index(spriteVisible,2)!=0;
+            k.interpolation=CinematicInterpolation(index(spriteEase,3));
+            auto it=std::lower_bound(t.keys.begin(),t.keys.end(),k.time,[](const auto& a,double b){return a.time<b;});
+            if(it!=t.keys.end()&&it->time==k.time)*it=k;else t.keys.insert(it,k);
+            cinematic->replace(std::move(d));
+        });
+        cineSample=summary(p);
+        action(p,"Sample sprite or subtitle at time",[this]{
+            const auto& asset=*cinematic->asset();const auto i=index(trackIndex,asset.data().tracks.size());
+            const auto& t=asset.data().tracks[i];const auto time=numeric(keyTime);
+            if(t.type!=CinematicTrackType::Sprite&&t.type!=CinematicTrackType::Subtitle)
+                throw std::runtime_error("Choose a sprite or subtitle track");
+            if(!asset.active(t,time)){cineSample->setText("Selected clip is inactive at this time.");return;}
+            if(t.type==CinematicTrackType::Subtitle){cineSample->setText(std::string(asset.subtitle(time)));return;}
+            const auto k=asset.sample(i,time);
+            cineSample->setText("Sprite frame "+std::to_string(k.spriteFrame)+" / opacity "+std::to_string(k.opacity)+(k.visible?" / visible":" / hidden"));
+            spriteFrame->setText(std::to_string(k.spriteFrame));spriteOpacity->setText(std::to_string(k.opacity));
+            spriteVisible->setText(k.visible?"1":"0");spriteEase->setText(std::to_string(int(k.interpolation)));
+        });
         action(p,"Record selected pose at time",[this]{auto d=cinematic->asset()->data();auto& t=d.tracks.at(index(trackIndex,d.tracks.size()));if(t.type!=CinematicTrackType::Transform&&t.type!=CinematicTrackType::Camera)throw std::runtime_error("Choose a transform/camera track");auto* n=scene.findSavedNode(t.target);if(!n)throw std::runtime_error("Track target is missing");CinematicKey k;k.time=numeric(keyTime);k.transform=n->transform;if(auto* c=dynamic_cast<CameraComponent*>(n))k.lens=c->projectionMode()==ProjectionMode::Perspective?c->verticalFov():c->orthographicHeight();auto it=std::lower_bound(t.keys.begin(),t.keys.end(),k.time,[](const auto& a,double b){return a.time<b;});if(it!=t.keys.end()&&it->time==k.time)*it=k;else t.keys.insert(it,k);cinematic->replace(std::move(d));});
         action(p,"Apply sampled track pose",[this]{const auto i=index(trackIndex,cinematic->asset()->data().tracks.size());const auto& t=cinematic->asset()->data().tracks[i];if(t.type!=CinematicTrackType::Transform&&t.type!=CinematicTrackType::Camera)throw std::runtime_error("Choose a transform/camera track");const auto k=cinematic->asset()->sample(i,numeric(keyTime));if(!editor.select(t.target)||!editor.setTransform(k.transform))throw std::runtime_error("Target missing or pose rejected");});
         action(p,"Remove cinematic track",[this]{auto d=cinematic->asset()->data();d.tracks.erase(d.tracks.begin()+index(trackIndex,d.tracks.size()));cinematic->replace(std::move(d));});files(p);

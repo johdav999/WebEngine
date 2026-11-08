@@ -2,6 +2,8 @@
 #include "engine/glb_importer.hpp"
 #include "engine/mesh_optimizer.hpp"
 #include <cgltf.h>
+#include "material_delivery.hpp"
+#include <optional>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -100,7 +102,11 @@ struct Import {
     std::unordered_map<const cgltf_node*,std::uint32_t> joints;
     std::unordered_map<const cgltf_texture*,std::shared_ptr<const Texture>> textures;
     std::unordered_map<const cgltf_material*,std::uint32_t> materials;
+    std::unordered_map<const cgltf_material*,std::size_t> remainingMaterialUses;
     std::vector<UvMapping> materialUvs;
+    std::vector<bool> materialAtlas;
+    std::vector<std::array<std::shared_ptr<const Texture>,17>> rawMaterialMaps;
+    std::map<std::size_t,material_delivery::Json> manifestBindings;
     std::size_t textureBytes=0;double decodeMs=0;
     Import(const GlbImportOptions& options,cgltf_data& data,Mesh& result):o(options),d(data),mesh(result) {}
     void warn(std::string message) { if(std::find(mesh.warnings.begin(),mesh.warnings.end(),message)==mesh.warnings.end()) mesh.warnings.push_back(std::move(message)); }
@@ -116,7 +122,7 @@ struct Import {
     }
     std::shared_ptr<const Texture> texture(const cgltf_texture_view& view,const UvMapping& primary) {
         if(!view.texture) return {};
-        if(!(mapping(view)==primary)) {warn("Texture uses a different UV set or transform from the material primary map; texture omitted");return {};}
+        (void)primary; // Independent mappings are retained and rebaked per primitive below.
         if(auto it=textures.find(view.texture);it!=textures.end()) return it->second;
         const auto* image=view.texture->image;
         if(!image) { warn("Texture has no supported PNG/JPEG source");return {}; }
@@ -136,7 +142,7 @@ struct Import {
         if(const auto* s=view.texture->sampler) {
             result->wrapU=s->wrap_s==cgltf_wrap_mode_clamp_to_edge?TextureWrap::Clamp:TextureWrap::Repeat;
             result->wrapV=s->wrap_t==cgltf_wrap_mode_clamp_to_edge?TextureWrap::Clamp:TextureWrap::Repeat;
-            if(s->wrap_s==cgltf_wrap_mode_mirrored_repeat||s->wrap_t==cgltf_wrap_mode_mirrored_repeat) warn("Mirrored texture wrapping approximated with repeat");
+            // Mirrored repeat is retained by the bounded per-primitive atlas path.
         }
         decodeMs+=elapsed(start);textureBytes+=result->pixels.size();textures[view.texture]=result;return result;
     }
@@ -154,11 +160,140 @@ struct Import {
             result->emissiveTexture=texture(m->emissive_texture,primary);result->doubleSided=m->double_sided;
             result->alphaMode=m->alpha_mode==cgltf_alpha_mode_blend?AlphaMode::Blend:m->alpha_mode==cgltf_alpha_mode_mask?AlphaMode::Mask:AlphaMode::Opaque;
             result->alphaCutoff=m->alpha_cutoff;result->shader=m->unlit?MaterialShader::Unlit:MaterialShader::Pbr;
-            if(m->has_clearcoat||m->has_transmission||m->has_volume||m->has_specular||m->has_sheen||m->has_pbr_specular_glossiness||m->has_iridescence||m->has_anisotropy||m->has_diffuse_transmission||m->has_dispersion||m->has_ior)
-                warn("Optional advanced material extensions approximated by metallic-roughness PBR");
+            auto& a=result->advanced;
+            if(m->has_clearcoat){a.clearcoat=m->clearcoat.clearcoat_factor;a.clearcoatRoughness=m->clearcoat.clearcoat_roughness_factor;if(m->clearcoat.clearcoat_normal_texture.texture)a.clearcoatNormalScale=m->clearcoat.clearcoat_normal_texture.scale;}
+            if(m->has_transmission)a.transmission=m->transmission.transmission_factor;
+            if(m->has_volume){a.thickness=m->volume.thickness_factor;a.attenuationColor=vec(m->volume.attenuation_color);a.attenuationDistance=std::isfinite(m->volume.attenuation_distance)&&m->volume.attenuation_distance<=1000000?m->volume.attenuation_distance:0;}
+            if(m->has_ior)a.ior=m->ior.ior;
+            if(m->has_specular){a.specular=.5f*m->specular.specular_factor;if(m->specular.specular_color_factor[0]!=1||m->specular.specular_color_factor[1]!=1||m->specular.specular_color_factor[2]!=1)warn("Colored dielectric specular is approximated by neutral specular reflectance");}
+            if(m->has_sheen){a.sheenColor=vec(m->sheen.sheen_color_factor);a.sheen=std::max({a.sheenColor.x,a.sheenColor.y,a.sheenColor.z})>0?1:0;a.sheenRoughness=m->sheen.sheen_roughness_factor;}
+            if(m->has_anisotropy){a.anisotropy=m->anisotropy.anisotropy_strength;a.anisotropyRotation=m->anisotropy.anisotropy_rotation;}
+            if(m->has_diffuse_transmission){a.subsurface=m->diffuse_transmission.diffuse_transmission_factor;a.subsurfaceColor=vec(m->diffuse_transmission.diffuse_transmission_color_factor);warn("Diffuse transmission uses the portable wrapped/backlit subsurface approximation");}
+            if(m->has_pbr_specular_glossiness||m->has_iridescence||m->has_dispersion)warn("Unsupported advanced optical model approximated by the portable material recipe");
+            if(a.clearcoat||a.transmission||a.subsurface||a.sheen||a.anisotropy)warn("Advanced material uses WebEngine's portable shading approximation");
+            const auto sourceIndex=std::size_t(m-d.materials);
+            if(auto found=manifestBindings.find(sourceIndex);found!=manifestBindings.end())material_delivery::apply(found->second,*result,mesh.warnings);
         }
-        result->validate();auto id=std::uint32_t(mesh.materials.size());materials[m]=id;mesh.materials.push_back(result);materialUvs.push_back(primary);return id;
+        bool atlas=false;MapTextures source{};
+        if(m){auto views=mapViews(m);for(std::size_t i=0;i<mapCount;++i)if(views[i]->texture){source[i]=texture(*views[i],primary);if(!(mapping(*views[i])==primary)||(views[i]->texture->sampler&&(views[i]->texture->sampler->wrap_s==cgltf_wrap_mode_mirrored_repeat||views[i]->texture->sampler->wrap_t==cgltf_wrap_mode_mirrored_repeat)))atlas=true;}
+            for(auto group:{std::array<int,4>{5,6,8,9},std::array<int,4>{10,11,15,16},std::array<int,4>{12,13,14,-1}}){const Texture* first=nullptr;for(auto index:group)if(index>=0&&source[index]){if(first&&(source[index]->wrapU!=first->wrapU||source[index]->wrapV!=first->wrapV))atlas=true;first=source[index].get();}}
+            if(!atlas)packDirect(m,*result,source);
+        }
+        result->validate();auto id=std::uint32_t(mesh.materials.size());materials[m]=id;mesh.materials.push_back(result);materialUvs.push_back(primary);materialAtlas.push_back(atlas);if(!atlas)source={};rawMaterialMaps.push_back(std::move(source));releaseUnusedTextures();return id;
     }
+    static constexpr std::size_t mapCount=17;
+    using MapTextures=std::array<std::shared_ptr<const Texture>,mapCount>;
+    static std::array<const cgltf_texture_view*,mapCount> mapViews(const cgltf_material* m){
+        const auto& p=m->pbr_metallic_roughness;
+        return {&p.base_color_texture,&p.metallic_roughness_texture,&m->normal_texture,&m->occlusion_texture,&m->emissive_texture,
+            &m->clearcoat.clearcoat_texture,&m->clearcoat.clearcoat_roughness_texture,&m->clearcoat.clearcoat_normal_texture,
+            &m->transmission.transmission_texture,&m->volume.thickness_texture,&m->sheen.sheen_color_texture,&m->sheen.sheen_roughness_texture,
+            &m->anisotropy.anisotropy_texture,&m->specular.specular_texture,&m->specular.specular_color_texture,
+            &m->diffuse_transmission.diffuse_transmission_color_texture,&m->diffuse_transmission.diffuse_transmission_texture};
+    }
+    static bool colorMap(std::size_t i){return i==0||i==4||i==10||i==14||i==15;}
+    static float toLinear(float v){return v<=.04045f?v/12.92f:std::pow((v+.055f)/1.055f,2.4f);}
+    static float toSrgb(float v){v=std::clamp(v,0.f,1.f);return v<=.0031308f?v*12.92f:1.055f*std::pow(v,1/2.4f)-.055f;}
+    static std::array<float,4> sampleMap(const Texture& t,const cgltf_texture_view& view,Vec2 uv,bool color){
+        const auto* sampler=view.texture->sampler;const auto wrapU=sampler?sampler->wrap_s:cgltf_wrap_mode_repeat,wrapV=sampler?sampler->wrap_t:cgltf_wrap_mode_repeat;
+        auto address=[](float value,cgltf_wrap_mode mode){if(mode==cgltf_wrap_mode_clamp_to_edge)return std::clamp(value,0.f,1.f);if(mode==cgltf_wrap_mode_mirrored_repeat){float x=std::fmod(value,2.f);if(x<0)x+=2;return x>1?2-x:x;}return value-std::floor(value);};
+        const float x=address(uv.x,wrapU)*t.width-.5f,y=address(uv.y,wrapV)*t.height-.5f;const int x0=int(std::floor(x)),y0=int(std::floor(y));const float fx=x-x0,fy=y-y0;
+        auto pixel=[&](int px,int py,int channel){auto index=[](int v,int size,cgltf_wrap_mode mode){if(mode==cgltf_wrap_mode_repeat){v%=size;if(v<0)v+=size;return v;}return std::clamp(v,0,size-1);};const float value=t.pixels[(std::size_t(index(py,int(t.height),wrapV))*t.width+index(px,int(t.width),wrapU))*4+channel]/255.f;return color&&channel<3?toLinear(value):value;};
+        std::array<float,4> result{};for(int c=0;c<4;++c)result[c]=(pixel(x0,y0,c)*(1-fx)+pixel(x0+1,y0,c)*fx)*(1-fy)+(pixel(x0,y0+1,c)*(1-fx)+pixel(x0+1,y0+1,c)*fx)*fy;return result;
+    }
+    using Outputs=std::array<std::shared_ptr<Texture>,9>;
+    Outputs allocateMaps(const MapTextures& source,std::size_t dimension,bool atlas){
+        Outputs output;std::array<bool,9> needed{};for(std::size_t i=0;i<5;++i)needed[i]=atlas&&bool(source[i]);
+        needed[5]=bool(source[5]||source[6]||source[8]||source[9]);needed[6]=bool(source[7]);needed[7]=bool(source[10]||source[11]||source[15]||source[16]);needed[8]=bool(source[12]||source[13]||source[14]);
+        for(std::size_t i=0;i<9;++i)if(needed[i]){const auto height=dimension*(i==7?2:1),size=dimension*height*4;require(dimension<=o.textureLimits.maxDimension&&height<=o.textureLimits.maxDimension,"packed material texture exceeds dimension limit");require(textureBytes<=o.maxTextureBytes&&size<=o.maxTextureBytes-textureBytes,"packed material textures exceed total texture memory limit");auto t=std::make_shared<Texture>();t->name="GLB packed material channel "+std::to_string(i);t->width=std::uint32_t(dimension);t->height=std::uint32_t(height);t->wrapU=t->wrapV=atlas?TextureWrap::Clamp:TextureWrap::Repeat;t->pixels.resize(size);textureBytes+=size;output[i]=std::move(t);}
+        return output;
+    }
+    static void pixel(Texture& texture,std::size_t x,std::size_t y,std::array<float,4> color,bool srgb){for(std::size_t c=0;c<4;++c){float v=color[c];if(srgb&&c<3)v=toSrgb(v);texture.pixels[(y*texture.width+x)*4+c]=std::uint8_t(std::lround(std::clamp(v,0.f,1.f)*255));}}
+    static void packPixel(Outputs& output,std::size_t x,std::size_t y,const std::array<std::array<float,4>,mapCount>& raw){
+        for(std::size_t i=0;i<5;++i)if(output[i])pixel(*output[i],x,y,raw[i],colorMap(i));
+        if(output[5])pixel(*output[5],x,y,{raw[5][0],raw[6][1],raw[8][0],raw[9][1]},false);
+        if(output[6])pixel(*output[6],x,y,raw[7],false);
+        if(output[7]){pixel(*output[7],x,y,{raw[10][0],raw[10][1],raw[10][2],raw[11][3]},true);pixel(*output[7],x,y+output[7]->height/2,{raw[15][0],raw[15][1],raw[15][2],raw[16][0]},true);}
+        if(output[8])pixel(*output[8],x,y,{raw[12][0],raw[12][1],raw[12][2],raw[13][3]*(raw[14][0]*.2126f+raw[14][1]*.7152f+raw[14][2]*.0722f)},false);
+    }
+    static std::array<std::array<float,4>,mapCount> neutralSamples(){std::array<std::array<float,4>,mapCount> result;for(auto& c:result)c={1,1,1,1};result[2]=result[7]={.5f,.5f,1,1};result[12]={1,.5f,1,1};return result;}
+    static void bindMaps(Material& m,const Outputs& output,bool atlas){if(atlas){m.baseColorTexture=output[0];m.metallicRoughnessTexture=output[1];m.normalTexture=output[2];m.occlusionTexture=output[3];m.emissiveTexture=output[4];}m.advanced.surfaceTexture=output[5];m.advanced.coatNormalTexture=output[6];m.advanced.colorTexture=output[7];m.advanced.anisotropyTexture=output[8];}
+    void releaseUnusedTextures(){for(auto it=textures.begin();it!=textures.end();){if(it->second.use_count()==1){require(textureBytes>=it->second->pixels.size(),"texture budget accounting underflow");textureBytes-=it->second->pixels.size();it=textures.erase(it);}else ++it;}}
+    void packDirect(const cgltf_material* m,Material& material,const MapTextures& source){
+        bool any=false;for(std::size_t i=5;i<mapCount;++i)any=any||bool(source[i]);if(!any)return;
+        const auto views=mapViews(m);Outputs outputs;
+        const std::array<std::array<int,4>,4> groups={std::array<int,4>{5,6,8,9},std::array<int,4>{7,-1,-1,-1},std::array<int,4>{10,11,15,16},std::array<int,4>{12,13,14,-1}};
+        for(std::size_t group=0;group<4;++group){MapTextures subset{};std::size_t dimension=1;bool needed=false;
+            for(int index:groups[group])if(index>=0&&source[index]){needed=true;subset[index]=source[index];dimension=std::max<std::size_t>(dimension,std::max(source[index]->width,source[index]->height));}
+            if(!needed)continue;
+            dimension=std::min<std::size_t>(dimension,std::min<std::size_t>(2048,o.textureLimits.maxDimension/(group==2?2:1)));require(dimension>0,"packed material dimension limit is zero");
+            auto output=allocateMaps(subset,dimension,false);
+            for(std::size_t y=0;y<dimension;++y)for(std::size_t x=0;x<dimension;++x){auto raw=neutralSamples();const Vec2 uv{(x+.5f)/dimension,(y+.5f)/dimension};for(int index:groups[group])if(index>=0&&source[index])raw[index]=sampleMap(*source[index],*views[index],uv,colorMap(index));packPixel(output,x,y,raw);}
+            outputs[group+5]=output[group+5];
+            for(int index:groups[group])if(index>=0&&source[index]){outputs[group+5]->wrapU=source[index]->wrapU;outputs[group+5]->wrapV=source[index]->wrapV;break;}
+        }
+        bindMaps(material,outputs,false);
+        warn("Advanced material maps repacked to portable channels; filtering and colored dielectric specular may be approximated");
+    }
+
+    bool rebakeRectangle(const cgltf_primitive& primitive,std::uint32_t materialId,std::size_t base){
+        const auto& source=rawMaterialMaps.at(materialId);const auto views=mapViews(primitive.material);const auto primary=materialUvs[materialId];
+        if(std::abs(primary.scale.x)<1e-8f||std::abs(primary.scale.y)<1e-8f)return false;
+        for(std::size_t i=0;i<mapCount;++i)if(source[i]){const auto m=mapping(*views[i]);if(m.set!=primary.set)return false;if((i==2||i==7||i==12)&&(m.rotation!=primary.rotation||m.scale.x*primary.scale.x<=0||m.scale.y*primary.scale.y<=0))return false;}
+        require(attribute(primitive.attributes,primitive.attributes_count,cgltf_attribute_type_texcoord,primary.set),"independent material mapping is missing its UV set");
+        Vec2 low=mesh.vertices[base].uv,high=low;for(std::size_t i=base;i<mesh.vertices.size();++i){const auto uv=mesh.vertices[i].uv;low.x=std::min(low.x,uv.x);low.y=std::min(low.y,uv.y);high.x=std::max(high.x,uv.x);high.y=std::max(high.y,uv.y);}
+        const Vec2 extent{std::max(1e-6f,high.x-low.x),std::max(1e-6f,high.y-low.y)};
+        std::size_t dimension=1;for(auto& t:source)if(t)dimension=std::max<std::size_t>(dimension,std::max(t->width,t->height));const bool bands=source[10]||source[11]||source[15]||source[16];dimension=std::min<std::size_t>(dimension,std::min<std::size_t>(2048,o.textureLimits.maxDimension/(bands?2:1)));
+        std::size_t units=0;for(std::size_t i=0;i<5;++i)units+=bool(source[i]);units+=bool(source[5]||source[6]||source[8]||source[9])+bool(source[7])+2*bool(bands)+bool(source[12]||source[13]||source[14]);require(textureBytes<=o.maxTextureBytes,"material texture budget exceeded");while(dimension>1&&dimension*dimension*4*units>o.maxTextureBytes-textureBytes)dimension/=2;require(dimension>=8,"independent material mapping cannot fit minimum detail in texture budget");
+        auto output=allocateMaps(source,dimension,true);const float c=std::cos(primary.rotation),s=std::sin(primary.rotation);
+        for(std::size_t y=0;y<dimension;++y)for(std::size_t x=0;x<dimension;++x){const float u=low.x+(x+.5f)/dimension*extent.x-primary.offset.x,v=low.y+(y+.5f)/dimension*extent.y-primary.offset.y;const Vec2 original{(c*u+s*v)/primary.scale.x,(-s*u+c*v)/primary.scale.y};auto raw=neutralSamples();
+            for(std::size_t i=0;i<mapCount;++i)if(source[i]){const auto m=mapping(*views[i]);const float a=original.x*m.scale.x,b=original.y*m.scale.y,mc=std::cos(m.rotation),ms=std::sin(m.rotation);raw[i]=sampleMap(*source[i],*views[i],{m.offset.x+mc*a-ms*b,m.offset.y+ms*a+mc*b},colorMap(i));}packPixel(output,x,y,raw);
+        }
+        for(std::size_t i=base;i<mesh.vertices.size();++i){auto& uv=mesh.vertices[i].uv;uv={(uv.x-low.x)/extent.x,(uv.y-low.y)/extent.y};}
+        auto material=std::make_shared<Material>(*mesh.materials[materialId]);bindMaps(*material,output,true);if(material->advanced.uvSpeed.x||material->advanced.uvSpeed.y){material->advanced.uvSpeed={};warn("UV animation frozen for independently mapped textures; rectangular bake preserves exported static appearance");}
+        material->validate();mesh.parts.back().materialIndex=std::uint32_t(mesh.materials.size());mesh.materials.push_back(material);materialUvs.push_back({});materialAtlas.push_back(false);rawMaterialMaps.push_back({});
+        warn("Independent transforms sharing a UV set rebaked over the primitive UV bounds; filtering and texture detail are approximated");return true;
+    }
+
+    void rebakeMappings(const cgltf_primitive& primitive,std::uint32_t materialId,std::size_t base,std::size_t first){
+        if(!materialAtlas[materialId])return;
+        if(rebakeRectangle(primitive,materialId,base))return;
+        const auto& original=*mesh.materials[materialId];auto material=std::make_shared<Material>(original);
+        const auto views=mapViews(primitive.material);const auto source=rawMaterialMaps.at(materialId);
+        std::array<std::vector<float>,mapCount> coordinates;std::array<UvMapping,mapCount> mappings;
+        const auto vertexCount=mesh.vertices.size()-base;
+        for(std::size_t i=0;i<mapCount;++i)if(source[i]){mappings[i]=mapping(*views[i]);auto* uv=attribute(primitive.attributes,primitive.attributes_count,cgltf_attribute_type_texcoord,mappings[i].set);require(uv&&uv->count==vertexCount,"independent material mapping is missing its UV set");coordinates[i]=unpack(uv,cgltf_type_vec2,o.parserMemoryBytes);}
+        const auto triangleCount=(mesh.indices.size()-first)/3;require(triangleCount>0,"empty material atlas");
+        const std::size_t grid=std::size_t(std::ceil(std::sqrt(double(triangleCount))));
+        const bool bands=source[10]||source[11]||source[15]||source[16];const std::size_t dimensionLimit=std::min<std::size_t>(2048,o.textureLimits.maxDimension/(bands?2:1));
+        require(grid<=dimensionLimit/8,"independent material UV atlas exceeds triangle budget");std::size_t sourceSize=256;for(auto& t:source)if(t)sourceSize=std::max<std::size_t>(sourceSize,std::max(t->width,t->height));
+        auto cell=std::clamp<std::size_t>(std::min(sourceSize,dimensionLimit)/grid,8,128);std::size_t dimension=1;while(dimension<grid*cell)dimension*=2;require(dimension<=dimensionLimit,"independent material UV atlas exceeds dimension limit");
+        std::size_t units=0;for(std::size_t i=0;i<5;++i)units+=bool(source[i]);units+=bool(source[5]||source[6]||source[8]||source[9])+bool(source[7])+2*bool(bands)+bool(source[12]||source[13]||source[14]);
+        require(textureBytes<=o.maxTextureBytes,"material texture budget exceeded");while(dimension>1&&dimension*dimension*4*units>o.maxTextureBytes-textureBytes){dimension/=2;cell=std::min(cell,dimension/grid);}
+        require(cell>=8,"independent UV atlas cannot fit minimum detail in the texture budget");
+        require(triangleCount<=(o.maxVertices-base)/3,"independent UV seams exceed vertex limit");require(mesh.morphTargets.empty()||base+triangleCount*3<=o.maxMorphBytes/sizeof(Vec3)/3/mesh.morphTargets.size(),"independent UV seams exceed morph memory limit");
+        auto output=allocateMaps(source,dimension,true);
+        const std::vector<Vertex> oldVertices(mesh.vertices.begin()+base,mesh.vertices.end());std::vector<SkinVertex> oldSkin;if(skeleton)oldSkin.assign(mesh.skin.begin()+base,mesh.skin.end());const std::vector<std::uint32_t> oldIndices(mesh.indices.begin()+first,mesh.indices.end());
+        std::vector<std::vector<Vec3>> morphPositions,morphNormals;for(auto& target:mesh.morphTargets){morphPositions.emplace_back(target.positions.begin()+base,target.positions.end());morphNormals.emplace_back(target.normals.begin()+base,target.normals.end());target.positions.resize(base);target.normals.resize(base);}
+        mesh.vertices.resize(base);if(skeleton)mesh.skin.resize(base);
+        auto coordinate=[&](std::size_t map,std::size_t index){const auto& m=mappings[map];const auto& a=coordinates[map];const float u=a[index*2]*m.scale.x,v=a[index*2+1]*m.scale.y,c=std::cos(m.rotation),s=std::sin(m.rotation);return Vec2{finite(m.offset.x+c*u-s*v),finite(m.offset.y+s*u+c*v)};};
+        auto basis=[](Vec3 normal,Vec3 u,Vec3 v){Vec3 t=normalized(u-normal*dot(normal,u));if(dot(t,t)<.5f)t=normalized(cross(std::abs(normal.y)<.9f?Vec3{0,1,0}:Vec3{1,0,0},normal));Vec3 b=normalized(cross(normal,t));if(dot(b,v)<0)b=b*-1;return std::array<Vec3,2>{t,b};};
+        for(std::size_t triangle=0;triangle<triangleCount;++triangle){const std::array<std::size_t,3> ids={oldIndices[triangle*3]-base,oldIndices[triangle*3+1]-base,oldIndices[triangle*3+2]-base};const auto x=(triangle%grid)*cell,y=(triangle/grid)*cell;const float pad=2,extent=float(cell)-2*pad-1;
+            const std::array<Vec2,3> uv={Vec2{(x+pad+.5f)/dimension,(y+pad+.5f)/dimension},Vec2{(x+pad+.5f+extent)/dimension,(y+pad+.5f)/dimension},Vec2{(x+pad+.5f)/dimension,(y+pad+.5f+extent)/dimension}};
+            for(std::size_t k=0;k<3;++k){auto vertex=oldVertices[ids[k]];vertex.uv=uv[k];mesh.indices[first+triangle*3+k]=std::uint32_t(mesh.vertices.size());mesh.vertices.push_back(vertex);if(skeleton)mesh.skin.push_back(oldSkin[ids[k]]);for(std::size_t t=0;t<mesh.morphTargets.size();++t){mesh.morphTargets[t].positions.push_back(morphPositions[t][ids[k]]);mesh.morphTargets[t].normals.push_back(morphNormals[t][ids[k]]);}}
+            const Vec3 e1=oldVertices[ids[1]].position-oldVertices[ids[0]].position,e2=oldVertices[ids[2]].position-oldVertices[ids[0]].position;
+            std::array<std::array<Vec2,3>,mapCount> oldUv;std::array<Vec3,mapCount> oldU,oldV;
+            for(std::size_t map=0;map<mapCount;++map)if(source[map]){oldUv[map]={coordinate(map,ids[0]),coordinate(map,ids[1]),coordinate(map,ids[2])};oldU[map]=e1;oldV[map]=e2;if(map==2||map==7){const auto& u=oldUv[map];const float du1=u[1].x-u[0].x,dv1=u[1].y-u[0].y,du2=u[2].x-u[0].x,dv2=u[2].y-u[0].y,det=du1*dv2-du2*dv1;if(std::abs(det)>1e-12f){oldU[map]=(e1*dv2-e2*dv1)*(1/det);oldV[map]=(e2*du1-e1*du2)*(1/det);}else warn("Degenerate source normal-map UV triangle uses the geometric tangent frame");}}
+            for(std::size_t py=0;py<cell;++py)for(std::size_t px=0;px<cell;++px){float b=std::max(0.f,(float(px)-pad)/extent),c=std::max(0.f,(float(py)-pad)/extent);if(b+c>1){const float scale=1/(b+c);b*=scale;c*=scale;}const float a=1-b-c;auto raw=neutralSamples();
+                for(std::size_t map=0;map<mapCount;++map)if(source[map]){const auto& u=oldUv[map];raw[map]=sampleMap(*source[map],*views[map],{u[0].x*a+u[1].x*b+u[2].x*c,u[0].y*a+u[1].y*b+u[2].y*c},colorMap(map));if(map==2||map==7){auto& color=raw[map];const auto n=normalized(oldVertices[ids[0]].normal*a+oldVertices[ids[1]].normal*b+oldVertices[ids[2]].normal*c);const auto oldFrame=basis(n,oldU[map],oldV[map]),newFrame=basis(n,e1,e2);const auto tangent=normalized(Vec3{color[0]*2-1,color[1]*2-1,color[2]*2-1});const auto world=oldFrame[0]*tangent.x+oldFrame[1]*tangent.y+n*tangent.z;color[0]=dot(world,newFrame[0])*.5f+.5f;color[1]=dot(world,newFrame[1])*.5f+.5f;color[2]=dot(world,n)*.5f+.5f;}}
+                packPixel(output,x+px,y+py,raw);
+            }
+        }
+        bindMaps(*material,output,true);if(material->advanced.uvSpeed.x||material->advanced.uvSpeed.y){material->advanced.uvSpeed={};warn("UV animation frozen for a material with independently mapped textures; atlas preserves its exported static appearance");}
+        material->validate();mesh.parts.back().materialIndex=std::uint32_t(mesh.materials.size());mesh.materials.push_back(material);materialUvs.push_back({});materialAtlas.push_back(false);rawMaterialMaps.push_back({});
+        warn("Independent texture UV sets/transforms rebaked into a bounded per-triangle atlas; texture detail and filtering are approximated");
+    }
+
     void geometry(const cgltf_node& node) {
         if(!node.mesh) return;
         require(!node.has_mesh_gpu_instancing,"EXT_mesh_gpu_instancing is unsupported");
@@ -257,6 +392,9 @@ struct Import {
                     if(!dn.empty()&&!norm.empty()) target.normals[base+v]=normalized(transformDirection(normal,vec(norm.data()+v*3)+vec(dn.data()+v*3)))-mesh.vertices[base+v].normal;
                 }
             }
+            rebakeMappings(p,mat,base,first);
+            auto& remaining=remainingMaterialUses.at(p.material);require(remaining>0,"invalid material use accounting");
+            if(--remaining==0&&materialAtlas[mat]){rawMaterialMaps[mat]={};mesh.materials[mat]=Material::standard();releaseUnusedTextures();}
             if(attr(cgltf_attribute_type_color)) warn("Vertex colors are unsupported by the material vertex format");
         }
     }
@@ -326,12 +464,15 @@ std::shared_ptr<const Mesh> GlbImporter::loadMemory(std::span<const std::byte> b
     const auto start=Clock::now();if(o.measurements)*o.measurements={};
     struct Timer {GlbImportMeasurements* m;Clock::time_point start;~Timer(){if(m)m->totalMs=elapsed(start);}} timer{o.measurements,start};
     validate(o);require(!bytes.empty()&&bytes.size()<=o.maxFileBytes,"empty file or file size limit exceeded");
+    std::optional<material_delivery::Bundle> delivery;
+    if(bytes.size()>=4&&material_delivery::u32(bytes,0)==0x04034b50){delivery=material_delivery::bundle(bytes,o.maxFileBytes);bytes=delivery->glb;}
     Budget budget{0,o.parserMemoryBytes};cgltf_options opts{};opts.type=cgltf_file_type_glb;opts.memory={Budget::alloc,Budget::free,&budget};
     cgltf_data* raw=nullptr;const auto parsed=cgltf_parse(&opts,bytes.data(),bytes.size(),&raw);
     std::unique_ptr<cgltf_data,decltype(&cgltf_free)> data(raw,cgltf_free);require(parsed==cgltf_result_success,"invalid binary glTF 2.0 container or parser memory limit");
     auto& d=*data;
+    if(delivery){for(std::size_t i=0;i<d.images_count;++i)require(!d.images[i].uri,"bundle images must be embedded buffer views");}
     for(std::size_t i=0;i<d.extensions_required_count;++i) {
-        const std::string_view e=d.extensions_required[i];require(e=="KHR_materials_unlit"||e=="KHR_materials_emissive_strength"||e=="KHR_mesh_quantization"||e=="KHR_texture_transform","unsupported required glTF extension");
+        const std::string_view e=d.extensions_required[i];require(e=="KHR_materials_unlit"||e=="KHR_materials_emissive_strength"||e=="KHR_mesh_quantization"||e=="KHR_texture_transform"||e=="KHR_materials_clearcoat"||e=="KHR_materials_transmission"||e=="KHR_materials_volume"||e=="KHR_materials_ior"||e=="KHR_materials_specular"||e=="KHR_materials_sheen"||e=="KHR_materials_anisotropy"||e=="KHR_materials_diffuse_transmission","unsupported required glTF extension");
     }
     require(d.buffers_count==1&&!d.buffers[0].uri&&d.bin&&d.buffers[0].size<=d.bin_size,"GLB must contain one embedded geometry buffer");
     d.buffers[0].data=const_cast<void*>(d.bin);
@@ -351,6 +492,10 @@ std::shared_ptr<const Mesh> GlbImporter::loadMemory(std::span<const std::byte> b
     require(cgltf_validate(&d)==cgltf_result_success,"invalid glTF data");
     if(o.measurements)o.measurements->parseMs=elapsed(start);
     const auto convert=Clock::now();auto result=std::make_shared<Mesh>();Import import{o,d,*result};
+    std::optional<material_delivery::Json> manifest;
+    if(d.extras.data){auto extras=material_delivery::Parser(d.extras.data).parse();if(extras.type==material_delivery::Json::Type::Object)if(auto* value=extras.find("WEBENGINE_materials"))manifest=*value;}
+    if(delivery){require(manifest.has_value(),"bundle GLB is missing embedded material manifest");material_delivery::check(*manifest==delivery->manifest,"embedded and sidecar material manifests differ");}
+    if(manifest)import.manifestBindings=material_delivery::bindings(*manifest,d.materials_count);
     const auto* scene=d.scene?d.scene:d.scenes_count?&d.scenes[0]:nullptr;
     std::vector<const cgltf_node*> nodes;std::unordered_set<const cgltf_node*> visited;
     std::function<void(const cgltf_node*)> visit=[&](const cgltf_node* n){require(visited.insert(n).second,"duplicate node in scene");nodes.push_back(n);for(std::size_t i=0;i<n->children_count;++i)visit(n->children[i]);};
@@ -358,7 +503,12 @@ std::shared_ptr<const Mesh> GlbImporter::loadMemory(std::span<const std::byte> b
     else for(std::size_t i=0;i<d.nodes_count;++i) if(!d.nodes[i].parent) visit(&d.nodes[i]);
     const bool animated=d.animations_count||std::any_of(nodes.begin(),nodes.end(),[](auto* n){return n->skin!=nullptr;});
     if(animated) {import.skeleton=std::make_shared<Skeleton>();import.skeleton->bindings.push_back({});}
+    for(auto* n:nodes)if(n->mesh)for(std::size_t i=0;i<n->mesh->primitives_count;++i){const auto& primitive=n->mesh->primitives[i];if(primitive.type==cgltf_primitive_type_triangles||primitive.type==cgltf_primitive_type_triangle_strip||primitive.type==cgltf_primitive_type_triangle_fan)++import.remainingMaterialUses[primitive.material];}
     for(auto* n:nodes) import.geometry(*n);
+    // Temporary source materials are not runtime slots after a primitive-specific bake.
+    std::vector<std::shared_ptr<const Material>> activeMaterials;std::vector<std::uint32_t> remap(result->materials.size(),UINT32_MAX);
+    for(auto& part:result->parts){auto& target=remap.at(part.materialIndex);if(target==UINT32_MAX){target=std::uint32_t(activeMaterials.size());activeMaterials.push_back(result->materials[part.materialIndex]);}part.materialIndex=target;}result->materials=std::move(activeMaterials);
+    import.rawMaterialMaps.clear();import.releaseUnusedTextures();
     require(!result->indices.empty(),"no triangle meshes in selected scene");import.animations();
     result->generateTangents();require(result->vertices.size()<=o.maxVertices,"tangent seams exceed vertex limit");
     require(result->morphTargets.empty()||result->vertices.size()<=o.maxMorphBytes/sizeof(Vec3)/3/result->morphTargets.size(),"morph memory limit exceeded");

@@ -46,7 +46,7 @@ public:
     bool reading=false;
     std::uint32_t collisionDepth=0;
     bool referencesOnly=false; // In-memory duplication transport; never a persisted format.
-    std::uint32_t version=36;
+    std::uint32_t version=41;
     std::uint32_t effectDepth=0,prefabDepth=0;
     std::span<const std::byte> input;
     std::vector<std::byte> output;
@@ -213,10 +213,11 @@ public:
             if(version>=25){auto surface=value.surface();auto triangles=value.triangleSurfaces();auto children=value.children();fields(surface,triangles,children);}
         } else io(const_cast<T&>(value));
     }
-    template<class T>void boundedSource(std::vector<T>& values,unsigned maximum){
-        unsigned count=values.size();io(count);require(count<=maximum&&count<=limits.maxElements,"Spline/profile source limit exceeded");if(reading){allocation(std::size_t(count)*sizeof(T));values.resize(count);}for(auto& value:values)io(value);
+    template<class T>void boundedSource(std::vector<T>& values,unsigned maximum,const char* message="Spline/profile source limit exceeded"){
+        unsigned count=values.size();io(count);require(count<=maximum&&count<=limits.maxElements,message);if(reading){allocation(std::size_t(count)*sizeof(T));values.resize(count);}for(auto& value:values)io(value);
     }
     void io(RegionBounds& b){fields(b.minimum,b.maximum);b.validate();}
+    void io(LightingZone& zone) {fields(zone.minimum,zone.maximum,zone.blendDistance,zone.environment,zone.intensity,zone.rotation);}
     void io(RegionRecord& r){fields(r.key,r.bounds,r.visualAsset,r.collisionAsset,r.visualBytes,r.collisionBytes);}
     void io(RegionManifestData& d){io(d.scope);boundedSource(d.regions,128);boundedSource(d.requiredOnRestore,128);d.validate();}
     void io(SplinePoint& p){fields(p.position,p.tangent,p.bank);}
@@ -281,17 +282,24 @@ public:
         if(version>=13) fields(v.causticsStrength,v.causticsScale,v.causticsSpeed,v.causticsDepth);
         v.validate();
     }
+    void io(MaterialAdvanced& v) {
+        fields(v.clearcoat,v.clearcoatRoughness,v.transmission,v.ior,v.thickness,v.attenuationDistance,
+            v.subsurface,v.sheen,v.attenuationColor,v.sheenRoughness,v.subsurfaceColor,v.anisotropy,
+            v.sheenColor,v.anisotropyRotation,v.specular,v.uvSpeed,v.windAmplitude,v.windDirection,
+            v.windFrequency,v.windSpeed,v.clearcoatNormalScale,v.surfaceTexture,v.coatNormalTexture,v.colorTexture,v.anisotropyTexture);
+        v.validate();
+    }
     void io(Material& v) {
         fields(v.name,v.baseColor,v.baseColorTexture,v.texturePath,v.opacity,v.roughness,v.metallic,v.normalScale,v.occlusionStrength,v.emissive,
             v.metallicRoughnessTexture,v.normalTexture,v.occlusionTexture,v.emissiveTexture,v.alphaMode,v.alphaCutoff,v.doubleSided,v.shader,v.uvScale,v.uvOffset);
         if(version>=7) io(v.water);else require(v.shader<=MaterialShader::Unlit,"Invalid legacy material shader");
-        if(version>=12) io(v.layers);v.validate();
+        if(version>=12) io(v.layers);if(version>=40)io(v.advanced);v.validate();
     }
     void io(MaterialInstance& v) {
         fields(v.material,v.tint,v.opacity,v.uvScale,v.uvOffset,v.roughness,v.metallic,v.normalScale,v.occlusionStrength,v.alphaCutoff,v.emissive,
             v.alphaMode,v.doubleSided,v.shader,v.baseColorTexture,v.metallicRoughnessTexture,v.normalTexture,v.occlusionTexture,v.emissiveTexture);
         if(version>=7) io(v.water);else require(!v.shader||*v.shader<=MaterialShader::Unlit,"Invalid legacy material override");
-        if(version>=12) io(v.layers);v.resolve().validate();
+        if(version>=12) io(v.layers);if(version>=40)io(v.advanced);v.resolve().validate();
     }
     void io(Mesh& v) {
         fields(v.vertices,v.morphTargets,v.skin,v.skeleton,v.indices,v.materials,v.parts,v.warnings);
@@ -375,13 +383,21 @@ public:
             v.jumpSpeed,v.gravity,v.padding,v.maxPushForce,v.mass,v.collisionLayer);v.validate();
     }
     void io(AssetLibrary& v) { fields(v.meshes,v.materials,v.textures,v.skeletons,v.environments,v.emitters,v.effects,v.collisionShapes);if(version>=10) io(v.terrains);if(version>=25)io(v.physicalSurfaces); }
-    void io(FogSettings& v) { fields(v.color,v.density,v.startDistance,v.baseHeight,v.heightFalloff);v.validate(); }
+    void io(FogVolume& v) { fields(v.minimum,v.maximum,v.scattering,v.density,v.edgeFade,v.maxDistance);v.validate(); }
+    void io(FogSettings& v) {
+        fields(v.color,v.density,v.startDistance,v.baseHeight,v.heightFalloff);
+        if(version>=37)io(v.volume);
+        if(version>=39)boundedSource(v.additionalVolumes,maxAdditionalFogVolumes,"Additional fog volume limit exceeded");
+        v.validate();
+    }
     void io(SkyBackground& v) {
         fields(v.mode,v.panorama,v.horizon,v.zenith,v.nadir,v.rotation,v.brightness);
         if(version>=6) fields(v.geometry,v.clouds.enabled,v.clouds.coverage,v.clouds.density,v.clouds.scale,
             v.clouds.wind,v.clouds.offset,v.atmosphere.sunDirection,v.atmosphere.solarIntensity,v.atmosphere.rayleigh,
             v.atmosphere.mie,v.atmosphere.anisotropy,v.atmosphere.altitude,v.dayNight.enabled,v.dayNight.running,
             v.dayNight.hour,v.dayNight.daySeconds,v.dayNight.azimuth,v.dayNight.sunIntensity,v.dayNight.moonIntensity);
+        if(version>=41)fields(v.clouds.volumetric,v.clouds.baseHeight,v.clouds.thickness,v.clouds.extinction,
+                             v.clouds.maxDistance,v.clouds.detail,v.clouds.anisotropy);
         v.validate();
     }
 
@@ -712,6 +728,7 @@ public:
             case Kind::Light: {
                 auto& v=static_cast<LightComponent&>(node);fields(v.type,v.color,v.intensity,v.range,v.direction,v.visibilityMask,v.shadow);
                 if(version>=30)fields(v.innerAngle,v.outerAngle);
+                if(version>=38)io(v.priority);
                 require(version>=30||v.type!=LightType::Spot,"Spotlights require archive v30");v.validate();break;
             }
             case Kind::Skeleton: {
@@ -759,6 +776,7 @@ public:
         std::unordered_map<const void*,bool> seen;
         auto add=[&](auto& list,const auto& asset) { if(asset&&seen.emplace(asset.get(),true).second) list.push_back(asset); };
         add(result.environments,scene.environment);
+        for(const auto& zone:scene.lightingZones()) add(result.environments,zone.environment);
         if(scene.sky()&&scene.sky()->mode==SkyMode::Panorama) add(result.textures,scene.sky()->panorama);
         auto texture=[&](const auto& t) { add(result.textures,t); };
         auto material=[&](const auto& m) {
@@ -800,6 +818,7 @@ public:
         views(result.views);io(result.assets);io(result.applicationData);
         if(version>=5) { std::optional<SkyBackground> sky;io(sky);result.scene->setSky(std::move(sky)); }
         if(version>=16) { std::optional<FogSettings> fog;io(fog);result.scene->setFog(std::move(fog)); }
+        if(version>=38) { std::vector<LightingZone> zones;boundedSource(zones,maxLightingZones,"Lighting zone limit exceeded");result.scene->setLightingZones(std::move(zones)); }
         require(offset==input.size(),"Unexpected archive payload data");
         {
             Node::TraversalGuard guard(*scene);
@@ -822,9 +841,12 @@ public:
     void writeScene(const Scene& scene,std::span<const RenderView> renderViews,const AssetLibrary& assets,std::span<const std::byte> data) {
         scene.requireIdle();Node::TraversalGuard guard(*const_cast<Scene*>(&scene));
         std::uint32_t type=1;io(type);indexNodes(scene);writeNode(*const_cast<Scene*>(&scene));
-        std::vector<RenderView> savedViews(renderViews.begin(),renderViews.end());views(savedViews);
+        std::vector<RenderView> savedViews;
+        for(const auto& view:renderViews) if(!view.target) savedViews.push_back(view);
+        views(savedViews);
         io(const_cast<AssetLibrary&>(assets));std::vector<std::byte> metadata(data.begin(),data.end());io(metadata);
         auto sky=scene.sky();io(sky);auto fog=scene.fog();io(fog);
+        auto savedZones=scene.lightingZones();boundedSource(savedZones,maxLightingZones,"Lighting zone limit exceeded");
     }
 };
 
@@ -832,13 +854,13 @@ namespace {
 constexpr std::array<std::byte,8> magic={std::byte{'W'},std::byte{'E'},std::byte{'S'},std::byte{'C'},std::byte{'E'},std::byte{'N'},std::byte{'E'},std::byte{0}};
 std::vector<std::byte> envelope(std::vector<std::byte> payload,const ArchiveLimits& limits) {
     ArchiveCodec header(limits);auto signature=magic;header.bytes(signature.data(),signature.size());
-    std::uint32_t version=36,crc=checksum(payload);std::uint64_t size=payload.size();header.fields(version,size,crc);header.bytes(payload.data(),payload.size());return std::move(header.output);
+    std::uint32_t version=41,crc=checksum(payload);std::uint64_t size=payload.size();header.fields(version,size,crc);header.bytes(payload.data(),payload.size());return std::move(header.output);
 }
 std::span<const std::byte> open(std::span<const std::byte> bytes,const ArchiveLimits& limits,std::uint32_t& version) {
     require(bytes.size()<=limits.maxBytes,"Archive size limit exceeded");ArchiveCodec header(bytes,limits);
     std::array<std::byte,8> signature{};header.bytes(signature.data(),signature.size());require(signature==magic,"This is not a WebEngine archive");
     std::uint32_t crc=0;std::uint64_t size=0;header.fields(version,size,crc);
-    require(version>=1&&version<=36,"Unsupported WebEngine archive version");require(size==bytes.size()-header.offset,"Truncated archive or trailing data");
+    require(version>=1&&version<=41,"Unsupported WebEngine archive version");require(size==bytes.size()-header.offset,"Truncated archive or trailing data");
     const auto payload=bytes.subspan(header.offset);require(checksum(payload)==crc,"Archive checksum mismatch");return payload;
 }
 }

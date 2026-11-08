@@ -31,10 +31,10 @@ ID3D12PipelineState* fxPipeline(bool ribbon,BlendMode blend){
     p.PrimitiveTopologyType=D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;p.NumRenderTargets=1;p.RTVFormats[0]=colorFormat();p.DSVFormat=DXGI_FORMAT_D32_FLOAT;p.SampleDesc.Count=sampleCount_;
     ComPtr<ID3D12PipelineState> next;checked(device_->CreateGraphicsPipelineState(&p,IID_PPV_ARGS(&next)),"Create FX pipeline");return fxPipelines_.emplace(key,std::move(next)).first->second.Get();
 }
-void drawFx(Frame& frame,const FxBatch& batch,const CameraComponent& camera,const D3D12_VERTEX_BUFFER_VIEW& particles,const D3D12_VERTEX_BUFFER_VIEW& ribbons){
+void drawFx(Frame& frame,const FxBatch& batch,const CameraComponent& camera,const D3D12_VERTEX_BUFFER_VIEW& particles,const D3D12_VERTEX_BUFFER_VIEW& ribbons,RenderLayer layer){
     if(draws_>=40960)throw std::runtime_error("Direct D3D12 total draw budget exceeded");
     const auto source=batch.texture?batch.texture:Texture::white();const auto right=camera.right(),up=normalized(cross(right,camera.forward()));
-    const std::array<Float4,3> constants{{{right.x,right.y,right.z,0},{up.x,up.y,up.z,0},{float(source->width),float(source->height),float((source->wrapU==TextureWrap::Clamp?1:0)|(source->wrapV==TextureWrap::Clamp?2:0)),0}}};
+    const std::array<Float4,3> constants{{{right.x,right.y,right.z,0},{up.x,up.y,up.z,0},{float(source->width),float(source->height),float((source->wrapU==TextureWrap::Clamp?1:0)|(source->wrapV==TextureWrap::Clamp?2:0)),layer==RenderLayer::World?1.f:0.f}}};
     list_->SetGraphicsRootConstantBufferView(15,upload(frame,constants.data(),sizeof(constants)));
     list_->SetGraphicsRootDescriptorTable(2,texture(frame,source,true));list_->SetPipelineState(fxPipeline(batch.ribbon,batch.blend));
     const auto& vertices=batch.ribbon?ribbons:particles;list_->IASetVertexBuffers(0,1,&vertices);

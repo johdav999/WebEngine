@@ -1,10 +1,19 @@
 #include "desktop_graphics.hpp"
 #include "engine/render_frame.hpp"
+#include "engine/cluster_stream.hpp"
 #include "engine/fx_frame.hpp"
 #include "engine/performance.hpp"
+#include "engine/view_lighting.hpp"
 #include "engine/performance_timeline.hpp"
 #include "d3d12_shaders.hpp"
+#include "../fog_grid.hpp"
+#include "../cloud_render.hpp"
+#include "../fog_light_cache.hpp"
+#include "../fog_render.hpp"
+#include "../lighting_zones_render.hpp"
+#include "../diffuse_gi_gpu.hpp"
 #include "underwater_render.hpp"
+#include "screen_reflections.hpp"
 #include <Windows.h>
 #include <d3d12.h>
 #include <d3d12sdklayers.h>
@@ -32,15 +41,21 @@ using Float4=std::array<float,4>;
 struct LightConstants {Float4 positionType,directionRange,colorIntensity,cone;};
 struct ShadowConstants {Mat4 matrix;Float4 options,selection;};
 struct FrameConstants {Mat4 viewProjection;Float4 ambientCount;std::array<LightConstants,8> lights{};Float4 cameraEnvironment,environmentOptions;std::array<ShadowConstants,4> shadows{};Float4 forward;FogUniform fog;Float4 output;
-    Float4 waterClock;Mat4 inverseViewProjection;Float4 viewport,extent;Mat4 reflectionViewProjection;Float4 reflectionPlane,reflectionOptions;WaterInteractionParameters interactions;};
+    Float4 waterClock;Mat4 inverseViewProjection;Float4 viewport,extent;Mat4 reflectionViewProjection;Float4 reflectionPlane,reflectionOptions;WaterInteractionParameters interactions;LightingZoneConstants lightingZones;Float4 lightingZoneRotations;ReflectionProbeConstants reflectionProbe;CloudUniform cloud;};
 struct SkyConstants {SkyUniform sky;Float4 output;};
-struct ObjectConstants {Mat4 model,normal;Float4 tint,surface,emission,uv,options,maps;std::array<float,56> layers;std::array<float,28> water;};
-static_assert(sizeof(FrameConstants)==2352&&sizeof(ObjectConstants)==560&&sizeof(SkyConstants)==336);
+struct ObjectConstants {Mat4 model,normal;Float4 tint,surface,emission,uv,options,maps;std::array<float,56> layers;std::array<float,28> water;std::array<float,36> advanced;};
+static_assert(sizeof(FrameConstants)==2896&&sizeof(ObjectConstants)==704&&sizeof(SkyConstants)==800);
 
 class D3D12Graphics final:public DesktopGraphics {
     static constexpr UINT frameCount=2,descriptorCount=65536;
     using TextureKey=std::tuple<const Texture*,TextureSemantic,bool>; // Last flag forces GUI RGBA.
-    using MaterialKey=std::pair<std::array<const Texture*,9>,bool>;
+    struct SurfaceTarget {
+        std::weak_ptr<const RenderSurface> source;
+        ComPtr<ID3D12Resource> color,depth;
+        ComPtr<ID3D12DescriptorHeap> rtv,dsv;
+        bool captured=false;
+    };
+    using MaterialKey=std::tuple<std::array<const Texture*,9>,bool,const SurfaceTarget*>;
     struct Frame {
         ComPtr<ID3D12CommandAllocator> allocator;
         ComPtr<ID3D12Resource> upload;
@@ -50,13 +65,14 @@ class D3D12Graphics final:public DesktopGraphics {
         std::size_t used=0,capacity=0;
         UINT descriptorUsed=0;
         std::vector<ComPtr<ID3D12Resource>> retained;
+        std::vector<std::shared_ptr<SurfaceTarget>> retainedSurfaces;
         std::map<TextureKey,UINT> textureSlots;
         std::map<MaterialKey,UINT> materialSlots;
     };
     struct GpuMesh {std::weak_ptr<const Mesh> source;ComPtr<ID3D12Resource> vertices,indices,skin;D3D12_VERTEX_BUFFER_VIEW vb{},skinVb{};D3D12_INDEX_BUFFER_VIEW ib{};UINT maxJoint=0;};
     template<class Source> struct PoseBuffer {std::weak_ptr<const Source> source;ComPtr<ID3D12Resource> image;std::size_t capacity=0;std::uint64_t revision=0;};
     struct GpuTexture {std::weak_ptr<const Texture> source;ComPtr<ID3D12Resource> image;DXGI_FORMAT format=DXGI_FORMAT_UNKNOWN;bool compressed=false;std::uint64_t bytes=0;};
-    struct GpuEnvironment {std::weak_ptr<const Environment> source;std::array<ComPtr<ID3D12Resource>,3> images;UINT levels=0;};
+    struct GpuEnvironment {std::weak_ptr<const Environment> source;LightingZoneSources zoneSources;std::shared_ptr<const Environment> reflectionSource;std::array<ComPtr<ID3D12Resource>,3> images;UINT levels=0,cubeCount=1;};
     SDL_Window& window_;GuiSystem& gui_;
     Scene* scene_=nullptr;RenderViews views_;
     std::vector<ComponentId> viewCameraIds_;
@@ -70,14 +86,26 @@ class D3D12Graphics final:public DesktopGraphics {
     std::map<std::array<UINT,7>,ComPtr<ID3D12PipelineState>> meshPipelines_;
     ComPtr<ID3D12PipelineState> guiPipeline_;
     ComPtr<ID3D12PipelineState> bloomPipeline_,compositePipeline_;
-    std::map<std::array<UINT,3>,ComPtr<ID3D12PipelineState>> skyPipelines_;
+    ComPtr<ID3D12Resource> fogGrid_;
+    ComPtr<ID3D12PipelineState> fogGridPipeline_;
+    ComPtr<ID3D12PipelineState> cloudGridPipeline_,cloudShadowPipeline_;
+    std::uint64_t cloudGridPasses_=0,cloudShadowPasses_=0;
+    ComPtr<ID3D12Resource> fogLightCache_;
+    ComPtr<ID3D12PipelineState> fogLightCachePipeline_;
+    fog_light_cache::Cache fogLightCacheState_;
+    std::uint64_t fogLightCacheBuilds_=0,fogLightCacheSlots_=0;
+    std::map<std::array<UINT,4>,ComPtr<ID3D12PipelineState>> skyPipelines_;
     std::array<Frame,frameCount> frames_;
     std::map<const Mesh*,GpuMesh> meshes_;
     std::map<const SkinPose*,PoseBuffer<SkinPose>> skins_;
     std::map<const MorphPose*,PoseBuffer<MorphPose>> morphs_;
     std::map<TextureKey,GpuTexture> textures_;
     GpuEnvironment environment_;
+    ComPtr<ID3D12Resource> diffuseGiBuffer_;
+    std::shared_ptr<const DiffuseGiSnapshot> diffuseGiSource_;
     std::array<RenderFrame,32> viewFrames_;
+    std::array<ViewLightSelection,32> lightSelection_;
+    ViewLighting reportedLighting_;
     FxFrame transparent_;
     template<class T> struct FxStream {ComPtr<ID3D12Resource> image;std::size_t capacity=0;std::vector<T> shadow;};
     std::array<FxStream<ParticleInstance>,32> particleStreams_;
@@ -87,6 +115,11 @@ class D3D12Graphics final:public DesktopGraphics {
     std::uint64_t particles_=0,meshParticles_=0,particleDraws_=0,trailDraws_=0,trailSegments_=0,particleUploadBytes_=0,trailUploadBytes_=0;
     SceneFrame preflight_;
     std::vector<ResolvedRenderView> resolved_;
+    std::vector<ResolvedRenderView> drawViews_;
+    std::map<const RenderSurface*,std::shared_ptr<SurfaceTarget>> surfaceTargets_;
+    std::vector<SurfaceTarget*> recordedSurfaces_;
+    std::size_t surfacePasses_=0;
+    bool surfacePass_=false;
     HANDLE event_=nullptr;
     UINT rtvStride_=0,srvStride_=0,dsvStride_=0,width_=0,height_=0,sampleCount_=1,shadowResolution_=0,shadowLayers_=0;
     std::uint64_t nextFence_=0,presented_=0,generation_=0,draws_=0,triangles_=0,guiDraws_=0;
@@ -95,7 +128,7 @@ class D3D12Graphics final:public DesktopGraphics {
     bool shadowsEnabled_=true;
     bool hdr_=false,hdrMsaa_=false;
     std::uint64_t skyDraws_=0,postPasses_=0,bloomPasses_=0;
-    std::uint64_t shadowDraws_=0,shadowPasses_=0,shadowTriangles_=0;
+    std::uint64_t shadowDraws_=0,shadowPasses_=0,shadowTriangles_=0,fogGridPasses_=0;
     std::uint64_t skinnedDraws_=0,morphDraws_=0,skinUploads_=0,morphUploads_=0,skinUploadBytes_=0,morphUploadBytes_=0;
     std::uint64_t layeredDraws_=0,cameraLodParts_=0,shadowLodParts_=0,shadowCulledParts_=0;
     WaterInteractions waterInteractions_;
@@ -105,6 +138,7 @@ class D3D12Graphics final:public DesktopGraphics {
     UINT waterWidth_=0,waterHeight_=0,reflectionWidth_=0,reflectionHeight_=0,waterSamples_=0;
     bool waterCapture_=false,waterHdr_=false,waterDirty_=false,reflectionPass_=false;
     std::uint64_t waterDraws_=0,waterSnapshots_=0,reflectionPasses_=0,reflectionDraws_=0,reflectionTriangles_=0,underwaterPasses_=0,waterPresentCopies_=0;
+    std::uint64_t screenReflectionSnapshots_=0;
     std::size_t deformationUploadBytes_=0;
     std::uint64_t textureUploadBytes_=0;
     ComPtr<ID3D12InfoQueue> debugQueue_;std::uint64_t checkedMessages_=0;
@@ -126,6 +160,22 @@ class D3D12Graphics final:public DesktopGraphics {
     ComPtr<ID3D12Resource> buffer(std::uint64_t bytes,D3D12_HEAP_TYPE type,D3D12_RESOURCE_STATES state) {
         auto p=heap(type);auto d=bufferDescription(bytes);ComPtr<ID3D12Resource> result;
         checked(device_->CreateCommittedResource(&p,D3D12_HEAP_FLAG_NONE,&d,state,nullptr,IID_PPV_ARGS(&result)),"Create buffer");return result;
+    }
+    void bindDiffuseGi(Frame& frame) {
+        const auto& source=scene_->diffuseGi();
+        if(!diffuseGiBuffer_||source!=diffuseGiSource_) {
+            const auto data=packDiffuseGi(source.get());
+            auto bufferCandidate=buffer(sizeof(data),D3D12_HEAP_TYPE_UPLOAD,D3D12_RESOURCE_STATE_GENERIC_READ);
+            const auto bytes=sizeof(data.metadata)+(source?source->probes.size()*sizeof(DiffuseGiProbe):0);
+            void* mapped=nullptr;D3D12_RANGE unread{};
+            checked(bufferCandidate->Map(0,&unread,&mapped),"Map diffuse GI probes");
+            std::memcpy(mapped,&data,bytes);
+            const D3D12_RANGE written{0,bytes};bufferCandidate->Unmap(0,&written);
+            diffuseGiBuffer_=std::move(bufferCandidate);
+            diffuseGiSource_=source;
+        }
+        frame.retained.push_back(diffuseGiBuffer_);
+        list_->SetGraphicsRootConstantBufferView(18,diffuseGiBuffer_->GetGPUVirtualAddress());
     }
     void prepareUpload(Frame& frame,std::size_t bytes) {
         if(bytes>64*1024*1024)throw std::runtime_error("Direct D3D12 per-frame upload budget exceeded");
@@ -175,6 +225,7 @@ class D3D12Graphics final:public DesktopGraphics {
 #include "d3d12_instancing.inc"
 #include "d3d12_water.inc"
 #include "d3d12_fx.inc"
+#include "d3d12_surfaces.inc"
     void initialize() {
         wchar_t validation[4]{};
         if(GetEnvironmentVariableW(L"WEBENGINE_D3D12_VALIDATION",validation,4)&&validation[0]==L'1'){
@@ -189,7 +240,7 @@ class D3D12Graphics final:public DesktopGraphics {
         adapter_="{\"device\":"+jsonString(utf8)+",\"vendorId\":"+std::to_string(info.VendorId)+",\"deviceId\":"+std::to_string(info.DeviceId)+",\"backend\":\"D3D12\",\"software\":false}";
         D3D12_COMMAND_QUEUE_DESC q{};q.Type=D3D12_COMMAND_LIST_TYPE_DIRECT;checked(device_->CreateCommandQueue(&q,IID_PPV_ARGS(&queue_)),"Create command queue");
         checked(device_->CreateFence(0,D3D12_FENCE_FLAG_NONE,IID_PPV_ARGS(&fence_)),"Create fence");event_=CreateEventW(nullptr,FALSE,FALSE,nullptr);if(!event_)throw std::runtime_error("Create fence event failed");
-        D3D12_DESCRIPTOR_HEAP_DESC hd{};hd.Type=D3D12_DESCRIPTOR_HEAP_TYPE_RTV;hd.NumDescriptors=frameCount+7;checked(device_->CreateDescriptorHeap(&hd,IID_PPV_ARGS(&rtvs_)),"Create RTV heap");hd.Type=D3D12_DESCRIPTOR_HEAP_TYPE_DSV;hd.NumDescriptors=6;checked(device_->CreateDescriptorHeap(&hd,IID_PPV_ARGS(&dsv_)),"Create DSV heap");
+        D3D12_DESCRIPTOR_HEAP_DESC hd{};hd.Type=D3D12_DESCRIPTOR_HEAP_TYPE_RTV;hd.NumDescriptors=frameCount+9;checked(device_->CreateDescriptorHeap(&hd,IID_PPV_ARGS(&rtvs_)),"Create RTV heap");hd.Type=D3D12_DESCRIPTOR_HEAP_TYPE_DSV;hd.NumDescriptors=7;checked(device_->CreateDescriptorHeap(&hd,IID_PPV_ARGS(&dsv_)),"Create DSV heap");
         dsvStride_=device_->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);rtvStride_=device_->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);srvStride_=device_->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
         for(auto& frame:frames_){checked(device_->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,IID_PPV_ARGS(&frame.allocator)),"Create command allocator");hd.Type=D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;hd.NumDescriptors=descriptorCount;hd.Flags=D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;checked(device_->CreateDescriptorHeap(&hd,IID_PPV_ARGS(&frame.descriptors)),"Create frame descriptor heap");prepareUpload(frame,8*1024*1024);}
         checked(device_->CreateCommandList(0,D3D12_COMMAND_LIST_TYPE_DIRECT,frames_[0].allocator.Get(),nullptr,IID_PPV_ARGS(&list_)),"Create command list");checked(list_->Close(),"Close initial list");
@@ -250,8 +301,9 @@ class D3D12Graphics final:public DesktopGraphics {
         // Reserve a conservative complete-candidate bound before recording. Each
         // view may expand every segment to six vertices, even with no camera culling.
         const auto fxBytes=std::uint64_t(preflight_.particles.size())*sizeof(ParticleInstance)+std::uint64_t(preflight_.ribbons.size())*6*sizeof(RibbonVertex)+512;
-        if(fxBytes*views.size()>32*1024*1024)throw std::invalid_argument("Direct D3D12 FX upload budget exceeded");
-        fxUploadBudget_=std::size_t(fxBytes*views.size());
+        const auto windowViews=std::count_if(views.begin(),views.end(),[](const RenderView& view){return !view.target;});
+        if(fxBytes*windowViews>32*1024*1024)throw std::invalid_argument("Direct D3D12 FX upload budget exceeded");
+        fxUploadBudget_=std::size_t(fxBytes*windowViews);
         const auto objectBytes=std::uint64_t(preflight_.meshes.size())*RenderFrame::objectStride*views.size();
         if(objectBytes>32*1024*1024)throw std::invalid_argument("D3D12 instance upload budget exceeded");
         instanceUploadBudget_=std::size_t(objectBytes);
@@ -263,13 +315,15 @@ class D3D12Graphics final:public DesktopGraphics {
         UINT wraps=0;const auto textures=drawTextures(draw);for(UINT i=0;i<9;++i)if(textures[i]){
             const UINT mode=(textures[i]->wrapU==TextureWrap::Clamp?1u:0u)|(textures[i]->wrapV==TextureWrap::Clamp?2u:0u);wraps|=mode<<(i*2);
         }
+        const auto surface=sampledSurface(m,shadow);
+        if(surface)wraps|=3u;
         std::array<float,28> water{};const auto parameters=waterParameters(m.water);std::copy_n(parameters.begin(),water.size(),water.begin());
         const ObjectConstants object{draw.model,draw.normal,{draw.color.x,draw.color.y,draw.color.z,draw.opacity},
             {m.roughness,m.metallic,m.normalScale,m.occlusionStrength},{m.emissive.x,m.emissive.y,m.emissive.z,m.alphaCutoff},
             {m.uvScale.x,m.uvScale.y,m.uvOffset.x,m.uvOffset.y},
             {m.shader==MaterialShader::Water?2.f:m.shader==MaterialShader::Unlit?1.f:0.f,float(m.alphaMode),m.doubleSided?1.f:0.f,draw.receivesShadow?1.f:0.f},
-            {m.normalTexture?1.f:0.f,float(wraps),draw.layer==RenderLayer::World?(draw.blend==BlendMode::Additive?2.f:1.f):0.f,m.layers.enabled?1.f:0.f},materialLayerParameters(m.layers),water};
-        list_->SetGraphicsRootConstantBufferView(1,upload(frame,&object,sizeof(object)));auto material=materialBinding(frame,draw);
+            {m.normalTexture?1.f:0.f,float(wraps),draw.layer==RenderLayer::World?(draw.blend==BlendMode::Additive?2.f:1.f):0.f,m.layers.enabled?1.f:0.f},materialLayerParameters(m.layers),water,materialAdvancedParameters(m.advanced)};
+        list_->SetGraphicsRootConstantBufferView(1,upload(frame,&object,sizeof(object)));auto material=materialBinding(frame,draw,surface);
         list_->SetGraphicsRootDescriptorTable(2,material);material.ptr+=5*srvStride_;list_->SetGraphicsRootDescriptorTable(11,material);
         if(m.layers.enabled)++layeredDraws_;if(m.shader==MaterialShader::Water)++waterDraws_;
         auto vertices=gpu.vb;
@@ -308,7 +362,7 @@ class D3D12Graphics final:public DesktopGraphics {
         captureBuffer_.Reset();capturePath_.clear();captureFence_=0;
     }
     void cancelCapture(){if(capturePending())captureError_="Framebuffer capture cancelled by shutdown";capturePath_.clear();captureBuffer_.Reset();captureFence_=0;}
-    void clearCollectedFrames(){viewFrames_={};preflight_={};transparent_={};resolved_.clear();
+    void clearCollectedFrames(){viewFrames_={};preflight_={};transparent_={};resolved_.clear();drawViews_.clear();
         // Existing submissions may still reference streams after a scene/view edit.
         for(auto& frame:frames_)for(auto& stream:particleStreams_)if(stream.image){frame.retained.push_back(stream.image);}
         for(auto& frame:frames_)for(auto& stream:ribbonStreams_)if(stream.image){frame.retained.push_back(stream.image);}
@@ -316,7 +370,8 @@ class D3D12Graphics final:public DesktopGraphics {
         particleStreams_={};ribbonStreams_={};instanceStreams_={};}
 public:
     D3D12Graphics(SDL_Window& window,GuiSystem& gui,const RenderQuality& quality):window_(window),gui_(gui),quality_(quality) {
-        capabilities_.backend=RenderBackend::Direct3D12;capabilities_.maxTextureDimension2D=16384;capabilities_.maxBufferSize=256*1024*1024;capabilities_.maxTextureArrayLayers=6;
+        capabilities_.backend=RenderBackend::Direct3D12;capabilities_.maxTextureDimension2D=16384;capabilities_.maxBufferSize=256*1024*1024;
+        capabilities_.maxTextureArrayLayers=D3D12_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION;
         capabilities_.shadowMaps=capabilities_.spotLightShadows=capabilities_.pbr=capabilities_.spotLights=true;capabilities_.instancing=true;capabilities_.maxLights=8;
         try{initialize();}catch(...){if(event_)CloseHandle(event_);event_=nullptr;throw;}
     }
@@ -326,21 +381,34 @@ public:
             // Teardown must release scene borrows even after a removed device or
             // timed-out fence. Never throw through DesktopHost's destructor.
             try{idle();}catch(const std::exception& e){error_=e.what();}
-            cancelCapture();views_.set({});viewCameraIds_.clear();scene_=nullptr;waterInteractions_={};clearCollectedFrames();resetGpuTiming();return;
+            lightSelection_={};reportedLighting_={};
+            cancelCapture();views_.set({});viewCameraIds_.clear();scene_=nullptr;waterInteractions_={};surfaceTargets_.clear();clearCollectedFrames();resetGpuTiming();return;
         }
-        RenderViews candidate;candidate.set(views);validateScene(*scene,views);views_=std::move(candidate);viewCameraIds_.clear();for(const auto& view:views)viewCameraIds_.push_back(view.camera->id());scene_=scene;waterInteractions_={};clearCollectedFrames();resetGpuTiming();
+        RenderViews candidate;candidate.set(views);validateScene(*scene,views);
+        if(scene_!=scene){lightSelection_={};reportedLighting_={};}
+        views_=std::move(candidate);viewCameraIds_.clear();for(const auto& view:views)viewCameraIds_.push_back(view.camera->id());scene_=scene;waterInteractions_={};surfaceTargets_.clear();clearCollectedFrames();resetGpuTiming();
     }
     void setViews(std::span<const RenderView> views) override {
         RenderViews candidate;candidate.set(views);
         if(scene_)validateScene(*scene_,candidate.views());
         std::vector<ComponentId> ids;for(const auto& view:views)ids.push_back(view.camera->id());
         const auto previous=views_.views();bool same=ids==viewCameraIds_&&views.size()==previous.size();
-        if(same)for(std::size_t i=0;i<views.size();++i){const auto& a=views[i];const auto& b=previous[i];same&=a.camera==b.camera&&a.clearColor==b.clearColor&&a.skyEnabled==b.skyEnabled&&a.fogEnabled==b.fogEnabled;}
+        bool sameRefresh=same;
+        if(same)for(std::size_t i=0;i<views.size();++i){
+            const auto& a=views[i];const auto& b=previous[i];
+            same&=a.camera==b.camera&&a.clearColor==b.clearColor&&a.skyEnabled==b.skyEnabled&&a.fogEnabled==b.fogEnabled&&a.target==b.target;
+            sameRefresh&=a.refreshSurface==b.refreshSurface;
+        }
         // DesktopHost resolves the current camera handles every frame. Identical
         // snapshots retain LOD history and paused FX streams; new camera identities
         // invalidate even if an allocator reused a former camera's address.
+        if(same&&sameRefresh)return;
+        views_=std::move(candidate);
         if(same)return;
-        views_=std::move(candidate);viewCameraIds_=std::move(ids);clearCollectedFrames();resetGpuTiming();
+        std::erase_if(surfaceTargets_,[this](const auto& entry){
+            return entry.second->source.expired()||!views_.hasSurface(entry.first);
+        });
+        viewCameraIds_=std::move(ids);clearCollectedFrames();resetGpuTiming();
     }
     void service() override {
         checked(device_->GetDeviceRemovedReason(),"D3D12 device service");
@@ -358,60 +426,102 @@ public:
         try {
             const auto extent=resolveResolution(logical.width,logical.height,logical.pixelRatio,quality_.resolution,capabilities_);
             resize(extent.width,extent.height);prepareShadowTargets();
-            views_.resolve(width_,height_,resolved_);std::uint32_t waterMask=0;bool submerged=false;
+            views_.resolve(width_,height_,resolved_);
+            views_.resolveSurfaces(drawViews_);
+            drawViews_.insert(drawViews_.end(),resolved_.begin(),resolved_.end());
+            std::uint32_t waterMask=0;bool submerged=false;
             for(const auto& resolved:resolved_){const auto& camera=*views_.views()[resolved.index].camera;waterMask|=camera.visibilityMask();submerged|=bool(underwaterView(*scene_,camera.worldPosition(),camera.visibilityMask()));}
-            prepareWaterTargets(submerged||waterSceneInputsRequired(*scene_,waterMask)||softParticlesRequired(*scene_,waterMask),waterPlanarReflectionRequired(*scene_,waterMask));
+            prepareWaterTargets((hdr_&&quality_.screenSpaceReflections)||submerged||waterSceneInputsRequired(*scene_,waterMask)||softParticlesRequired(*scene_,waterMask),waterPlanarReflectionRequired(*scene_,waterMask));
             const UINT index=swapchain_->GetCurrentBackBufferIndex();auto& frame=frames_[index];wait(frame.fence);
-            frame.retained.clear();frame.textureSlots.clear();frame.materialSlots.clear();frame.used=frame.descriptorUsed=0;
+            frame.retained.clear();frame.retainedSurfaces.clear();frame.textureSlots.clear();frame.materialSlots.clear();frame.used=frame.descriptorUsed=0;
+            recordedSurfaces_.clear();
+            surfacePass_=false;
             const auto& guiData=gui_.draw(seconds);
             prepareUpload(frame,40960*768+32*12288+deformationUploadBytes_+fxUploadBudget_+instanceUploadBudget_+guiData.vertices.size()*sizeof(GuiVertex)+guiData.indices.size()*sizeof(std::uint32_t)+4096);
             checked(frame.allocator->Reset(),"Reset frame allocator");checked(list_->Reset(frame.allocator.Get(),nullptr),"Reset command list");prune(frame);
             list_->SetGraphicsRootSignature(root_.Get());ID3D12DescriptorHeap* heaps[]{frame.descriptors.Get()};list_->SetDescriptorHeaps(1,heaps);list_->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-            draws_=triangles_=guiDraws_=shadowDraws_=shadowPasses_=shadowTriangles_=skyDraws_=postPasses_=bloomPasses_=0;
+            bindDiffuseGi(frame);
+            draws_=triangles_=guiDraws_=shadowDraws_=shadowPasses_=shadowTriangles_=fogGridPasses_=skyDraws_=postPasses_=bloomPasses_=0;
+            fogLightCacheBuilds_=0;fogLightCacheSlots_=0;
+            cloudGridPasses_=cloudShadowPasses_=0;
+            reportedLighting_={};
             skinnedDraws_=morphDraws_=skinUploads_=morphUploads_=skinUploadBytes_=morphUploadBytes_=0;
             layeredDraws_=cameraLodParts_=shadowLodParts_=shadowCulledParts_=0;
             waterDraws_=waterSnapshots_=reflectionPasses_=reflectionDraws_=reflectionTriangles_=underwaterPasses_=waterPresentCopies_=0;textureUploadBytes_=0;
+            screenReflectionSnapshots_=0;
             particles_=meshParticles_=particleDraws_=trailDraws_=trailSegments_=particleUploadBytes_=trailUploadBytes_=0;submittedInstances_=instancedDraws_=maxInstances_=objectUploadBytes_=0;
             beginGpuTiming();const auto gpuFrame=beginGpuSpan("Frame");
             {GpuSpan timing(*this,"Initialize targets");initializeWaterTargets();list_->SetGraphicsRootDescriptorTable(12,waterBinding(frame));}
             auto* target=targets_[index].Get();
             if(sampleCount_==1&&!hdr_&&!waterCapture_)transition(*list_.Get(),target,D3D12_RESOURCE_STATE_PRESENT,D3D12_RESOURCE_STATE_RENDER_TARGET);
             auto* sceneTarget=sampleCount_>1?msaaColor_.Get():hdr_?hdrColor_.Get():waterCapture_?waterScene_.Get():target;
-            auto targetView=rtv(sampleCount_>1?frameCount:hdr_?frameCount+1:waterCapture_?frameCount+3:index);const auto depthView=dsv_->GetCPUDescriptorHandleForHeapStart();
-            const float background[]{.018f,.026f,.042f,1};list_->ClearRenderTargetView(targetView,background,0,nullptr);
-            for(const auto& resolved:resolved_){
-                GpuSpan gpuView(*this,"View",int(resolved.index));
+            const auto presentationView=rtv(sampleCount_>1?frameCount:hdr_?frameCount+1:waterCapture_?frameCount+3:index);
+            const auto presentationDepth=dsv_->GetCPUDescriptorHandleForHeapStart();
+            const float background[]{.018f,.026f,.042f,1};
+            list_->ClearRenderTargetView(presentationView,background,0,nullptr);
+            ClusterUploadBudget clusterUploads;
+            const ClusterPageUpload uploadCluster=[&](const auto& resource,bool pinned) {
+                if(meshes_.contains(resource.get()))return true;
+                if(meshes_.size()>=4096||(!pinned&&!clusterUploads.admit(*resource)))return false;
+                mesh(frame,resource);
+                return true;
+            };
+            for(const auto& resolved:drawViews_){
                 const auto& view=views_.views()[resolved.index];auto& camera=*view.camera;auto& collected=viewFrames_[resolved.index];
-                const float aspect=float(resolved.width)/resolved.height;
-                const DetailView detail{camera.viewProjection(aspect),float(resolved.width)*quality_.detailScale,float(resolved.height)*quality_.detailScale};
-                collected.collect(*scene_,true,camera.visibilityMask(),&camera.frustum(aspect),quality_.lod?&detail:nullptr);
+                const auto surface=view.target?ensureSurfaceTarget(view.target):nullptr;
+                if(view.target&&!surface)continue;
+                surfacePass_=bool(surface);
+                GpuSpan gpuView(*this,surfacePass_?"Render surface":"View",int(resolved.index));
+                const auto targetView=surface?surface->rtv->GetCPUDescriptorHandleForHeapStart():presentationView;
+                const auto depthView=surface?surface->dsv->GetCPUDescriptorHandleForHeapStart():presentationDepth;
+                if(surface){
+                    frame.retainedSurfaces.push_back(surface);
+                    transition(*list_.Get(),surface->color.Get(),D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_RENDER_TARGET);
+                    list_->ClearRenderTargetView(targetView,background,0,nullptr);
+                }
+                const float aspect=surface?resolved.viewport.width/resolved.viewport.height:float(resolved.width)/resolved.height;
+                const float detailWidth=surface?resolved.viewport.width:float(resolved.width);
+                const float detailHeight=surface?resolved.viewport.height:float(resolved.height);
+                const DetailView detail{camera.viewProjection(aspect),detailWidth*quality_.detailScale,detailHeight*quality_.detailScale};
+                collected.collect(*scene_,true,camera.visibilityMask(),&camera.frustum(aspect),quality_.lod?&detail:nullptr,uploadCluster);
                 cameraLodParts_+=collected.cameraLodParts();
                 D3D12_GPU_VIRTUAL_ADDRESS objects=0;{GpuSpan timing(*this,"Object uploads",int(resolved.index));objects=instanceObjects(frame,collected,resolved.index);}
                 const auto& scene=collected.sceneFrame();FrameConstants constants{};constants.viewProjection=camera.viewProjection(aspect);
-                constants.fog=prepareFog(scene_->fog(),camera,view.fogEnabled);constants.output={hdr_?1.f:0.f,0,0,0};
+                constants.fog=prepareRenderFog(scene_->fog(),camera,view.fogEnabled,quality_,bool(surface));
+                constants.cloud=prepareRenderClouds(scene_->sky(),camera,quality_,view.skyEnabled,shadowResolution_,shadowsEnabled_&&!surface);
+                if(!capabilities_.hdrPostProcessing)constants.cloud.layer[3]=0;
+                const bool grid=!surface&&quality_.volumetricFogGrid&&constants.fog.volumeLighting[0]==1&&capabilities_.hdrPostProcessing;
+                constants.fog.volumeOptions[1]=grid?1.f:0.f;constants.output={hdr_&&!surface?1.f:0.f,0,0,0};
                 constants.waterClock={float(waterTime_),0,0,0};constants.inverseViewProjection=camera.inverseViewProjection(aspect);
-                constants.viewport={resolved.viewport.x,resolved.viewport.y,resolved.viewport.width,resolved.viewport.height};constants.extent={float(width_),float(height_),0,0};
+                constants.viewport={resolved.viewport.x,resolved.viewport.y,resolved.viewport.width,resolved.viewport.height};
+                constants.extent={float(surface?view.target->width():width_),float(surface?view.target->height():height_),0,0};
                 constants.interactions=waterInteractionParameters(waterInteractions_,waterTime_,camera.visibilityMask());
-                const bool splitWater=waterCapture_&&std::any_of(scene.meshes.begin(),scene.meshes.end(),[](const MeshDraw& d){return d.cameraVisible&&d.layer==RenderLayer::World&&d.material.shader==MaterialShader::Water&&d.material.water.usesSceneInputs();});
+                const bool splitWater=!surface&&waterCapture_&&std::any_of(scene.meshes.begin(),scene.meshes.end(),[](const MeshDraw& d){return d.cameraVisible&&d.layer==RenderLayer::World&&(d.material.shader==MaterialShader::Water&&d.material.water.usesSceneInputs()||d.material.advanced.usesSceneInputs());});
+                const bool screenReflection=!surface&&hdr_&&quality_.screenSpaceReflections&&camera.projectionMode()==ProjectionMode::Perspective&&hasScreenReflectionReceivers(scene);
                 constants.extent[2]=splitWater?1.f:0.f;
-                const auto reflection=waterReflection(scene.meshes,camera.worldPosition());if(reflection){constants.reflectionViewProjection=constants.viewProjection*reflection->mirror;constants.reflectionPlane=reflection->plane;constants.reflectionOptions[0]=1;}
-                const auto count=std::min<std::size_t>(scene.lights.size(),8);constants.ambientCount={scene_->ambient.x,scene_->ambient.y,scene_->ambient.z,float(count)};
+                const auto reflection=surface?std::nullopt:waterReflection(scene.meshes,camera.worldPosition());if(reflection){constants.reflectionViewProjection=constants.viewProjection*reflection->mirror;constants.reflectionPlane=reflection->plane;constants.reflectionOptions[0]=1;}
+                const auto lighting=lightSelection_[resolved.index].prepare(scene.lights,camera,aspect,quality_,shadowResolution_,!surface&&shadowsEnabled_);
+                if(!surface&&resolved.index==resolved_.front().index) reportedLighting_=lighting;
+                const auto count=lighting.lightCount;constants.ambientCount={scene_->ambient.x,scene_->ambient.y,scene_->ambient.z,float(count)};
                 const auto position=camera.worldPosition(),forward=camera.forward();
                 constants.cameraEnvironment={position.x,position.y,position.z,scene_->environment?scene_->environmentIntensity:0};
                 const auto environment=environmentBinding(frame);
+                constants.lightingZones=lightingZoneConstants(scene_->lightingZones());
+                constants.lightingZoneRotations=lightingZoneRotations(scene_->lightingZones());
+                constants.reflectionProbe=reflectionProbeConstants(scene_->reflectionProbe().get(),1+scene_->lightingZones().size());
                 constants.environmentOptions={scene_->environmentRotation,float(environment_.levels-1),0,float(quality_.shadowFilterTaps)};constants.forward={forward.x,forward.y,forward.z,0};
-                for(std::size_t i=0;i<count;++i){const auto& l=scene.lights[i];constants.lights[i]={{l.position.x,l.position.y,l.position.z,float(l.type)},{l.direction.x,l.direction.y,l.direction.z,l.range},{l.color.x,l.color.y,l.color.z,l.intensity},{std::cos(l.innerAngle),std::cos(l.outerAngle),0,0}};}
-                const auto plan=shadowsEnabled_?planShadows(scene.lights,camera,aspect,quality_,shadowResolution_):ShadowPlan{};
+                for(std::size_t i=0;i<count;++i){const auto& l=lighting.lights[i];constants.lights[i]={{l.position.x,l.position.y,l.position.z,float(l.type)},{l.direction.x,l.direction.y,l.direction.z,l.range},{l.color.x,l.color.y,l.color.z,l.intensity},{std::cos(l.innerAngle),std::cos(l.outerAngle),0,0}};}
+                const auto& plan=lighting.shadows;
                 for(auto& shadow:constants.shadows)shadow.options[0]=-1;
-                list_->SetGraphicsRootConstantBufferView(0,upload(frame,&constants,sizeof(constants)));
                 if(plan.count){
+                    list_->SetGraphicsRootConstantBufferView(0,upload(frame,&constants,sizeof(constants)));
                     transition(*list_.Get(),shadowMaps_.Get(),D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_DEPTH_WRITE);
                     const D3D12_VIEWPORT viewport{0,0,float(shadowResolution_),float(shadowResolution_),0,1};const D3D12_RECT rect{0,0,LONG(shadowResolution_),LONG(shadowResolution_)};
                     list_->RSSetViewports(1,&viewport);list_->RSSetScissorRects(1,&rect);
-                    for(UINT i=0;i<plan.count;++i){const auto& map=plan.maps[i];const auto& light=scene.lights[map.light];
+                    for(UINT i=0;i<plan.count;++i){const auto& map=plan.maps[i];const auto& light=lighting.lights[map.light];
                         GpuSpan timing(*this,"Shadow map",int(resolved.index),int(i));
                         constants.shadows[i]={map.matrix,{float(i),light.shadow.depthBias,light.shadow.normalBias,1.f/shadowResolution_},{float(map.light),map.nearDistance,map.farDistance,map.cascade?1.f:0.f}};
-                        collected.prepareShadow(i,{map.matrix,float(shadowResolution_)*quality_.detailScale,float(shadowResolution_)*quality_.detailScale},quality_.shadowLod,true,true);
+                        collected.prepareShadow(i,{map.matrix,float(shadowResolution_)*quality_.detailScale,float(shadowResolution_)*quality_.detailScale},quality_.shadowLod,true,true,uploadCluster);
                         auto depth=dsv_->GetCPUDescriptorHandleForHeapStart();depth.ptr+=(i+1)*dsvStride_;
                         list_->OMSetRenderTargets(0,nullptr,FALSE,&depth);list_->ClearDepthStencilView(depth,D3D12_CLEAR_FLAG_DEPTH,1,0,0,nullptr);
                         list_->SetGraphicsRootConstantBufferView(6,upload(frame,&map.matrix,sizeof(map.matrix)));++shadowPasses_;
@@ -420,39 +530,86 @@ public:
                     transition(*list_.Get(),shadowMaps_.Get(),D3D12_RESOURCE_STATE_DEPTH_WRITE,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
                 }
                 shadowLodParts_+=collected.shadowLodParts();shadowCulledParts_+=collected.shadowCulledParts();
+                const bool buildFogLightCache=prepareFogLightCache(frame,constants.fog,lighting);
+                const auto cameraConstants=upload(frame,&constants,sizeof(constants));
+                list_->SetGraphicsRootConstantBufferView(0,cameraConstants);
                 list_->SetGraphicsRootDescriptorTable(4,shadowBinding(frame));list_->SetGraphicsRootDescriptorTable(5,environment);
+                list_->SetGraphicsRootDescriptorTable(19,fogLightCacheBinding(frame,false));
+                if(buildFogLightCache){GpuSpan timing(*this,"Fog light cache",int(resolved.index));drawFogLightCache();}
+                fogLightCacheSlots_+=static_cast<std::uint64_t>(constants.fog.volumeLighting[2]);
+                list_->SetGraphicsRootDescriptorTable(19,fogLightCacheBinding(frame,fogLightCacheState_.active()));
+                if(grid||constants.cloud.layer[3]>.5f)prepareFogGridTarget(frame,constants.cloud.layer[3]>.5f);
+                if(grid){GpuSpan timing(*this,"Volumetric fog",int(resolved.index));drawFogGrid();}
+                list_->SetGraphicsRootDescriptorTable(17,fogGridBinding(frame,grid||constants.cloud.layer[3]>.5f));
+                std::optional<SkyConstants> cloudSky;
+                if(constants.cloud.layer[3]>.5f||constants.cloud.sun[3]>0) {
+                    cloudSky=SkyConstants{prepareSky(*scene_->sky(),camera,aspect,quality_.volumetricCloudSteps),constants.output};
+                    cloudSky->sky.fog=constants.fog;cloudSky->sky.cloud=constants.cloud;
+                    list_->SetGraphicsRootDescriptorTable(20,texture(frame,skyCloudNoiseTexture(),false,true));
+                    if(constants.cloud.sun[3]>0){GpuSpan timing(*this,"Cloud shadow",int(resolved.index));drawCloudShadow(frame,*cloudSky);}
+                }
                 const D3D12_RECT rect{LONG(resolved.x),LONG(resolved.y),LONG(resolved.x+resolved.width),LONG(resolved.y+resolved.height)};
-                const D3D12_VIEWPORT viewport{float(resolved.x),float(resolved.y),float(resolved.width),float(resolved.height),0,1};list_->RSSetViewports(1,&viewport);list_->RSSetScissorRects(1,&rect);
-                if(reflection){GpuSpan timing(*this,"Reflection",int(resolved.index));drawReflection(frame,collected,objects,*reflection,constants,rect,viewport);}
-                list_->SetGraphicsRootConstantBufferView(0,upload(frame,&constants,sizeof(constants)));list_->SetGraphicsRootDescriptorTable(12,waterBinding(frame));list_->RSSetViewports(1,&viewport);list_->RSSetScissorRects(1,&rect);
+                const D3D12_VIEWPORT viewport=surface
+                    ?D3D12_VIEWPORT{resolved.viewport.x,resolved.viewport.y,resolved.viewport.width,resolved.viewport.height,0,1}
+                    :D3D12_VIEWPORT{float(resolved.x),float(resolved.y),float(resolved.width),float(resolved.height),0,1};
+                list_->RSSetViewports(1,&viewport);list_->RSSetScissorRects(1,&rect);
+                if(reflection){GpuSpan timing(*this,"Reflection",int(resolved.index));drawReflection(frame,collected,objects,*reflection,constants,rect,viewport,cloudSky?&*cloudSky:nullptr);list_->SetGraphicsRootConstantBufferView(0,cameraConstants);}
+                if(constants.cloud.layer[3]>.5f){GpuSpan timing(*this,"Cloud grid",int(resolved.index));drawCloudGrid(frame,*cloudSky);}
+                list_->SetGraphicsRootDescriptorTable(12,waterBinding(frame));list_->RSSetViewports(1,&viewport);list_->RSSetScissorRects(1,&rect);
                 list_->OMSetRenderTargets(1,&targetView,FALSE,&depthView);if(view.clearColor)list_->ClearRenderTargetView(targetView,view.clearColor->data(),1,&rect);
-                if(scene_->sky()&&view.skyEnabled){GpuSpan timing(*this,"Sky",int(resolved.index));drawSky(frame,view,aspect,constants.fog);}
-                transparent_.prepare(scene,camera.view());
+                if(scene_->sky()&&view.skyEnabled){GpuSpan timing(*this,"Sky",int(resolved.index));drawSky(frame,view,aspect,constants.fog,constants.cloud);}
                 D3D12_VERTEX_BUFFER_VIEW particleVertices{},ribbonVertices{};
-                {GpuSpan timing(*this,"FX uploads",int(resolved.index));particleVertices=fxStream(frame,particleStreams_[resolved.index],transparent_.instances(),particleUploadBytes_);
-                ribbonVertices=fxStream(frame,ribbonStreams_[resolved.index],transparent_.ribbonVertices(),trailUploadBytes_);}
-                particles_+=transparent_.instances().size();meshParticles_+=scene.meshParticleCount;
-                const bool softDepth=std::any_of(scene.particles.begin(),scene.particles.end(),[](const ParticleDraw& p){return p.softDistance>0;})||std::any_of(scene.ribbons.begin(),scene.ribbons.end(),[](const RibbonDraw& r){return r.softDistance>0;});
+                if(!surface){
+                    transparent_.prepare(scene,camera.view());
+                    GpuSpan timing(*this,"FX uploads",int(resolved.index));
+                    particleVertices=fxStream(frame,particleStreams_[resolved.index],transparent_.instances(),particleUploadBytes_);
+                    ribbonVertices=fxStream(frame,ribbonStreams_[resolved.index],transparent_.ribbonVertices(),trailUploadBytes_);
+                    particles_+=transparent_.instances().size();meshParticles_+=scene.meshParticleCount;
+                }
+                const bool softDepth=!surface&&(std::any_of(scene.particles.begin(),scene.particles.end(),[](const ParticleDraw& p){return p.softDistance>0;})||std::any_of(scene.ribbons.begin(),scene.ribbons.end(),[](const RibbonDraw& r){return r.softDistance>0;}));
                 for(UINT layer=0;layer<UINT(RenderLayer::Count);++layer){
                     GpuSpan gpuLayer(*this,"Layer",int(resolved.index),int(layer));
+                    const bool splitReflection=screenReflection&&layer==UINT(RenderLayer::World);
+                    const auto batches=collected.cameraBatches(RenderLayer(layer));
                     {GpuSpan timing(*this,"Opaque",int(resolved.index),int(layer));
                     list_->ClearDepthStencilView(depthView,D3D12_CLEAR_FLAG_DEPTH,1,0,1,&rect);
                     const bool split=splitWater&&layer==UINT(RenderLayer::World);
-                    for(const auto& batch:collected.cameraBatches(RenderLayer(layer)))if(!split||collected.instanceDraw(batch.firstInstance).material.shader!=MaterialShader::Water)drawBatch(frame,collected,batch,objects);
+                    for(const auto& batch:batches){
+                        const auto& draw=collected.instanceDraw(batch.firstInstance);
+                        if(((split&&(draw.material.shader==MaterialShader::Water||draw.material.advanced.usesSceneInputs()))||(surface&&draw.material.shader==MaterialShader::Water))||(splitReflection&&screenReflectionReceiver(draw)))continue;
+                        drawBatch(frame,collected,batch,objects);
+                    }
+                    }
+                    if(surface)continue;
+                    if(splitReflection){
+                        GpuSpan timing(*this,"Screen-space reflections",int(resolved.index),int(layer));
+                        captureWater(frame,sceneTarget,rect,false);++screenReflectionSnapshots_;
+                        list_->RSSetViewports(1,&viewport);list_->OMSetRenderTargets(1,&targetView,FALSE,&depthView);
+                        auto receiverConstants=constants;receiverConstants.output[1]=1;
+                        list_->SetGraphicsRootConstantBufferView(0,upload(frame,&receiverConstants,sizeof(receiverConstants)));
+                        for(const auto& batch:batches)
+                            if(screenReflectionReceiver(collected.instanceDraw(batch.firstInstance)))drawBatch(frame,collected,batch,objects);
+                        list_->SetGraphicsRootConstantBufferView(0,cameraConstants);
                     }
                     const bool split=splitWater&&layer==UINT(RenderLayer::World);
                     if(split||(softDepth&&layer==UINT(RenderLayer::World))){
                         {GpuSpan timing(*this,"Water snapshot",int(resolved.index),int(layer));captureWater(frame,sceneTarget,rect);list_->RSSetViewports(1,&viewport);list_->OMSetRenderTargets(1,&targetView,FALSE,&depthView);}
-                        if(split){GpuSpan timing(*this,"Water surface",int(resolved.index),int(layer));for(const auto& batch:collected.cameraBatches(RenderLayer(layer)))if(collected.instanceDraw(batch.firstInstance).material.shader==MaterialShader::Water)drawBatch(frame,collected,batch,objects);}}
+                        if(split){GpuSpan timing(*this,"Water surface",int(resolved.index),int(layer));for(const auto& batch:collected.cameraBatches(RenderLayer(layer)))if(collected.instanceDraw(batch.firstInstance).material.shader==MaterialShader::Water||collected.instanceDraw(batch.firstInstance).material.advanced.usesSceneInputs())drawBatch(frame,collected,batch,objects);}}
                     {GpuSpan timing(*this,"Transparent / FX",int(resolved.index),int(layer));
                     for(const auto& batch:transparent_.batches(RenderLayer(layer))){
-                        if(batch.particle||batch.ribbon)drawFx(frame,batch,camera,particleVertices,ribbonVertices);
+                        if(batch.particle||batch.ribbon)drawFx(frame,batch,camera,particleVertices,ribbonVertices,RenderLayer(layer));
                         else draw(frame,scene.meshes[batch.first]);
                     }
                     }
                     if(layer==UINT(RenderLayer::World))if(const auto water=underwaterView(*scene_,position,camera.visibilityMask())){GpuSpan timing(*this,"Underwater",int(resolved.index),int(layer));drawUnderwater(frame,sceneTarget,targetView,camera,resolved,*water,waterTime_,rect);list_->RSSetViewports(1,&viewport);list_->OMSetRenderTargets(1,&targetView,FALSE,&depthView);}
                 }
+                if(surface){
+                    list_->OMSetRenderTargets(0,nullptr,FALSE,nullptr);
+                    transition(*list_.Get(),surface->color.Get(),D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                    recordedSurfaces_.push_back(surface.get());
+                }
             }
+            surfacePass_=false;
             if(sampleCount_>1){
                 GpuSpan timing(*this,"MSAA resolve");
                 transition(*list_.Get(),msaaColor_.Get(),D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_RESOLVE_SOURCE);
@@ -470,6 +627,9 @@ public:
             endGpuSpan(gpuFrame);resolveGpuTiming();
             checked(list_->Close(),"Close draw list");ID3D12CommandList* commands[]{list_.Get()};queue_->ExecuteCommandLists(1,commands);
             frame.fence=++nextFence_;checked(queue_->Signal(fence_.Get(),frame.fence),"Submit frame fence");if(copying)captureFence_=frame.fence;
+            for(auto* surface:recordedSurfaces_)surface->captured=true;
+            surfacePasses_=recordedSurfaces_.size();
+            recordedSurfaces_.clear();
             submitGpuTiming(frame.fence);
             checked(swapchain_->Present(1,0),"Present swapchain");++presented_;
         }catch(const DesktopDeviceLost&){throw;}catch(const std::exception& e){checked(device_->GetDeviceRemovedReason(),"D3D12 render device");error_=e.what();throw;}
@@ -480,7 +640,11 @@ public:
     void setShadows(bool enabled) override {if(shadowsEnabled_!=enabled)resetGpuTiming();shadowsEnabled_=enabled;}
     void setWaterInteractions(const WaterInteractions& values) override {if(!scene_)throw std::logic_error("Water interactions require an active scene");waterInteractions_=values;}
     DesktopDiagnostics diagnostics() const override {
-        std::ostringstream state,performance;std::uint64_t gpuTextureBytes=0,compressedCount=0;for(const auto& [key,gpu]:textures_){gpuTextureBytes+=gpu.bytes;compressedCount+=gpu.compressed;}
+        std::ostringstream state,performance;std::uint64_t gpuTextureBytes=(fogGrid_?fogGrid_->GetDesc().Width*fogGrid_->GetDesc().Height*8:0)+(fogLightCache_?fog_light_cache::bytes:0),compressedCount=0;for(const auto& [key,gpu]:textures_){gpuTextureBytes+=gpu.bytes;compressedCount+=gpu.compressed;}
+        std::uint64_t surfaceBytes=0;
+        for(const auto& [source,target]:surfaceTargets_)
+            if(const auto desc=target->source.lock())surfaceBytes+=std::uint64_t(desc->width())*desc->height()*8;
+        gpuTextureBytes+=surfaceBytes/2;
         state<<"{\"backend\":\"d3d12\",\"desktopBackend\":\"direct-d3d12\",\"state\":\""<<(error_.empty()?"ready":"failed")<<"\",\"generation\":"<<generation_
              <<",\"validation\":"<<(debug_?"true":"false")<<",\"milestone\":8,\"particles\":true,\"ribbons\":true,\"meshParticles\":true,\"softParticles\":true,\"water\":true,\"waterCapture\":"<<(waterCapture_?"true":"false")<<",\"waterTargetWidth\":"<<waterWidth_<<",\"reflectionTargetWidth\":"<<reflectionWidth_<<",\"terrainLayers\":true,\"heightBlend\":true,\"triplanar\":true,\"skinning\":true,\"morphTargets\":true,\"pbr\":true,\"sky\":true,\"fog\":true,\"spotLights\":true,\"spotLightShadows\":true,\"shadows\":"<<(shadowsEnabled_?"true":"false")
              <<",\"instancing\":true,\"compressionBC\":"<<(capabilities_.compressionBC?"true":"false")<<",\"compressedTextures\":"<<(quality_.compressedTextures?"true":"false")<<",\"msaa4x\":"<<(capabilities_.msaa4x?"true":"false")<<",\"msaaSamples\":"<<quality_.msaaSamples<<",\"effectiveMsaaSamples\":"<<sampleCount_
@@ -488,16 +652,23 @@ public:
              <<",\"postEnabled\":"<<(quality_.post.enabled?"true":"false")<<",\"effectivePost\":"<<(hdr_?"true":"false")
              <<",\"postExposure\":"<<quality_.post.exposure<<",\"postBloom\":"<<quality_.post.bloomStrength<<",\"postThreshold\":"<<quality_.post.bloomThreshold
              <<",\"postSaturation\":"<<quality_.post.saturation<<",\"postContrast\":"<<quality_.post.contrast
+             <<",\"postToneMapper\":"<<int(quality_.post.toneMapper)
+             <<",\"diffuseGiProbeCount\":"<<(scene_&&diffuseGiSource_?diffuseGiSource_->probes.size():0)
              <<",\"shadowResolution\":"<<shadowResolution_<<",\"maxShadowMaps\":"<<quality_.maxShadowMaps<<",\"directionalCascades\":"<<quality_.directionalCascades
              <<",\"width\":"<<width_<<",\"height\":"<<height_<<",\"adapter\":"<<adapter_<<"}";
         performance<<"{\"backend\":\"d3d12\",\"counters\":{\"drawCalls\":"<<draws_<<",\"triangles\":"<<triangles_<<",\"guiDrawCalls\":"<<guiDraws_
                     <<",\"layeredDrawCalls\":"<<layeredDraws_<<",\"cameraLodParts\":"<<cameraLodParts_<<",\"shadowLodParts\":"<<shadowLodParts_<<",\"shadowCulledParts\":"<<shadowCulledParts_<<",\"shadowTriangles\":"<<shadowTriangles_<<",\"colorTriangles\":"<<(triangles_-shadowTriangles_-reflectionTriangles_)
                     <<",\"waterDrawCalls\":"<<waterDraws_<<",\"waterSnapshots\":"<<waterSnapshots_<<",\"reflectionPasses\":"<<reflectionPasses_<<",\"reflectionDrawCalls\":"<<reflectionDraws_<<",\"reflectionTriangles\":"<<reflectionTriangles_<<",\"underwaterPasses\":"<<underwaterPasses_<<",\"waterPresentCopies\":"<<waterPresentCopies_
                    <<",\"shadowPasses\":"<<shadowPasses_<<",\"shadowDrawCalls\":"<<shadowDraws_<<",\"skyDrawCalls\":"<<skyDraws_<<",\"postPasses\":"<<postPasses_<<",\"bloomPasses\":"<<bloomPasses_
+                   <<",\"renderSurfacePasses\":"<<surfacePasses_<<",\"renderSurfaceBytes\":"<<surfaceBytes
+                   <<",\"screenReflectionSnapshots\":"<<screenReflectionSnapshots_
+                   <<",\"fogLightCacheBuilds\":"<<fogLightCacheBuilds_<<",\"fogLightCacheBytes\":"<<(fogLightCache_?fog_light_cache::bytes:0)
+                   <<",\"cloudGridPasses\":"<<cloudGridPasses_<<",\"cloudShadowPasses\":"<<cloudShadowPasses_
+                   <<",\"fogLightCacheSlots\":"<<fogLightCacheSlots_
                    <<",\"skinnedDrawCalls\":"<<skinnedDraws_<<",\"morphDrawCalls\":"<<morphDraws_<<",\"skinUploads\":"<<skinUploads_<<",\"morphUploads\":"<<morphUploads_<<",\"skinUploadBytes\":"<<skinUploadBytes_<<",\"morphUploadBytes\":"<<morphUploadBytes_
                    <<",\"particles\":"<<particles_<<",\"meshParticles\":"<<meshParticles_<<",\"particleDrawCalls\":"<<particleDraws_<<",\"trailDrawCalls\":"<<trailDraws_<<",\"trailSegments\":"<<trailSegments_<<",\"particleUploadBytes\":"<<particleUploadBytes_<<",\"trailUploadBytes\":"<<trailUploadBytes_
-                    <<",\"submittedInstances\":"<<submittedInstances_<<",\"instancedDrawCalls\":"<<instancedDraws_<<",\"maxInstancesPerDraw\":"<<maxInstances_<<",\"objectUploadBytes\":"<<objectUploadBytes_<<",\"textureUploadBytes\":"<<textureUploadBytes_<<",\"gpuTextureBytes\":"<<gpuTextureBytes<<",\"compressedTextureCount\":"<<compressedCount
-                      <<",\"cachedSkinPoses\":"<<skins_.size()<<",\"cachedMorphPoses\":"<<morphs_.size()<<",\"cachedMeshes\":"<<meshes_.size()<<",\"cachedTextures\":"<<textures_.size()<<",\"cachedMaterialPipelines\":"<<meshPipelines_.size()<<"},\"gpu\":"<<gpuMeasurements_.gpuJson(gpuNow(),gpuState())<<",\"gpuProfile\":"<<gpuProfileCached_<<'}';
+                    <<",\"submittedInstances\":"<<submittedInstances_<<",\"instancedDrawCalls\":"<<instancedDraws_<<",\"maxInstancesPerDraw\":"<<maxInstances_<<",\"objectUploadBytes\":"<<objectUploadBytes_<<",\"textureUploadBytes\":"<<textureUploadBytes_<<",\"gpuTextureBytes\":"<<gpuTextureBytes<<",\"compressedTextureCount\":"<<compressedCount<<",\"fogGridPasses\":"<<fogGridPasses_
+                      <<",\"cachedSkinPoses\":"<<skins_.size()<<",\"cachedMorphPoses\":"<<morphs_.size()<<",\"cachedMeshes\":"<<meshes_.size()<<",\"cachedTextures\":"<<textures_.size()<<",\"cachedMaterialPipelines\":"<<meshPipelines_.size()<<"},\"gpu\":"<<gpuMeasurements_.gpuJson(gpuNow(),gpuState())<<",\"gpuProfile\":"<<gpuProfileCached_<<",\"lightingSlots\":"<<reportedLighting_.diagnosticsJson()<<'}';
         return {initialized_&&scene_&&error_.empty(),presented_,width_,height_,sampleCount_,error_,state.str(),performance.str()};
     }
     void retry() override {throw std::logic_error("Direct D3D12 milestone requires restarting the host after device failure");}

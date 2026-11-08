@@ -27,6 +27,7 @@ struct CinematicPreview::Impl {
     std::vector<Base> base;
     std::vector<Ref> targets,controlledAnimations,effects;
     std::vector<std::size_t> clipIndices;
+    std::vector<std::optional<CinematicSpriteBinding>> sprites;
     std::vector<RenderView> views;
     ComponentId fallback;
     std::vector<std::size_t> liveFx;
@@ -47,13 +48,19 @@ struct CinematicPreview::Impl {
         });
         for(const auto& ref:effects)if(auto* e=dynamic_cast<EffectComponent*>(ref.get(s))){e->stop(true);e->enabled=false;}
         for(const auto& t:clock.sequence()->data().tracks){
-            targets.push_back({});clipIndices.push_back(0);if(!t.enabled||t.type==CinematicTrackType::Audio)continue;
+            targets.push_back({});clipIndices.push_back(0);sprites.emplace_back();
+            if(!t.enabled||t.type==CinematicTrackType::Audio||t.type==CinematicTrackType::Subtitle)continue;
             auto* n=s.findSavedNode(t.target);if(!n)throw std::invalid_argument("Missing cinematic target: "+t.target);targets.back()=reference(*n);
             if(t.type==CinematicTrackType::Camera){auto* c=dynamic_cast<CameraComponent*>(n);if(!c||c->follow().enabled||!c->isActiveInHierarchy())throw std::invalid_argument("Choose an active camera without a follow writer");for(const auto& k:t.keys){if(c->projectionMode()==ProjectionMode::Perspective)perspective(k.lens,1,c->nearPlane,c->farPlane);else orthographic(k.lens,1,c->nearPlane,c->farPlane);}}
             if(t.type==CinematicTrackType::Transform||t.type==CinematicTrackType::Camera){
                 if(n->isProtectedChild())throw std::invalid_argument("Managed children cannot have cinematic motion tracks");bool physics=false;n->visit([&](const Node& child,const Mat4&){physics|=dynamic_cast<const RigidBodyComponent*>(&child)||dynamic_cast<const CharacterMotorComponent*>(&child)||dynamic_cast<const VehicleComponent*>(&child);});if(physics)throw std::invalid_argument("Cinematic motion cannot own a physics-controlled hierarchy");
             }
             if(t.type==CinematicTrackType::Animation){auto* mesh=dynamic_cast<SkeletalMeshComponent*>(n);if(!mesh||!mesh->skeleton().skeleton())throw std::invalid_argument("Animation track needs a skeletal mesh component");const auto& clips=mesh->skeleton().skeleton()->clips;auto found=std::find_if(clips.begin(),clips.end(),[&](const auto& c){return c.name==t.resource;});if(found==clips.end()||std::count_if(clips.begin(),clips.end(),[&](const auto& c){return c.name==t.resource;})!=1)throw std::invalid_argument("Missing or ambiguous cinematic animation clip: "+t.resource);clipIndices.back()=std::size_t(found-clips.begin());controlledAnimations.push_back(targets.back());}
+            if(t.type==CinematicTrackType::Sprite){
+                auto* sprite=dynamic_cast<MeshComponent*>(n);
+                if(!sprite||n->isProtectedChild())throw std::invalid_argument("Select an ordinary sprite mesh component");
+                sprites.back().emplace(*sprite,t.atlasColumns,t.atlasRows);
+            }
             if(t.type==CinematicTrackType::Effect){auto* effect=dynamic_cast<EffectComponent*>(n);if(!effect)throw std::invalid_argument("Effect track needs an EffectComponent");std::set<const EffectAsset*> seen;
                 const auto check=[&](auto&& self,const EffectAsset& a)->void{if(!seen.insert(&a).second)return;if(seen.size()>128)throw std::invalid_argument("Cinematic FX graph exceeds 128 assets");for(const auto& e:a.emitters)if(e.definition->renderMode==ParticleRenderMode::SurfaceTrail)throw std::invalid_argument("Contact-driven surface trails require gameplay input and cannot be scrubbed here");for(const auto& trigger:a.triggers)if(trigger.effect)self(self,*trigger.effect);};check(check,effect->asset());
             }
@@ -64,11 +71,15 @@ struct CinematicPreview::Impl {
     void visual(double time){auto& s=*document.scene;
         for(const auto& b:base)if(auto* n=b.ref.get(s)){n->transform=b.transform;if(b.lens)if(auto* c=dynamic_cast<CameraComponent*>(n)){if(b.mode==ProjectionMode::Perspective)c->setPerspective(b.lens,b.near,b.far);else c->setOrthographic(b.lens,b.near,b.far);}}
         for(const auto& ref:controlledAnimations)if(auto* mesh=dynamic_cast<SkeletalMeshComponent*>(ref.get(s)))mesh->animation().stop();
+        for(std::size_t i=0;i<sprites.size();++i)
+            if(sprites[i])sprites[i]->restore(dynamic_cast<MeshComponent&>(node(i)));
         auto* camera=dynamic_cast<CameraComponent*>(s.findComponent(fallback));
         const auto& seq=*clock.sequence();const auto& tracks=seq.data().tracks;
         for(std::size_t i=0;i<tracks.size();++i){const auto& t=tracks[i];if(!seq.active(t,time))continue;
             if(t.type==CinematicTrackType::Transform||t.type==CinematicTrackType::Camera){auto& n=node(i);auto value=seq.sample(i,time);n.transform=value.transform;if(t.type==CinematicTrackType::Camera){camera=dynamic_cast<CameraComponent*>(&n);if(camera->projectionMode()==ProjectionMode::Perspective)camera->setPerspective(value.lens,camera->nearPlane,camera->farPlane);else camera->setOrthographic(value.lens,camera->nearPlane,camera->farPlane);}}
             else if(t.type==CinematicTrackType::Animation){auto& mesh=dynamic_cast<SkeletalMeshComponent&>(node(i));auto& animation=mesh.animation();animation.play(clipIndices[i],t.loop,t.speed);animation.pause();animation.seek(t.offset+(time-t.start)*t.speed);}
+            else if(t.type==CinematicTrackType::Sprite)
+                sprites[i]->apply(dynamic_cast<MeshComponent&>(node(i)),seq.sample(i,time));
         }
         if(!camera||!camera->isActiveInHierarchy())throw std::logic_error("Cinematic camera is unavailable");views={RenderView{camera}};
     }
@@ -109,6 +120,7 @@ Scene& CinematicPreview::scene(){return *impl_->document.scene;}
 std::span<const RenderView> CinematicPreview::views()const{return impl_->views;}
 CinematicPlayer& CinematicPreview::player(){return impl_->clock;}
 const CinematicPlayer& CinematicPreview::player()const{return impl_->clock;}
+std::string_view CinematicPreview::subtitle()const{return impl_->clock.sequence()->subtitle(impl_->clock.time());}
 AudioSystem* CinematicPreview::audio(){return impl_->audio.get();}
 void CinematicPreview::seek(double time){auto& i=*impl_;i.clock.seek(time);i.clock.pause();i.cancelAudio();try{i.evaluate(time,false);}catch(const std::exception& e){i.error=e.what();throw;}}
 void CinematicPreview::play(){auto& i=*impl_;const auto old=i.clock.time();i.clock.play();if(i.clock.time()!=old)i.evaluate(i.clock.time(),false);i.reconcileAudio(true);}

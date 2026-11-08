@@ -3,8 +3,22 @@
   const $=id=>document.getElementById(id);
   let request=0,lastState=null;
   const status=text=>{$('sky-status').textContent=text;};
+  const refreshVolume=state=>{
+    const toggle=$('sky-volumetric'),quality=$('sky-cloud-quality');
+    toggle.disabled=quality.disabled=state.mode===0;
+    toggle.checked=!!state.volumetric;
+    if(state.cloudSteps>0) {
+      const value=String(state.cloudSteps);
+      if(!Array.from(quality.options).some(option=>option.value===value)) {
+        const custom=document.createElement('option');custom.value=value;custom.textContent=`Custom (${value} steps)`;custom.dataset.custom='true';quality.append(custom);
+      }
+      quality.value=value;
+      for(const option of Array.from(quality.options)) if(option.dataset.custom&&option.value!==value) option.remove();
+    }
+  };
   window.engineSkyState=state=>{
     lastState=state;
+    refreshVolume(state);
     for(const [id,key] of Object.entries({'sky-mode':'mode','sky-geometry':'geometry','sky-brightness':'brightness','sky-rotation':'rotation','sky-coverage':'coverage','sky-density':'density','sky-rayleigh':'rayleigh','sky-mie':'mie','sky-hour':'hour','sky-day-seconds':'daySeconds'}))
       if(document.activeElement!==$(id)) $(id).value=key==='rotation' ? state[key]*180/Math.PI : state[key];
     for(const [id,key] of Object.entries({'sky-clouds':'clouds','sky-cycle':'cycle','sky-running':'running'})) if(document.activeElement!==$(id)) $(id).checked=state[key];
@@ -24,6 +38,17 @@
   for(const id of ['sky-brightness','sky-rotation']) $(id).addEventListener('input',apply);
   for(const id of ['sky-geometry','sky-clouds','sky-cycle','sky-running','sky-day-seconds']) $(id).addEventListener('change',apply);
   for(const id of ['sky-coverage','sky-density','sky-rayleigh','sky-mie','sky-hour']) $(id).addEventListener('input',apply);
+  const applyVolume=()=>{
+    ++request;
+    if(!window.Module?._engine_sky_volume) {
+      if(lastState) refreshVolume(lastState);
+      return status('Wait for the scene to load.');
+    }
+    const ok=Module._engine_sky_volume($('sky-volumetric').checked?1:0,Number($('sky-cloud-quality').value));
+    if(!ok&&lastState) refreshVolume(lastState);
+    status(ok?'Cloud settings updated.':'Cloud settings rejected; previous settings retained.');
+  };
+  for(const id of ['sky-volumetric','sky-cloud-quality']) $(id).addEventListener('change',applyVolume);
   $('sky-load').addEventListener('click',()=>$('sky-file').click());
   $('sky-file').addEventListener('change',async()=>{
     const file=$('sky-file').files[0];if(!file) return;

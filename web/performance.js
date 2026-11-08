@@ -74,9 +74,19 @@
   window.enginePerformance = snapshot => {
     snapshot.wasmCapacityBytes = window.Module?.HEAPU8?.byteLength || 0;
     latest = snapshot;
+    if (snapshot.lightingSlots) window.dispatchEvent(new CustomEvent('engine-lighting-slots', {detail: snapshot.lightingSlots}));
     history.push({ atMs: performance.now(), ...structuredClone(snapshot) });
     if (history.length > 240) history.shift();
     const t = snapshot.timings, c = snapshot.current;
+    const archGpuStatus=document.getElementById('stone-arch-gpu-status');
+    if(archGpuStatus&&!document.getElementById('stone-arch').hidden) {
+      const gpuEnabled=document.getElementById('stone-arch-gpu').checked;
+      archGpuStatus.textContent=c.gpuClusterBins
+        ? `${c.gpuClusterBins} indirect draws · ${c.gpuClusterCandidates} cluster ranges${c.gpuClusterSampleSerial
+          ? ` · ${c.gpuClusterVisibleTriangles.toLocaleString()} / ${c.gpuClusterSampleTriangles.toLocaleString()} triangles visible in GPU sample` : ''}${c.gpuHierarchyPlans
+          ? ` · GPU LOD ${c.gpuHierarchyVisited} visited / ${c.gpuHierarchySelected} selected / ${c.gpuHierarchyRequests} page requests` : ''}`
+        : gpuEnabled?'CPU cluster submission active':'';
+    }
     show('cpu', timing(t.cpuMs)); show('interval', timing(t.intervalMs));
     show('update', timing(t.updateMs)); show('collect', timing(t.collectMs));
     show('prepare', timing(t.prepareMs)); show('encode', timing(t.encodeMs)); show('submit', timing(t.submitMs));

@@ -66,7 +66,9 @@
       }
       }
       const formats = ['BC','ETC2','ASTC'].filter(name => next[`compression${name}`]);
-      report.textContent = next.generation ? `${next.backend === "webgl2" ? "WebGL 2 · basic lighting; PBR unavailable" : "WebGPU"} · ${next.state} · MSAA ${next.effectiveMsaaSamples === 4 ? '4×' : 'off'}${next.msaaSamples === 4 && !next.msaa4x ? ' (4× unsupported)' : ''} · ${next.maxLights} lights, spotlights ${next.spotLights ? 'on' : 'unavailable'} (spot shadows ${next.spotLightShadows ? "available" : "unavailable"}) · GPU generation ${next.generation} · max texture ${next.maxTextureDimension2D} · timestamps ${next.timestampQuery ? 'available' : 'unavailable'} · compression ${formats.join(', ') || 'RGBA fallback'}` : `${next.state} · GPU capabilities pending`;
+      const rendererLabel=next.backend==='webgl2'?`WebGL 2 · ${next.effectiveCompactPbr?'compact PBR':'basic lighting'}`:'WebGPU';
+      report.textContent = next.generation ? `${rendererLabel} · ${next.state} · MSAA ${next.effectiveMsaaSamples === 4 ? '4×' : 'off'}${next.msaaSamples === 4 && !next.msaa4x ? ' (4× unsupported)' : ''} · ${next.maxLights} lights, spotlights ${next.spotLights ? 'on' : 'unavailable'} (spot shadows ${next.spotLightShadows ? "available" : "unavailable"}) · GPU generation ${next.generation} · max texture ${next.maxTextureDimension2D} · timestamps ${next.timestampQuery ? 'available' : 'unavailable'} · compression ${formats.join(', ') || 'RGBA fallback'}` : `${next.state} · GPU capabilities pending`;
+      if (next.state === 'ready') report.textContent += ` · ${next.width} × ${next.height} render px`;
       if (next.state === 'ready' && !configured) {
         configured = true;
         const requested = new URLSearchParams(location.search).get('quality');
@@ -125,7 +127,9 @@
 
 (() => {
   const panel=document.createElement('details');panel.innerHTML=`<summary>Lighting &amp; post-processing</summary>
+  <label id="webgl-pbr-control" hidden><input id="webgl-pbr" type="checkbox"> Compact PBR on WebGL 2</label>
   <label><input id="post-enabled" type="checkbox"> HDR post-processing</label>
+  <label>Tone mapper<select id="post-tone-mapper"><option value="0">Reinhard</option><option value="1">PBR Neutral</option></select></label>
   <label>Exposure (stops)<input id="post-exposure" type="number" min="-8" max="8" step=".25" value="0"></label>
   <label>Bloom strength<input id="post-bloom" type="number" min="0" max="2" step=".05" value=".15"></label>
   <label>Bloom threshold<input id="post-threshold" type="number" min="0" max="32" step=".25" value="1"></label>
@@ -135,16 +139,24 @@
   <label>Shadow distance<input id="post-distance" type="number" min="1" max="10000" value="80"></label>
   <button id="post-apply" type="button">Apply lighting</button><p id="post-status" role="status"></p>`;
   document.querySelector('#quality-form').after(panel);
+  const compact=panel.querySelector('#webgl-pbr');
+  compact.onchange=()=>{
+    if(window.Module?._engine_webgl_pbr?.(+compact.checked))EngineQuality.markCustom();
+    else compact.checked=!!EngineQuality.snapshot()?.webGlPbr;
+  };
   let lastSettings='';
   window.EngineLightingReport=state=>{
-    const values=[state.postEnabled,state.postExposure,state.postBloom,state.postThreshold,state.postSaturation,state.postContrast,state.directionalCascades,state.shadowDistance];
+    compact.closest('label').hidden=state.backend!=='webgl2';
+    compact.disabled=!state.compactPbr;
+    compact.checked=!!state.webGlPbr;
+    const values=[state.postEnabled,state.postExposure,state.postBloom,state.postThreshold,state.postSaturation,state.postContrast,state.directionalCascades,state.shadowDistance,state.postToneMapper];
     const key=JSON.stringify(values);if(key===lastSettings||values.some(v=>v===undefined))return;lastSettings=key;
     panel.querySelector('#post-enabled').checked=values[0];
-    ['exposure','bloom','threshold','saturation','contrast','cascades','distance'].forEach((name,i)=>{panel.querySelector('#post-'+name).value=values[i+1];});
+    ['exposure','bloom','threshold','saturation','contrast','cascades','distance','tone-mapper'].forEach((name,i)=>{panel.querySelector('#post-'+name).value=values[i+1];});
   };
   panel.querySelector('#post-apply').onclick=()=>{
     const get=id=>panel.querySelector('#post-'+id),num=id=>Number(get(id).value);
-    const ok=window.Module?._engine_lighting?.(+get('enabled').checked,num('exposure'),num('bloom'),num('threshold'),num('saturation'),num('contrast'),num('cascades'),num('distance'));
+    const ok=window.Module?._engine_lighting_with_tone_mapper?.(+get('enabled').checked,num('exposure'),num('bloom'),num('threshold'),num('saturation'),num('contrast'),num('cascades'),num('distance'),num('tone-mapper'));
     get('status').textContent=ok?(get('enabled').checked&&!EngineQuality.snapshot()?.hdrPostProcessing?'HDR unavailable on this device; standard rendering retained.':'Lighting settings applied.'):'Invalid settings. Previous settings retained.';
     if(ok)EngineQuality.markCustom();
   };

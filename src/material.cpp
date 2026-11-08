@@ -38,11 +38,39 @@ std::array<std::shared_ptr<const Texture>,9> materialTextures(const Material& m)
         for(std::size_t i=0;i<4;++i) result[5+i]=m.layers.layers[i].normalHeightTexture ? m.layers.layers[i].normalHeightTexture : Texture::flatNormal();return result;
     }
     return {m.baseColorTexture ? m.baseColorTexture : Texture::white(),m.metallicRoughnessTexture ? m.metallicRoughnessTexture : Texture::white(),
-        m.normalTexture ? m.normalTexture : Texture::flatNormal(),m.occlusionTexture ? m.occlusionTexture : Texture::white(),m.emissiveTexture ? m.emissiveTexture : Texture::white(),Texture::flatNormal(),Texture::flatNormal(),Texture::flatNormal(),Texture::flatNormal()};
+        m.normalTexture ? m.normalTexture : Texture::flatNormal(),m.occlusionTexture ? m.occlusionTexture : Texture::white(),m.emissiveTexture ? m.emissiveTexture : Texture::white(),m.advanced.surfaceTexture?m.advanced.surfaceTexture:Texture::white(),m.advanced.coatNormalTexture?m.advanced.coatNormalTexture:Texture::flatNormal(),
+        m.advanced.colorTexture?m.advanced.colorTexture:Texture::white(),m.advanced.anisotropyTexture?m.advanced.anisotropyTexture:Texture::white()};
 }
 std::array<TextureSemantic,9> materialTextureSemantics(const Material& m) {
     return m.layers.enabled ? std::array{TextureSemantic::Color,TextureSemantic::Color,TextureSemantic::Color,TextureSemantic::Color,TextureSemantic::Data,TextureSemantic::Normal,TextureSemantic::Normal,TextureSemantic::Normal,TextureSemantic::Normal} :
-        std::array{TextureSemantic::Color,TextureSemantic::Data,TextureSemantic::Normal,TextureSemantic::Data,TextureSemantic::Color,TextureSemantic::Normal,TextureSemantic::Normal,TextureSemantic::Normal,TextureSemantic::Normal};
+        std::array{TextureSemantic::Color,TextureSemantic::Data,TextureSemantic::Normal,TextureSemantic::Data,TextureSemantic::Color,TextureSemantic::Data,TextureSemantic::Normal,TextureSemantic::Color,TextureSemantic::Data};
+}
+void MaterialAdvanced::validate() const {
+    auto range=[](float v,float lo,float hi){return std::isfinite(v)&&v>=lo&&v<=hi;};
+    auto color=[&](Vec3 v){return range(v.x,0,1)&&range(v.y,0,1)&&range(v.z,0,1);};
+    if(!range(clearcoat,0,1)||!range(clearcoatRoughness,0,1)||!range(transmission,0,1)||!range(ior,1,3)||
+       !range(thickness,0,100)||!range(attenuationDistance,0,1000000)||!range(subsurface,0,1)||!range(sheen,0,1)||
+       !color(attenuationColor)||!color(subsurfaceColor)||!color(sheenColor)||!range(sheenRoughness,0,1)||
+       !range(anisotropy,-1,1)||!range(anisotropyRotation,-1000000,1000000)||!range(specular,0,1)||
+       !range(uvSpeed.x,-100,100)||!range(uvSpeed.y,-100,100)||!range(windAmplitude,0,10)||
+       !range(windFrequency,0,100)||!range(windSpeed,-100,100)||!range(clearcoatNormalScale,0,16)||
+       !range(windDirection.x,-1000000,1000000)||!range(windDirection.y,-1000000,1000000)||!range(windDirection.z,-1000000,1000000)||
+       (windAmplitude>0&&dot(windDirection,windDirection)<1e-12f))
+        throw std::invalid_argument("Invalid advanced material parameters");
+    for(const auto& texture:{surfaceTexture,coatNormalTexture,colorTexture,anisotropyTexture})
+        if(texture&&(!texture->width||!texture->height||texture->width>4096||texture->height>4096||texture->pixels.size()!=std::uint64_t(texture->width)*texture->height*4))
+            throw std::invalid_argument("Invalid advanced material texture");
+    if(colorTexture&&(colorTexture->height<2||colorTexture->height%2))throw std::invalid_argument("Advanced color atlas needs two equal vertical bands");
+}
+std::array<float,36> materialAdvancedParameters(const MaterialAdvanced& a) {
+    return {a.clearcoat,a.clearcoatRoughness,a.transmission,a.ior,
+        a.thickness,a.attenuationDistance,a.subsurface,a.sheen,
+        a.attenuationColor.x,a.attenuationColor.y,a.attenuationColor.z,a.sheenRoughness,
+        a.subsurfaceColor.x,a.subsurfaceColor.y,a.subsurfaceColor.z,a.anisotropy,
+        a.sheenColor.x,a.sheenColor.y,a.sheenColor.z,a.anisotropyRotation,
+        a.specular,a.uvSpeed.x,a.uvSpeed.y,a.windAmplitude,
+        a.windDirection.x,a.windDirection.y,a.windDirection.z,a.windFrequency,a.windSpeed,a.clearcoatNormalScale,a.colorTexture?float((a.colorTexture->wrapU==TextureWrap::Clamp?1:0)|(a.colorTexture->wrapV==TextureWrap::Clamp?2:0)):0.f,0,
+        a.surfaceTexture?1.f:0.f,a.coatNormalTexture?1.f:0.f,a.colorTexture?1.f:0.f,a.anisotropyTexture?1.f:0.f};
 }
 void Material::validate() const {
     auto unit=[](float v) { return std::isfinite(v)&&v>=0&&v<=1; };
@@ -53,8 +81,13 @@ void Material::validate() const {
         ||alphaMode<AlphaMode::Opaque||alphaMode>AlphaMode::Additive||shader<MaterialShader::Pbr||shader>MaterialShader::Water)
         throw std::invalid_argument("Invalid material parameters");
     water.validate();
+    advanced.validate();
+    if(layers.enabled&&(advanced.surfaceTexture||advanced.coatNormalTexture||advanced.colorTexture||advanced.anisotropyTexture))
+        throw std::invalid_argument("Layered and advanced material maps use the same texture slots");
     layers.validate();
     if(layers.enabled&&shader==MaterialShader::Water) throw std::invalid_argument("Layer blending is unavailable for water");
+    if(baseColorSurface && (shader!=MaterialShader::Unlit || alphaMode!=AlphaMode::Opaque || layers.enabled))
+        throw std::invalid_argument("Render surface bindings require an opaque unlit material without layers");
 }
 std::shared_ptr<const Material> Material::standard() {
     static const auto value=std::make_shared<const Material>();return value;
@@ -62,9 +95,9 @@ std::shared_ptr<const Material> Material::standard() {
 Material Material::parameters() const {
     Material result;
 #define COPY(field) result.field=field
-    COPY(baseColor);COPY(baseColorTexture);COPY(opacity);COPY(roughness);COPY(metallic);COPY(normalScale);COPY(occlusionStrength);
+    COPY(baseColor);COPY(baseColorTexture);COPY(baseColorSurface);COPY(opacity);COPY(roughness);COPY(metallic);COPY(normalScale);COPY(occlusionStrength);
     COPY(emissive);COPY(metallicRoughnessTexture);COPY(normalTexture);COPY(occlusionTexture);COPY(emissiveTexture);
-    COPY(alphaMode);COPY(alphaCutoff);COPY(doubleSided);COPY(shader);COPY(water);COPY(layers);COPY(uvScale);COPY(uvOffset);
+    COPY(alphaMode);COPY(alphaCutoff);COPY(doubleSided);COPY(shader);COPY(water);COPY(layers);COPY(advanced);COPY(uvScale);COPY(uvOffset);
 #undef COPY
     return result;
 }
@@ -80,19 +113,21 @@ Material MaterialInstance::resolve(const std::shared_ptr<const Material>& fallba
     if(!std::isfinite(opacity)||opacity<0||opacity>1) throw std::invalid_argument("Invalid material instance opacity");
 #define OVERRIDE(field) if(field) result.field=*field
     OVERRIDE(roughness);OVERRIDE(metallic);OVERRIDE(normalScale);OVERRIDE(occlusionStrength);OVERRIDE(alphaCutoff);
-    OVERRIDE(emissive);OVERRIDE(alphaMode);OVERRIDE(doubleSided);OVERRIDE(shader);OVERRIDE(water);OVERRIDE(layers);
+    OVERRIDE(emissive);OVERRIDE(alphaMode);OVERRIDE(doubleSided);OVERRIDE(shader);OVERRIDE(water);OVERRIDE(layers);OVERRIDE(advanced);
     OVERRIDE(baseColorTexture);OVERRIDE(metallicRoughnessTexture);OVERRIDE(normalTexture);OVERRIDE(occlusionTexture);OVERRIDE(emissiveTexture);
+    if(baseColorSurface) result.baseColorSurface=baseColorSurface;
 #undef OVERRIDE
     result.validate();return result;
 }
 bool sameMaterialBinding(const Material& a,const Material& b) {
     auto base=[](const Material& m) { return m.baseColorTexture ? m.baseColorTexture.get() : Texture::white().get(); };
-    return base(a)==base(b)&&a.metallicRoughnessTexture==b.metallicRoughnessTexture&&a.normalTexture==b.normalTexture
+    return base(a)==base(b)&&a.baseColorSurface==b.baseColorSurface&&a.metallicRoughnessTexture==b.metallicRoughnessTexture&&a.normalTexture==b.normalTexture
         &&a.occlusionTexture==b.occlusionTexture&&a.emissiveTexture==b.emissiveTexture
         &&a.roughness==b.roughness&&a.metallic==b.metallic&&a.normalScale==b.normalScale&&a.occlusionStrength==b.occlusionStrength
         &&a.emissive.x==b.emissive.x&&a.emissive.y==b.emissive.y&&a.emissive.z==b.emissive.z
         &&a.uvScale.x==b.uvScale.x&&a.uvScale.y==b.uvScale.y&&a.uvOffset.x==b.uvOffset.x&&a.uvOffset.y==b.uvOffset.y
         &&a.alphaMode==b.alphaMode&&a.alphaCutoff==b.alphaCutoff&&a.doubleSided==b.doubleSided&&a.shader==b.shader&&waterParameters(a.water)==waterParameters(b.water)
+        &&materialAdvancedParameters(a.advanced)==materialAdvancedParameters(b.advanced)
         &&materialLayerParameters(a.layers)==materialLayerParameters(b.layers)&&materialTextures(a)==materialTextures(b);
 }
 } // namespace engine

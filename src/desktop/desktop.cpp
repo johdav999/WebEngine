@@ -128,7 +128,7 @@ struct DesktopHost::Impl {
         for(const auto& view:source) {
             auto* camera=dynamic_cast<CameraComponent*>(scene.findComponent(view.camera));
             if(!camera) { if(strict)throw std::invalid_argument("Desktop view has a stale or foreign camera");continue; }
-            result.push_back({camera,view.clearColor,view.skyEnabled,view.fogEnabled});
+            result.push_back({camera,view.clearColor,view.skyEnabled,view.fogEnabled,view.target,view.refreshSurface});
         }
         RenderViews checked;checked.set(result);return result;
     }

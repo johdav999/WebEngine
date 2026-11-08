@@ -5,6 +5,13 @@
 #include <vector>
 #include <cstddef>
 #include <cstdint>
+inline void stripEmptyLightingZones(std::vector<std::byte>& bytes) {
+    constexpr std::size_t countBytes=sizeof(std::uint32_t);
+    if(bytes.size()<24+countBytes||
+       !std::all_of(bytes.end()-countBytes,bytes.end(),[](std::byte value){return value==std::byte{};}))
+        throw std::runtime_error("Expected empty lighting zones at the end of the scene fixture");
+    bytes.resize(bytes.size()-countBytes);
+}
 inline void stripDefaultCameraFollow(std::vector<std::byte>& bytes){
     std::vector<std::byte> fields={std::byte{0},std::byte{1},std::byte{1},std::byte{1},std::byte{0},std::byte{0},std::byte{0},std::byte{0}};
     for(float value:{0.f,1.f,0.f,0.f,3.f,-8.f,.3f,4.f,.12f,.1f,.3f,.05f}){auto word=std::bit_cast<std::uint32_t>(value);for(int i=0;i<4;++i)fields.push_back(std::byte((word>>(i*8))&255));}fields.push_back(std::byte{255});fields.push_back(std::byte{255});

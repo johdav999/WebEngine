@@ -12,7 +12,7 @@ Close preview to edit. A sequence has its own name, duration, frame grid and
 bounded Undo/Redo history, independent of scene history. Choose a track type and
 target, then **Add track**. Saved node identities bind motion, shots, characters
 and effects; sound tracks reference encoded audio URIs. The example provides all
-five kinds without requiring a model download.
+original five kinds without requiring a model download.
 
 - **Object motion:** local position, Euler rotation and positive scale keys.
 - **Camera shot:** a camera, an active time range, pose keys and lens keys. Lens
@@ -26,6 +26,12 @@ five kinds without requiring a model download.
 - **Effect:** an existing EffectComponent and its active range. Its immutable
   EffectAsset owns emission, duration, looping, seed and composition settings.
   Per-clip FX rate/offset overrides are not supported.
+- **Sprite:** an ordinary textured MeshComponent with one material slot and a
+  rectangular atlas. Frame indices count from zero in row-major order. Visibility
+  and frame selection step at keys. Opacity uses the chosen interpolation. Use a
+  separate transform track for motion and an orthographic shot for flat staging.
+- **Subtitle:** a timed cue containing plain text. Subtitle clips share one lane
+  and cannot overlap. The host draws text in screen space over either projection.
 
 Select a row or key diamond to edit exact values. Drag a clip to move it, its
 right edge to resize it, or a diamond to retime a key. Dragged times snap to the
@@ -45,7 +51,8 @@ axis. This is not quaternion spline interpolation or an authored multi-turn curv
 Parent and child motion compose through the normal hierarchy. Gaps restore the
 source's local transform; animation gaps use the character's bind pose.
 
-**Save .wecin** writes a separate `WECINE 1` text asset. It contains track/key data,
+**Save .wecin** writes a separate text asset. The original track types still
+round-trip as `WECINE 1`. Sprite and subtitle tracks use `WECINE 2`. The file contains track/key data,
 saved node IDs, clip names and audio URIs, not a scene, meshes, animations, effects,
 audio bytes, callbacks or live playback. Save the scene/resources separately and
 keep project audio paths available. Import parses and validates a complete candidate
@@ -114,7 +121,6 @@ CinematicPlayer clock(asset);               // engine_core, no scene/device owne
 clock.play();
 clock.advance(eligibleDelta);                // 0..0.25s, explicit host clock.
 auto pose = asset->sample(trackIndex, clock.time());
-// Runtime applications bind saved targets/resources and choose their own handoff.
 
 CinematicSequenceEditor document(asset);     // Independent 128-edit history.
 CinematicPreview preview(source, views, asset, std::move(optionalAudioBackend));
@@ -131,9 +137,8 @@ backend/system; it borrows the source only during construction, then uses ordina
 scene-scoped handles. Renderer references stay borrowed. The browser workbench is
 application code in `src/cinematic_browser.inc`, `src/cinematic_example.hpp` and
 `web/cinematic.js`; it introduces no DOM/renderer types into portable interfaces.
-No second source-scene update, global subscription or automatic gameplay cutscene
-component is added. Runtime games can consume the asset/player through their own
-binding and gameplay completion policy; no authored gameplay events are executed.
+The isolated preview never updates the live source scene. Subtitle presentation
+is available from the sampled cursor while paused or scrubbing.
 
 Limits: duration **.01..3600s**, frame grid **1..120fps** (not a render-rate cap),
 **64 tracks**, **256 keys/track**, **4096 total keys**, **8 simultaneous sounds**,
@@ -145,6 +150,55 @@ version, built-in sequencer resource record, playback checkpoint or worker codec
 change is introduced. Nested sequences, shot crossfades, Bezier curves, audio
 waveform editing, offline/video export and automatic recording/apply-back remain
 extensions.
+
+## In-game playback
+
+Open `?scene=cutscene-game` or run
+`build/windows/Release/webengine_cutscene_windows.exe` for **The Gate**. Use A/D
+to move. Play the 3D greeting, the 2D signal, or the mixed cut with an animated
+2D card composited over a 3D shot. The same gate opens
+on completion or Skip. Cancel restores gameplay with the gate still closed if
+it was closed on entry. The Windows executable accepts `--backend dawn|d3d12`.
+
+```cpp
+#include "engine/cinematic_runtime.hpp"
+
+CinematicRuntime cutscene;
+// Load an authored asset with CinematicSequenceArchive::load(wecinText).
+cutscene.start(scene, sequence, std::move(optionalAudioBackend), resolveAudio);
+if (auto* audio = cutscene.audio()) audio->backend().activate();
+// The host selects its gameplay input and pause policy after start succeeds.
+cutscene.advance(scene, presentationDelta);
+auto* shot = cutscene.camera(scene); // Null means use the gameplay view.
+std::string_view subtitle = cutscene.subtitle(); // Copy into the host UI.
+```
+
+- Start on the scene owner while the scene is idle. The runtime validates enabled
+  tracks and resolves scene-scoped handles before taking control. Each scene
+  allows one active runtime. Use dedicated
+  visual targets and cameras. Motion bindings reject physics-controlled
+  hierarchies, and skeletal bindings use dedicated stopped animation components.
+- Advance with an eligible presentation delta of 0 to .25 seconds. This clock
+  can run while application simulation is paused. When simulation continues, the
+  game keeps its writers away from the cinematic targets.
+- The host binds the shot or falls back to the gameplay view during gaps. The
+  subtitle text is borrowed. Browser DOM and Windows GUI can render the same cue.
+  For portraits or panels over the world, use sprite tracks on a masked mesh
+  and an additional orthographic view with load-color compositing, as in The Gate.
+  Dedicated effects advance on the cutscene clock while regular scene ticking
+  bypasses the owned effects.
+- An enabled sound track requires a streaming backend. The synchronous resolver
+  turns an authored reference into an AudioStreamAsset. The browser can use a
+  project URL and activates audio from a gesture. Windows can resolve the same
+  reference to a packaged absolute local file URI with `desktopAudioStreamUri`.
+  The host suspends audio and the timeline when its presentation is suspended.
+- The host can call `skip(scene)` or `cancel(scene)`. Completion, skip, cancel,
+  and failure release cinematic presentation state and stop owned audio. Rebind
+  gameplay views and restore the previous input/pause policy at handoff.
+  Scene destruction releases playback. Cancel explicitly when leaving a scene
+  that the application keeps loaded.
+  Apply the same game-owned outcome for Completed and Skipped. Use Cancelled
+  and Failed to return without applying that outcome. The game owns its callbacks.
 
 ## Validation
 
@@ -158,3 +212,9 @@ files/invalid retention, device recovery, editor preview exclusion, compact cont
 and shutdown. Regress animation control, FX composition, audio and relevant editor
 flows. Desktop/DPR samples do not establish physical mobile, native rendering/audio,
 Safari or sustained performance. See [recorded evidence](cinematic-sequencer-validation.md).
+
+For live playback run CTest `cinematic_runtime`, run
+`scripts/cutscene-game-smoke.cjs` against the browser build, and run
+`webengine_cutscene_windows.exe --smoke build/evidence/cutscene-windows` from the
+configured Windows build. The demos exercise 3D, 2D and mixed playback plus game
+handoff. Native smoke captures PPM frames and verifies gate state and input.

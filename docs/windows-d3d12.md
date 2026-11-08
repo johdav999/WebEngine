@@ -54,7 +54,7 @@ The editor uses Automatic by default.
 | Shadows | Existing WebGPU renderer | Up to four directional/cascade/spot maps per view, shared planner, 1/9-tap PCF, caster/receiver flags, alpha cutouts and independent caster LOD |
 | MSAA | Existing renderer | Hardware-checked 1x/4x scene color/depth, resolve before single-sample GUI |
 | Sky | Existing shared settings | Gradient, sRGB panorama, atmosphere/clouds/day-night payloads; fullscreen or sphere; per-view opt-out |
-| Fog | Existing shared settings | Analytic height/start-distance fog on World meshes and sky; additive extinction; orthographic origins |
+| Fog | Existing shared settings | Analytic height/start-distance fog, additive extinction, orthographic origins, and an opt-in FP16 volumetric grid for World geometry, sky and FX with direct fallback |
 | HDR post | Existing renderer | Checked RGBA16F scene targets, quarter-size bloom, exposure/saturation/contrast and SDR composite before GUI |
 | Retained GUI | Shared WGSL GUI renderer | Same GuiDrawList/font atlas, native HLSL pipeline, clip rectangles and alpha |
 | Views, masks, culling and camera LOD | Existing renderer | Shared RenderViews/RenderFrame collection |
@@ -197,6 +197,9 @@ buffers, vsynced presentation and conventional resource barriers. Requested 4x
 MSAA requires both color/depth support; otherwise effective samples remain 1.
 MSAA resolves all ordered views/layers before post, GUI and framebuffer capture.
 Post enable/disable recreates compatible attachments only after queue completion.
+Both Windows renderers support [camera render surfaces](render-surfaces.md).
+Direct D3D12 retains their color and depth resources through the fences of
+frames that capture or sample them. Window resize leaves their extents intact.
 
 `host.captureFrame(path)` queues one capture; duplicate requests reject without
 replacing it. Step the host until `capturePending()` clears, then check

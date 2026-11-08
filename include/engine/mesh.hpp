@@ -14,6 +14,8 @@ struct Vertex { Vec3 position; Vec3 normal; Vec2 uv; std::array<float,4> tangent
 struct MeshPart { std::uint32_t firstIndex=0,indexCount=0,materialIndex=0; };
 struct MeshBounds { Vec3 minimum{},maximum{}; bool valid=false; };
 struct Mesh;
+class ClusterLod;
+class ClusterPageStream;
 struct MeshLod { std::shared_ptr<const Mesh> mesh; float maxPixels=0; };
 // Presentation-only selection, applied independently to camera pixels and shadow
 // texels. Negative fixed levels select automatically; level zero is full detail.
@@ -45,6 +47,8 @@ struct MeshLodRecipe {
 };
 struct Mesh {
     std::vector<MeshLod> lods; // Shared derived static geometry; level zero is this mesh.
+    std::shared_ptr<const ClusterLod> clusterLod; // Optional derived static geometry.
+    std::shared_ptr<ClusterPageStream> clusterStream; // Optional owner-thread presentation residency.
     std::optional<MeshLodRecipe> lodRecipe;
     std::vector<Vertex> vertices;
     std::vector<MorphTarget> morphTargets;
@@ -61,7 +65,7 @@ struct Mesh {
     void validateMorphTargets() const;
     const MeshBounds& localBounds() const;
     // Call after editing positions in place; published mesh resources are immutable.
-    void invalidateBounds() { boundsData_=nullptr; }
+    void invalidateBounds() { boundsData_=nullptr;clusterLod.reset();clusterStream.reset(); }
 private:
     mutable MeshBounds bounds_;
     mutable const Vertex* boundsData_=nullptr;

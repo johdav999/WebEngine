@@ -2,6 +2,8 @@
 #include "engine/scene.hpp"
 #include "engine/camera_component.hpp"
 #include "engine/render_quality.hpp"
+#include "engine/view_lighting.hpp"
+#include <sstream>
 
 namespace engine {
 namespace { bool finite(Vec3 v) { return std::isfinite(v.x)&&std::isfinite(v.y)&&std::isfinite(v.z); } }
@@ -44,13 +46,22 @@ ShadowPlan planShadows(std::span<const SceneLight> lights,const CameraComponent&
     q.validate();if(!resolution||!std::isfinite(aspect)||aspect<=0)throw std::invalid_argument("Invalid shadow planning viewport");
     camera.projection(aspect); // Validate direct lens writes before deriving split distances.
     ShadowPlan result;
-    for(std::uint32_t i=0;i<std::min<std::size_t>(8,lights.size())&&result.count<q.maxShadowMaps;++i) {
+    lights=lights.first(std::min<std::size_t>(8,lights.size()));
+    const auto eligibleSpot=[](const SceneLight& light){return light.type==LightType::Spot&&light.shadow.enabled&&light.intensity>0;};
+    auto reserved=std::min({q.localShadowReserve,q.maxShadowMaps,std::uint32_t(std::count_if(lights.begin(),lights.end(),eligibleSpot))});
+    for(std::uint32_t i=0;i<lights.size()&&result.count<q.maxShadowMaps;++i) {
         const auto& l=lights[i];if(!l.shadow.enabled||l.intensity<=0||l.type==LightType::Point)continue;
-        if(l.type==LightType::Spot) {result.maps[result.count++]={spotShadowMatrix(l.position,l.direction,l.outerAngle,l.range),i};continue;}
+        if(l.type==LightType::Spot) {
+            result.maps[result.count++]={spotShadowMatrix(l.position,l.direction,l.outerAngle,l.range),i};
+            if(reserved) --reserved;
+            continue;
+        }
+        const auto available=q.maxShadowMaps-result.count-reserved;
+        if(!available) continue;
         if(q.directionalCascades==1) {result.maps[result.count++]={directionalShadowMatrix(l.direction,l.shadowCenter,l.shadow,resolution),i};continue;}
         const auto n=camera.nearPlane,f=std::min(camera.farPlane,q.shadowDistance);
         if(f<=n)continue;
-        const auto count=std::min(q.directionalCascades,q.maxShadowMaps-result.count);
+        const auto count=std::min(q.directionalCascades,available);
         float previous=n;
         for(std::uint32_t c=0;c<count;++c) {
             const float t=float(c+1)/count,far=(1-q.cascadeLambda)*(n+(f-n)*t)+q.cascadeLambda*n*std::pow(f/n,t);
@@ -67,5 +78,70 @@ ShadowPlan planShadows(std::span<const SceneLight> lights,const CameraComponent&
         }
     }
     return result;
+}
+
+ViewLighting ViewLightSelection::prepare(std::span<const SceneLight> lights,const CameraComponent& camera,float aspect,
+                                         const RenderQuality& quality,std::uint32_t resolution,bool shadowsEnabled) {
+    quality.validate();
+    if(!std::isfinite(aspect)||aspect<=0)throw std::invalid_argument("Invalid view lighting viewport");
+    ViewLighting result;
+    result.eligibleCount=lights.size();
+    const auto cameraId=camera.id();
+    const auto keepHistory=quality.rankedLights&&cameraId&&camera_==cameraId;
+    if(!quality.rankedLights) {
+        result.lightCount=static_cast<std::uint32_t>(std::min(lights.size(),result.lights.size()));
+        std::copy_n(lights.begin(),result.lightCount,result.lights.begin());
+    } else {
+        const auto eye=camera.worldPosition();
+        const auto& frustum=camera.frustum(aspect);
+        struct Candidate { const SceneLight* light=nullptr;double score=0; };
+        std::array<Candidate,8> winners{};
+        const auto better=[](const Candidate& a,const Candidate& b){
+            if(a.light->priority!=b.light->priority)return a.light->priority>b.light->priority;
+            if(a.score!=b.score)return a.score>b.score;
+            return a.light->component.index<b.light->component.index;
+        };
+        for(const auto& light:lights) {
+            const double brightness=double(light.intensity)*(.2126*light.color.x+.7152*light.color.y+.0722*light.color.z);
+            if(brightness<=0) continue;
+            double score=brightness;
+            if(light.type!=LightType::Directional) {
+                const double x=double(light.position.x)-eye.x,y=double(light.position.y)-eye.y,z=double(light.position.z)-eye.z;
+                const double distance=std::sqrt(x*x+y*y+z*z)/light.range;
+                score/=1+distance*distance;
+                if(!frustum.intersectsSphere(light.position,light.range)) score/=16;
+            }
+            if(keepHistory&&light.component&&std::find(previous_.begin(),previous_.end(),light.component)!=previous_.end())score*=1.125;
+            const Candidate candidate{&light,score};
+            auto position=std::find_if(winners.begin(),winners.end(),[&](const auto& winner){return !winner.light||better(candidate,winner);});
+            if(position==winners.end())continue;
+            std::move_backward(position,winners.end()-1,winners.end());
+            *position=candidate;
+        }
+        for(const auto& winner:winners)if(winner.light)result.lights[result.lightCount++]=*winner.light;
+    }
+    if(shadowsEnabled) result.shadows=planShadows(std::span(result.lights).first(result.lightCount),camera,aspect,quality,resolution);
+    camera_=cameraId;previous_={};
+    if(quality.rankedLights)for(std::uint32_t i=0;i<result.lightCount;++i)previous_[i]=result.lights[i].component;
+    return result;
+}
+
+std::string ViewLighting::diagnosticsJson() const {
+    std::ostringstream json;
+    json<<"{\"eligible\":"<<eligibleCount<<",\"selected\":[";
+    for(std::uint32_t i=0;i<lightCount;++i) {
+        if(i)json<<',';
+        const auto& light=lights[i];
+        json<<"{\"id\":"<<light.component.index<<",\"generation\":"<<light.component.generation
+            <<",\"type\":"<<int(light.type)<<",\"priority\":"<<light.priority<<'}';
+    }
+    json<<"],\"maps\":[";
+    for(std::uint32_t i=0;i<shadows.count;++i) {
+        if(i)json<<',';
+        const auto& map=shadows.maps[i];
+        json<<"{\"slot\":"<<map.light<<",\"cascade\":"<<(map.cascade?"true":"false")<<'}';
+    }
+    json<<"]}";
+    return json.str();
 }
 } // namespace engine

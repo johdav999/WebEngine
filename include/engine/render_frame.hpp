@@ -1,5 +1,6 @@
 #pragma once
 #include "engine/scene.hpp"
+#include <functional>
 #include <span>
 
 namespace engine {
@@ -7,8 +8,15 @@ namespace engine {
 struct alignas(16) ObjectUniform { Mat4 model,normal; std::array<float,4> color,shadow; };
 static_assert(sizeof(ObjectUniform)==160);
 struct ObjectUploadRange { std::size_t offset=0,bytes=0; };
-// Resource/range information comes from instanceDraw(firstInstance).
-struct InstanceBatch { std::uint32_t firstInstance=0,instanceCount=1; };
+// A mesh override selects a cluster range while retaining the original object slot.
+struct InstanceBatch {
+    std::uint32_t firstInstance=0,instanceCount=1,firstIndex=0,indexCount=0;
+    std::shared_ptr<const Mesh> mesh{};
+    MeshBounds clusterBounds{};
+    bool hierarchyRoot=false;
+    std::uint32_t selectionIndex=~std::uint32_t(0);
+};
+using ClusterPageUpload=std::function<bool(const std::shared_ptr<const Mesh>&,bool pinned)>;
 struct DetailView { Mat4 viewProjection; float width=1,height=1; };
 struct ShadowBatch {
     InstanceBatch instances;
@@ -19,9 +27,11 @@ class RenderFrame {
 public:
     static constexpr std::size_t objectStride=256;
     // One collect/prepare cycle per frame; upload objectUploads() before next prepare.
-    void collect(const Scene& scene,bool instancing=true,std::uint32_t visibilityMask=0xffffffffu,const Frustum* frustum=nullptr,const DetailView* detail=nullptr);
+    void collect(const Scene& scene,bool instancing=true,std::uint32_t visibilityMask=0xffffffffu,const Frustum* frustum=nullptr,
+                 const DetailView* detail=nullptr,const ClusterPageUpload& upload={},bool gpuHierarchy=false);
     // Independent per-light selection; object slots are shared with camera draws.
-    void prepareShadow(std::size_t light,const DetailView& detail,bool lod=true,bool culling=true,bool casting=true);
+    void prepareShadow(std::size_t light,const DetailView& detail,bool lod=true,bool culling=true,bool casting=true,
+                       const ClusterPageUpload& upload={});
     std::span<const ShadowBatch> shadowBatches(std::size_t light) const { return shadows_.at(light).batches; }
     std::size_t cameraLodParts() const { return cameraLodParts_; }
     std::size_t shadowLodParts() const { return shadowLodParts_; }
@@ -30,6 +40,7 @@ public:
     void prepareObjects();
     const SceneFrame& sceneFrame() const { return scene_; }
     const MeshDraw& instanceDraw(std::size_t slot) const { return scene_.meshes[instanceSources_.at(slot)]; }
+    MeshDraw batchDraw(const InstanceBatch& batch,std::uint32_t offset=0) const;
     std::uint32_t instanceSource(std::size_t slot) const { return instanceSources_.at(slot); }
     std::span<const InstanceBatch> batches(RenderLayer layer) const { return batches_.at(static_cast<std::size_t>(layer)); }
     // Camera-visible batches; batches() retains off-screen geometry for shadow passes.

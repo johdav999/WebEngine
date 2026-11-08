@@ -8,6 +8,21 @@ inline std::shared_ptr<const engine::CinematicSequence> populateCinematicExample
     using namespace engine;
     auto& root=scene.spawn("Cinematic stage");root.setSavedId("cine.stage");
     auto& ground=root.addComponent<MeshComponent>("Stage floor",Mesh::plane(18));ground.color={.13f,.18f,.25f};
+    auto atlas=std::make_shared<Texture>();
+    atlas->name="Greeting card atlas";atlas->width=64;atlas->height=32;
+    atlas->wrapU=atlas->wrapV=TextureWrap::Clamp;
+    atlas->pixels.resize(atlas->width*atlas->height*4);
+    for(std::uint32_t y=0;y<atlas->height;++y)for(std::uint32_t x=0;x<atlas->width;++x){
+        const bool second=x>=32, stripe=((x%32+y)/6)%2==0;
+        const std::array<std::uint8_t,4> color=second
+            ?std::array<std::uint8_t,4>{24,std::uint8_t(stripe?215:150),205,255}
+            :std::array<std::uint8_t,4>{239,std::uint8_t(stripe?101:60),138,255};
+        const auto offset=(y*atlas->width+x)*4;
+        std::copy(color.begin(),color.end(),atlas->pixels.begin()+offset);
+    }
+    auto& card=root.addComponent<MeshComponent>("Greeting card (sprite track target)",Mesh::plane(1.6f));
+    card.setSavedId("cine.card");card.texture=std::move(atlas);card.color={1,1,1};card.enabled=false;
+    card.transform.position={-1.3f,1.9f,.2f};card.transform.rotation.x=pi/2;
     for(int i=0;i<5;++i){auto& pillar=root.addComponent<MeshComponent>("Stage pillar",Mesh::cube());pillar.transform.position={float(i-2)*2,1,-3};pillar.transform.scale={.4f,2,.4f};pillar.color={.2f,.38f,.55f};}
     auto& performer=root.addChild<Actor>("Performer");performer.setSavedId("cine.performer");performer.transform.position={-2,0,0};
     auto& character=performer.addComponent<SkeletalMeshComponent>("Waving character",retargetExampleMesh(false));character.setSavedId("cine.character");character.animation().pause();

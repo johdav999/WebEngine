@@ -45,12 +45,13 @@ after acquisition also retain this recovery path. WebGL 1 is not supported.
 | Terrain source paging / asynchronous generation | Isolated workers fetch/decode/generate bounded patches; owner publishes ordinary meshes and optional collision | Same worker/source/residency contracts and recovery; basic lighting with directional/spot shadows |
 | Paged terrain sculpt/paint and dirty writeback | Atomic source/halo edits, affected rebuilds, shared paint geometry and IndexedDB generation-checked batches | Same portable edit/residency/writeback contracts and recovery; lighting/shadow limits unchanged |
 | Ordered views, Background/World/Overlay and canvas GUI | Supported | Supported |
+| [Camera render surfaces](render-surfaces.md) | Single-sample SDR attachments sampled by window views | Complete RGBA8/depth framebuffers sampled by window views |
 | Fullscreen/mesh sphere skies, gradient/panorama/atmosphere, clouds and day/night light updates | Supported | Supported (IBL remains unavailable) |
 | RGBA textures, UV transforms, color/opacity, alpha mask, double-sided/mirrored meshes | Supported | Supported |
 | Skeletal/morph geometry | GPU skinning, morph streams | CPU deformation into backend vertex buffers |
 | Alpha/additive particles, transparent mesh ordering and flipbooks | Supported | Supported |
 | Shaped CPU emission, drag/wind/gusts, vector curves, velocity stretch and soft particles | Supported; instanced 80-byte billboards and resolved opaque depth | Same simulation and fading; CPU billboard vertices and individual draws |
-| Lighting | PBR maps and environment lighting | Ambient, directional/point/spot diffuse lighting, unlit and emissive factors |
+| Lighting | PBR maps and environment lighting | Basic ambient and punctual lighting by default, plus opt-in compact metallic/roughness lighting and a prefiltered environment atlas |
 | Reflective animated water | Gerstner waves, ripple normals, Fresnel, highlights, optional IBL | Same waves/ripples, analytic horizon/zenith reflection and highlights |
 | Underwater rendering | Depth-based RGB absorption and fog, transformed footprint, post-World capture/composite, 1x/4x | Same behavior using RGB8/DEPTH_COMPONENT24 snapshots and GLSL reconstruction |
 | Interaction ripples and wakes | Up to 16 world-space ring/V sources; normals and crest highlights, caller clock | Same bounded field and per-camera masks in fragment uniforms |
@@ -58,6 +59,7 @@ after acquisition also retain this recovery path. WebGL 1 is not supported.
 | Planar water reflections | One single-sample opaque/masked World capture per view, transformed plane clipping and mirrored winding | Same bounded capture, RGBA8 color and DEPTH_COMPONENT24 depth |
 | Depth-aware water refraction/absorption and shoreline foam | Per-view opaque snapshot, 1x/4x color/min-depth capture | RGB8/DEPTH_COMPONENT24 snapshot and same-size color/depth blit, 1x/4x |
 | Directional/spot maps and optional cascades | Supported | Supported |
+| Volumetric fog box | Shared compute grid for World geometry, sky and FX, with direct and analytic modes | Same depth sampling with an FP16 raster atlas. Devices without the target format use direct integration |
 | HDR bloom and color grading | Supported | EXT_color_buffer_float required; standard rendering otherwise |
 | Instancing | Supported | Unavailable |
 | Authored BC7/ETC2/ASTC uploads | When device supports them | Retained RGBA pixels |
@@ -66,9 +68,9 @@ after acquisition also retain this recovery path. WebGL 1 is not supported.
 `RenderCapabilities` identifies the backend and shadow/PBR/instancing support.
 The inspector and performance report include backend identity, effective limits,
 canvas extent and capability flags. Shadow controls are supported; unavailable compression controls remain disabled. Water has its own optional normal/radiance/highlight path; see [water contracts](water.md).
-Full PBR maps and environment lighting
-do not affect fallback pixels. Applications should choose whether its basic
-lighting meets their visual requirements.
+The compact PBR tier is reported independently of full PBR and can use the global
+environment and local lighting zones. The basic tier retains the original pixels.
+[Compact PBR contract](lighting-improvements.md#webgl2-compact-pbr)
 
 The fallback consumes the same `RenderFrame`, `FxFrame`, shared immutable assets,
 GUI draw list and camera coordinate conventions. Its vertex shader maps the

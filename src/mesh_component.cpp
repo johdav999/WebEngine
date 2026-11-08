@@ -94,6 +94,7 @@ MeshBounds MeshComponent::localBounds(const std::shared_ptr<const SkinPose>& pos
     for(std::size_t slot=0;slot<std::max<std::size_t>(1,mesh->materials.size());++slot) {
         const auto m=resolvedMaterial(slot,false);
         if(m.shader==MaterialShader::Water) margin=std::max(margin,m.water.amplitude);
+        margin=std::max(margin,m.advanced.windAmplitude);
     }
     bounds.minimum=bounds.minimum-Vec3{margin,margin,margin};
     bounds.maximum=bounds.maximum+Vec3{margin,margin,margin};return bounds;

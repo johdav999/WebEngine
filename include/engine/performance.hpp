@@ -19,7 +19,15 @@ struct FrameCounters {
     std::uint64_t particles=0,particleDrawCalls=0,transparentMeshDraws=0,particleUploadCalls=0,particleUploadBytes=0,particleBufferGrowths=0;
     std::uint64_t meshes=0,lights=0,passes=0,drawCalls=0,triangles=0;
     std::uint64_t shadowPasses=0,shadowDrawCalls=0,shadowInstances=0;
+    std::uint64_t fogGridPasses=0;
+    std::uint64_t cloudGridPasses=0,cloudShadowPasses=0;
+    std::uint64_t fogLightCacheBuilds=0,fogLightCacheBytes=0,fogLightCacheSlots=0;
+    std::uint64_t renderSurfacePasses=0,renderSurfaceBytes=0;
+    std::uint64_t screenReflectionSnapshots=0;
     std::uint64_t shadowTriangles=0,cameraLodParts=0,shadowLodParts=0,shadowCulledParts=0;
+    std::uint64_t gpuClusterBins=0,gpuClusterCandidates=0,gpuClusterCandidateTriangles=0;
+    std::uint64_t gpuClusterSampleTriangles=0,gpuClusterVisibleTriangles=0,gpuClusterSampleSerial=0;
+    std::uint64_t gpuHierarchyPlans=0,gpuHierarchyVisited=0,gpuHierarchySelected=0,gpuHierarchyRequests=0,gpuHierarchySampleSerial=0;
     std::uint32_t shadowMapResolution=1024,shadowFilterTaps=9;
     std::uint64_t submittedInstances=0,instancedDrawCalls=0,maxInstancesPerDraw=0;
     std::uint64_t skinnedInstances=0,cachedSkeletons=0,gpuSkinBytes=0,boneUploadCalls=0,boneUploadBytes=0;
@@ -52,5 +60,6 @@ private:
     double totalResourceMs_=0,lastResourceMs_=0;
     std::uint64_t totalFrameStorageGrowths_=0,totalObjectBufferGrowths_=0;
     std::uint64_t totalObjectUploadBytes_=0;
+    std::uint64_t totalFogLightCacheBuilds_=0;
 };
 } // namespace engine

@@ -39,8 +39,9 @@ float4 fxPS(FxOutput i):SV_Target {
         }
     }
     const float alpha=texel.a*i.color.a*fade;float3 color=texel.rgb*i.color.rgb;
+    if(fxTexture.w>.5)color=cloudApply(color,i.world,i.parameters.x>.5);
     if(outputOptions.x<.5)color=color/(1+color);
-    color=fogApply(frameFog,color,i.world,i.parameters.x>.5);
+    color=fogVolumeApply(color,i.world,i.parameters.x>.5);
     if(outputOptions.x<.5)color=srgb(color);
     return float4(color*alpha,alpha);
 }

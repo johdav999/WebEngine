@@ -1,4 +1,11 @@
-struct Fog { colorDensity:vec4f, height:vec4f, eye:vec4f, forward:vec4f };
+struct FogVolumeData { minimumFade:vec4f, maximumDistance:vec4f, colorDensity:vec4f };
+struct FogLightCacheData { minimumIndex:vec4f, maximum:vec4f };
+struct Fog {
+    colorDensity:vec4f, height:vec4f, eye:vec4f, forward:vec4f,
+    volumeMinSteps:vec4f, volumeMaxDistance:vec4f, volumeColorDensity:vec4f, volumeOptions:vec4f,
+    additionalVolumes:array<FogVolumeData,3>, volumeLighting:vec4f,
+    lightCache:array<FogLightCacheData,4>
+};
 // Stable analytic average of exp(-falloff * (height-baseHeight)).
 fn fogDepth(f:Fog,origin:vec3f,end:vec3f,start:f32) -> f32 {
     let distance=length(end-origin);

@@ -1,6 +1,10 @@
 #include "engine/performance_timeline.hpp"
 #include "engine/scene.hpp"
+#include "engine/dynamic_gi.hpp"
+#include "engine/dynamic_reflections.hpp"
 #include "engine/decal.hpp"
+#include "engine/effect_component.hpp"
+#include "engine/cinematic_runtime.hpp"
 #include "engine/mesh_component.hpp"
 #include "engine/skeletal_mesh_component.hpp"
 #include "engine/physics.hpp"
@@ -17,7 +21,29 @@ Scene::Scene(std::string name) : Node(std::move(name)),identity_(nextSceneIdenti
     scene_=this;
 }
 Scene::~Scene() {
+    if(cinematicPlayback_) cinematicPlayback_->sceneLost(*this);
     shuttingDown_=true;TraversalGuard guard(*this);detachSubtree(*this);
+}
+void Scene::setLightingZones(std::vector<LightingZone> zones) {
+    if (zones.size() > maxLightingZones)
+        throw std::invalid_argument("Too many lighting zones");
+    for (const auto& zone : zones)
+        zone.validate();
+    lightingZones_ = std::move(zones);
+}
+
+void Scene::setDiffuseGi(std::shared_ptr<const DiffuseGiSnapshot> snapshot) {
+    requireIdle();
+    if(snapshot==diffuseGi_) return;
+    if(snapshot) snapshot->validate();
+    diffuseGi_=std::move(snapshot);
+}
+
+void Scene::setReflectionProbe(std::shared_ptr<const ReflectionProbeSnapshot> snapshot) {
+    requireIdle();
+    if(snapshot==reflectionProbe_) return;
+    if(snapshot) snapshot->validate();
+    reflectionProbe_=std::move(snapshot);
 }
 void Scene::reserveSubtreeHandles(const Node& node) {
     std::size_t actorCount=0,componentCount=0;
@@ -118,23 +144,23 @@ void Scene::queueRemoval(Node& node) {
     };
     mark(mark,node);
 }
+void Scene::sweepPendingChildren(Node& node) {
+    for(std::size_t i=0;i<node.children_.size();) {
+        auto& child=*node.children_[i];
+        if(child.pendingRemoval_) {
+            detachSubtree(child);
+            // Cleanup callbacks can append children, but cannot erase/reparent them.
+            auto removed=std::move(node.children_[i]);node.children_.erase(node.children_.begin()+i);
+            removed->parent_=nullptr;
+            removed->notifyOwnerChanges();
+        } else { sweepPendingChildren(child);++i; }
+    }
+}
 void Scene::flushPendingDestroy() {
     requireIdle();
     TraversalGuard guard(*this);
-    auto sweep=[&](auto&& self,Node& node)->void {
-        for(std::size_t i=0;i<node.children_.size();) {
-            auto& child=*node.children_[i];
-            if(child.pendingRemoval_) {
-                detachSubtree(child);
-                // Cleanup callbacks can append children, but cannot erase/reparent them.
-                auto removed=std::move(node.children_[i]);node.children_.erase(node.children_.begin()+i);
-                removed->parent_=nullptr;
-                removed->notifyOwnerChanges();
-            } else { self(self,child);++i; }
-        }
-    };
     do {
-        while(pendingDestroy_) { pendingDestroy_=false;sweep(sweep,*this); }
+        while(pendingDestroy_) { pendingDestroy_=false;sweepPendingChildren(*this); }
         if(selection_ && !shuttingDown_) selection_->refresh();
     } while(pendingDestroy_);
 }
@@ -162,7 +188,7 @@ void Scene::prepareNodes(Node& node) {
     if(node.isPendingRemoval()) return;
     for(std::size_t i=0;i<count;++i) prepareNodes(*node.children_[i]);
 }
-void Scene::updateNodes(Node& node,double delta,bool fixed) {
+void Scene::updateNodes(Node& node,double delta,bool fixed,bool presentationEffectRoot) {
     if(!node.isActiveInHierarchy()) return;
     const auto count=node.children_.size();
     if(auto* actor=dynamic_cast<Actor*>(&node)) {
@@ -176,6 +202,7 @@ void Scene::updateNodes(Node& node,double delta,bool fixed) {
         if(auto* mesh=dynamic_cast<SkeletalMeshComponent*>(&node)) mesh->synchronizeSkeleton();
     }
     if(auto* component=dynamic_cast<Component*>(&node)) {
+        if(component->presentationClockOwned_&&!presentationEffectRoot) return;
         if(!component->initialized_) return; // Components created by hooks/ticks start next update.
         if(fixed) { if(component->fixedTickEnabled_) component->fixedTick(delta); }
         else if(component->tickEnabled_) component->tick(delta);
@@ -195,6 +222,19 @@ void Scene::update(double delta) {
     requireIdle();
     { TraversalGuard guard(*this);prepareNodes(*this);synchronizePhysics();updateNodes(*this,delta,false); }
     flushPendingDestroy();
+}
+void Scene::advancePresentationEffect(ComponentId id,double delta) {
+    requireIdle();
+    auto* effect=dynamic_cast<EffectComponent*>(findComponent(id));
+    if(!effect||!effect->presentationClockOwned_) return;
+    TraversalGuard guard(*this);
+    prepareNodes(*effect);
+    updateNodes(*effect,delta,false,true);
+    if(pendingDestroy_) sweepPendingChildren(*effect);
+}
+void Scene::requireCinematicSubtreeMovable(const Node& root) const {
+    if(cinematicPlayback_&&cinematicPlayback_->ownsSubtree(root))
+        throw std::logic_error("Cancel cinematic playback before moving a bound subtree between scene owners");
 }
 void Scene::synchronize() {
     requireIdle();
@@ -327,7 +367,8 @@ void Scene::collect(SceneFrame& frame,std::uint32_t visibilityMask,const Frustum
             for(float value:{lightDirection.x,lightDirection.y,lightDirection.z,lightPosition.x,lightPosition.y,lightPosition.z})if(!std::isfinite(value))throw std::invalid_argument("Invalid world light pose");
             if(light->type!=LightType::Point&&dot(lightDirection,lightDirection)<.5f)throw std::invalid_argument("Singular world light direction");
             const auto capacity=frame.lights.capacity();
-            frame.lights.push_back({light->type,lightPosition,lightDirection,light->color,light->intensity,light->range,light->shadow,transformPoint(world,light->shadow.center),light->innerAngle,light->outerAngle});
+            frame.lights.push_back({light->type,lightPosition,lightDirection,light->color,light->intensity,light->range,
+                light->shadow,transformPoint(world,light->shadow.center),light->innerAngle,light->outerAngle,light->priority,light->id()});
             frame.storageGrowths+=capacity!=frame.lights.capacity();
         }
     },Mat4::identity(),&frame.transformRebuilds);

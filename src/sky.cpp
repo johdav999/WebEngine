@@ -3,6 +3,60 @@
 #include <limits>
 
 namespace engine {
+namespace {
+float cloudLattice(std::uint32_t x,std::uint32_t y,std::uint32_t z,std::uint32_t seed) {
+    std::uint32_t hash=x*0x8da6b343u^y*0xd8163841u^z*0xcb1ab31fu^seed;
+    hash^=hash>>16;hash*=0x7feb352du;hash^=hash>>15;hash*=0x846ca68bu;hash^=hash>>16;
+    return float(hash&0xffffffu)/float(0xffffffu);
+}
+
+float cloudNoise(Vec3 point,std::uint32_t frequency,std::uint32_t seed) {
+    const Vec3 p=point*float(frequency);
+    const auto x=static_cast<std::uint32_t>(p.x),y=static_cast<std::uint32_t>(p.y),z=static_cast<std::uint32_t>(p.z);
+    const auto smooth=[](float t){return t*t*(3-2*t);};
+    const float tx=smooth(p.x-x),ty=smooth(p.y-y),tz=smooth(p.z-z);
+    const auto at=[&](unsigned dx,unsigned dy,unsigned dz) {
+        return cloudLattice((x+dx)%frequency,(y+dy)%frequency,(z+dz)%frequency,seed);
+    };
+    const auto mix=[](float a,float b,float t){return a+(b-a)*t;};
+    return mix(mix(mix(at(0,0,0),at(1,0,0),tx),mix(at(0,1,0),at(1,1,0),tx),ty),
+               mix(mix(at(0,0,1),at(1,0,1),tx),mix(at(0,1,1),at(1,1,1),tx),ty),tz);
+}
+} // namespace
+
+std::shared_ptr<const Texture> skyCloudNoiseTexture() {
+    static const std::shared_ptr<const Texture> result=[] {
+        auto texture=std::make_shared<Texture>();
+        texture->name="Volumetric cloud linear density/detail noise";
+        texture->width=texture->height=528;
+        texture->wrapU=texture->wrapV=TextureWrap::Clamp;
+        texture->pixels.resize(std::size_t(texture->width)*texture->height*4);
+        const auto byte=[](float value){return static_cast<std::uint8_t>(std::lround(std::clamp(value,0.f,1.f)*255));};
+        for(unsigned z=0;z<64;++z) {
+            const unsigned tileX=(z%8)*66,tileY=(z/8)*66;
+            for(unsigned y=0;y<64;++y)for(unsigned x=0;x<64;++x) {
+                const Vec3 point{(x+.5f)/64,(y+.5f)/64,(z+.5f)/64};
+                const float base=.625f*cloudNoise(point,4,0x68bc21ebu)+.25f*cloudNoise(point,8,0x68bc21ebu)+
+                                 .125f*cloudNoise(point,16,0x68bc21ebu);
+                const float detail=.5f*cloudNoise(point,16,0x02e5be93u)+.5f*cloudNoise(point,32,0x02e5be93u);
+                const auto offset=((tileY+y+1)*texture->width+tileX+x+1)*4;
+                texture->pixels[offset]=byte(base);texture->pixels[offset+1]=byte(detail);
+                texture->pixels[offset+2]=0;texture->pixels[offset+3]=255;
+            }
+            // Wrapped XY borders keep bilinear filtering inside each depth tile.
+            for(unsigned y=0;y<66;++y)for(unsigned x=0;x<66;++x) {
+                if(x>0&&x<65&&y>0&&y<65)continue;
+                const unsigned sourceX=1+(x+63)%64,sourceY=1+(y+63)%64;
+                const auto source=((tileY+sourceY)*texture->width+tileX+sourceX)*4;
+                const auto target=((tileY+y)*texture->width+tileX+x)*4;
+                std::copy_n(texture->pixels.begin()+source,4,texture->pixels.begin()+target);
+            }
+        }
+        return texture;
+    }();
+    return result;
+}
+
 void SkyBackground::validate() const {
     if(mode!=SkyMode::Gradient && mode!=SkyMode::Panorama && mode!=SkyMode::Atmosphere) throw std::invalid_argument("Invalid sky mode");
     if(geometry!=SkyGeometry::Fullscreen && geometry!=SkyGeometry::Sphere) throw std::invalid_argument("Invalid sky geometry");
@@ -16,6 +70,10 @@ void SkyBackground::validate() const {
         throw std::invalid_argument("Sky panorama requires valid RGBA8 pixels up to 4096 pixels per dimension");
     auto range=[](double v,double lo,double hi) { if(!std::isfinite(v)||v<lo||v>hi) throw std::invalid_argument("Invalid sky weather or cycle settings"); };
     range(clouds.coverage,0,1);range(clouds.density,0,5);range(clouds.scale,0.05,10);
+    range(clouds.baseHeight,-10000,100000);range(clouds.thickness,1,20000);
+    range(clouds.extinction,0,1);range(clouds.maxDistance,1,200000);
+    range(clouds.detail,0,1);range(clouds.anisotropy,0,.95);
+    if(!std::isfinite(clouds.baseHeight+clouds.thickness))throw std::invalid_argument("Invalid cloud layer top");
     for(float v:{clouds.wind.x,clouds.wind.y}) range(v,-10,10);
     for(float v:{clouds.offset.x,clouds.offset.y}) range(v,0,4096);
     for(float v:{atmosphere.sunDirection.x,atmosphere.sunDirection.y,atmosphere.sunDirection.z}) range(v,-1e4,1e4);
@@ -25,7 +83,8 @@ void SkyBackground::validate() const {
     range(dayNight.hour,0,24);range(dayNight.daySeconds,1,1e9);range(dayNight.azimuth,-1e4,1e4);
     range(dayNight.sunIntensity,0,100);range(dayNight.moonIntensity,0,10);
 }
-SkyUniform prepareSky(const SkyBackground& sky,const CameraComponent& camera,float aspect) {
+SkyUniform prepareSky(const SkyBackground& sky,const CameraComponent& camera,float aspect,std::uint32_t cloudSteps) {
+    if(cloudSteps>64)throw std::invalid_argument("Invalid volumetric cloud sample budget");
     sky.validate();camera.projection(aspect); // Validate the lens, including direct writes.
     // Read the linear transform directly: subtracting translated world points loses
     // axis precision at large coordinates. Preserve inherited camera scale/shear
@@ -45,6 +104,18 @@ SkyUniform prepareSky(const SkyBackground& sky,const CameraComponent& camera,flo
     for(float v:clip.m) if(!std::isfinite(v)) throw std::invalid_argument("Invalid sky camera matrix");
     const auto direction=sky.dayNight.enabled ? evaluateDayNight(sky.dayNight).sunDirection : normalized(sky.atmosphere.sunDirection);
     const float fogExtent=perspective ? 0 : camera.orthographicHeight()*.5f;
+    const auto& c=sky.clouds;
+    const float frequency=c.scale/8000.f;
+    const auto phase=[&](float coordinate,float offset) {
+        const double value=double(coordinate)*frequency+offset;
+        const double wrapped=value-std::floor(value);
+        const float result=static_cast<float>(wrapped);
+        return result<1?result:0.f;
+    };
+    const auto effectiveSteps=c.enabled&&c.volumetric&&c.coverage>0&&c.density>0?cloudSteps:0;
+    const std::array<float,4> cloudOrigin=effectiveSteps?
+        std::array<float,4>{phase(m[12],c.offset.x),m[13],phase(m[14],c.offset.y),frequency}:
+        std::array<float,4>{};
     return {{r.x,r.y,r.z,tangent*aspect},{u.x,u.y,u.z,tangent},{f.x,f.y,f.z,perspective ? 1.0f : 0.0f},
         {sky.horizon.x,sky.horizon.y,sky.horizon.z,sky.brightness},
         {sky.zenith.x,sky.zenith.y,sky.zenith.z,sky.rotation},
@@ -52,7 +123,9 @@ SkyUniform prepareSky(const SkyBackground& sky,const CameraComponent& camera,flo
         {direction.x,direction.y,direction.z,sky.atmosphere.solarIntensity},
         {sky.atmosphere.rayleigh,sky.atmosphere.mie,sky.atmosphere.anisotropy,sky.atmosphere.altitude},
         {sky.clouds.enabled ? sky.clouds.coverage : 0,sky.clouds.density,sky.clouds.scale,0},
-        {sky.clouds.offset.x,sky.clouds.offset.y,0,0},{},{r.x*fogExtent*aspect,r.y*fogExtent*aspect,r.z*fogExtent*aspect,0},{u.x*fogExtent,u.y*fogExtent,u.z*fogExtent,0}};
+        {sky.clouds.offset.x,sky.clouds.offset.y,0,0},{},{r.x*fogExtent*aspect,r.y*fogExtent*aspect,r.z*fogExtent*aspect,0},{u.x*fogExtent,u.y*fogExtent,u.z*fogExtent,0},
+        {c.baseHeight,c.thickness,c.extinction,c.maxDistance},{c.detail,c.anisotropy,float(effectiveSteps),4},
+        cloudOrigin};
 }
 std::shared_ptr<const Mesh> skySphereMesh() {
     static const std::shared_ptr<const Mesh> result=[] {

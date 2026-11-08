@@ -4,6 +4,9 @@ uniform bool hdrOutput;
 vec3 hdrEncode(vec3 c){return hdrOutput?c:pow(c,vec3(1.0/2.2));}
 
 // FOG_FUNCTIONS
+// FOG_VOLUME
+// FOG_GRID_SAMPLING
+// CLOUD_GRID_SAMPLING
 in vec3 fogOffset;
 in vec3 direction;
 uniform vec4 skyHorizon,skyZenith,skyNadir,skySun,skyAir,skyClouds,skyCloudWind;
@@ -63,6 +66,7 @@ vec3 cloudLayer(vec3 d,vec3 background) {
     vec3 color=vec3(0.015,0.025,0.05)+daylight*(vec3(1.8,1.9,2.1)+warm)*shade;
     return mix(background,color,alpha);
 }
+// CLOUD_VOLUME
 vec3 decodeSrgb(vec3 p) {return mix(p/12.92,pow((p+0.055)/1.055,vec3(2.4)),step(vec3(0.04045),p));}
 vec3 panoramaPixel(ivec2 p,ivec2 size) {
     p.x=(p.x%size.x+size.x)%size.x;p.y=clamp(p.y,0,size.y-1);return decodeSrgb(texelFetch(panorama,p,0).rgb);
@@ -80,6 +84,11 @@ void main() {
         vec2 uv=vec2(atan(rotated.z,rotated.x)/6.28318530718+0.5,acos(clamp(rotated.y,-1.0,1.0))/3.14159265359);
         radiance=samplePanorama(uv);
     }
+#ifdef VOLUMETRIC_CLOUDS
+    vec4 cloudMedium=cloud.layer.w>.5?cloudGridSlice(gl_FragCoord.xy*cloudViewport.zw+cloudViewport.xy,32.0):vec4(0,0,0,1);
+    vec3 linear=cloud.layer.w>.5?cloudMedium.rgb+cloudMedium.a*radiance*skyHorizon.w:volumetricClouds(d,fogOffset,radiance)*skyHorizon.w;
+#else
     vec3 linear=cloudLayer(d,radiance)*skyHorizon.w;
-    outputColor=vec4(hdrEncode(fogApply(fog,hdrOutput?linear:linear/(vec3(1)+linear),fog.eye.xyz+fogOffset+d*(fog.height.w/max(dot(d,fog.forward.xyz),0.001)),false)),1);
+#endif
+    outputColor=vec4(hdrEncode(fogVolumeApply(hdrOutput?linear:linear/(vec3(1)+linear),fog.eye.xyz+fogOffset+d*(fog.height.w/max(dot(d,fog.forward.xyz),0.001)),false)),1);
 }

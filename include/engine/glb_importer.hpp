@@ -7,7 +7,10 @@ using GlbImportOptions = FbxImportOptions;
 using GlbImportMeasurements = FbxImportMeasurements;
 class GlbImporter {
 public:
-    // glTF 2.0 binary container. Merges selected-scene instances in Y-up meters.
+    // glTF 2.0 binary container or strict ZIP_STORED WebEngine material bundle.
+    // Reads version-1 extras.WEBENGINE_materials; performs no bundle extraction.
+    // Independent map UVs are rebaked into bounded, approximate triangle atlases.
+    // Merges selected-scene instances in Y-up meters.
     // No implicit IO. Unsupported required extensions are rejected explicitly.
     static std::shared_ptr<const Mesh> loadMemory(std::span<const std::byte> data,
         const GlbImportOptions& options={});

@@ -1,6 +1,6 @@
 // Private D3D12Graphics root signature and PSO construction.
 void pipelines() {
-    std::array<D3D12_ROOT_PARAMETER,17> params{};
+    std::array<D3D12_ROOT_PARAMETER,21> params{};
     params[0].ParameterType=params[1].ParameterType=D3D12_ROOT_PARAMETER_TYPE_CBV;params[0].Descriptor.ShaderRegister=0;params[1].Descriptor.ShaderRegister=1;
     std::array<D3D12_DESCRIPTOR_RANGE,3> ranges{{
         {D3D12_DESCRIPTOR_RANGE_TYPE_SRV,5,0,0,D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND},
@@ -22,6 +22,13 @@ void pipelines() {
     params[14].ParameterType=D3D12_ROOT_PARAMETER_TYPE_CBV;params[14].Descriptor.ShaderRegister=6;params[14].ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
     params[15].ParameterType=D3D12_ROOT_PARAMETER_TYPE_CBV;params[15].Descriptor.ShaderRegister=7;
     params[16].ParameterType=D3D12_ROOT_PARAMETER_TYPE_SRV;params[16].Descriptor.ShaderRegister=23;params[16].ShaderVisibility=D3D12_SHADER_VISIBILITY_VERTEX;
+    const D3D12_DESCRIPTOR_RANGE fogRange{D3D12_DESCRIPTOR_RANGE_TYPE_SRV,1,24,0,D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND};
+    params[17].ParameterType=D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;params[17].DescriptorTable={1,&fogRange};params[17].ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
+    params[18].ParameterType=D3D12_ROOT_PARAMETER_TYPE_CBV;params[18].Descriptor.ShaderRegister=11;params[18].ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
+    const D3D12_DESCRIPTOR_RANGE fogLightCacheRange{D3D12_DESCRIPTOR_RANGE_TYPE_SRV,1,26,0,D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND};
+    params[19].ParameterType=D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;params[19].DescriptorTable={1,&fogLightCacheRange};params[19].ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
+    const D3D12_DESCRIPTOR_RANGE cloudNoiseRange{D3D12_DESCRIPTOR_RANGE_TYPE_SRV,1,27,0,D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND};
+    params[20].ParameterType=D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;params[20].DescriptorTable={1,&cloudNoiseRange};params[20].ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
     std::array<D3D12_STATIC_SAMPLER_DESC,6> samplers{};
     for(UINT i=0;i<6;++i){auto& s=samplers[i];s.Filter=D3D12_FILTER_MIN_MAG_MIP_LINEAR;
         s.AddressU=(i>=4||(i&1))?D3D12_TEXTURE_ADDRESS_MODE_CLAMP:D3D12_TEXTURE_ADDRESS_MODE_WRAP;
@@ -46,7 +53,8 @@ ID3D12PipelineState* materialPipeline(const MeshDraw& draw,bool shadow,bool inst
     // uses SV_IsFrontFace to orient normals, including mirrored water surfaces.
     const UINT winding=(material.doubleSided?0u:1u)|((draw.mirrored!=reflectionPass_)?2u:0u);
     const bool skin=bool(draw.skinPose);
-    const std::array<UINT,7> key{blend,winding,shadow||reflectionPass_?1:sampleCount_,shadow?1u:hdr_?2u:0u,skin?1u:0u,reflectionPass_?1u:0u,instanced?1u:0u};
+    const bool hdr=hdr_&&!surfacePass_;
+    const std::array<UINT,7> key{blend,winding,shadow||reflectionPass_||surfacePass_?1:sampleCount_,shadow?1u:hdr?2u:0u,skin?1u:0u,reflectionPass_?1u:0u,instanced?1u:0u};
     if(auto it=meshPipelines_.find(key);it!=meshPipelines_.end())return it->second.Get();
     const D3D12_INPUT_ELEMENT_DESC input[]={
         {"POSITION",0,DXGI_FORMAT_R32G32B32_FLOAT,0,offsetof(Vertex,position),D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,0},
@@ -71,7 +79,8 @@ ID3D12PipelineState* materialPipeline(const MeshDraw& draw,bool shadow,bool inst
     if(blend){b.BlendEnable=TRUE;b.SrcBlend=D3D12_BLEND_SRC_ALPHA;b.DestBlend=blend==2?D3D12_BLEND_ONE:D3D12_BLEND_INV_SRC_ALPHA;b.DestBlendAlpha=D3D12_BLEND_INV_SRC_ALPHA;}
     p.DepthStencilState.DepthEnable=TRUE;p.DepthStencilState.DepthWriteMask=blend?D3D12_DEPTH_WRITE_MASK_ZERO:D3D12_DEPTH_WRITE_MASK_ALL;
     p.DepthStencilState.DepthFunc=blend?D3D12_COMPARISON_FUNC_LESS_EQUAL:D3D12_COMPARISON_FUNC_LESS;
-    p.PrimitiveTopologyType=D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;p.NumRenderTargets=shadow?0:1;p.RTVFormats[0]=shadow?DXGI_FORMAT_UNKNOWN:colorFormat();
+    p.PrimitiveTopologyType=D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;p.NumRenderTargets=shadow?0:1;
+    p.RTVFormats[0]=shadow?DXGI_FORMAT_UNKNOWN:surfacePass_?DXGI_FORMAT_R8G8B8A8_UNORM:colorFormat();
     p.DSVFormat=DXGI_FORMAT_D32_FLOAT;p.SampleDesc.Count=key[2];
     ComPtr<ID3D12PipelineState> result;checked(device_->CreateGraphicsPipelineState(&p,IID_PPV_ARGS(&result)),"Create material pipeline");
     return meshPipelines_.emplace(key,std::move(result)).first->second.Get();

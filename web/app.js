@@ -2,6 +2,73 @@
 const canvas = document.querySelector('#viewport');
 // Keep the measured-layout showcase reachable at narrow widths. The host's
 // floating zoom buttons otherwise cover its scrollable canvas controls.
+function initCutsceneGame() {
+  const controls=document.querySelector('#cutscene-game-controls');
+  const caption=document.querySelector('#cutscene-game-caption');
+  const status=document.querySelector('#cutscene-game-status');
+  const canvas=document.querySelector('#viewport');
+  const input=window.EngineInput?.instance;
+  const restoreGameplay=input?.pushContext('Gameplay');
+  let restoreCutscene;
+  const command=action=>Module._engine_cutscene_game(action);
+  const keydown=event=>{
+    if(event.key==='Escape'&&restoreCutscene&&!event.repeat) {
+      event.preventDefault();
+      command(4);
+    }
+  };
+  window.engineCutsceneReport=(phase,opened,ortho,overlay,audioBlocked,time,x,line,error)=>{
+    const playing=phase===1;
+    if(playing&&!restoreCutscene) restoreCutscene=input?.pushContext('Cutscene');
+    if(!playing&&restoreCutscene) {
+      restoreCutscene();
+      restoreCutscene=undefined;
+    }
+    const message=error|| (audioBlocked?'Activate audio to resume the cutscene.'
+      : playing?'Cutscene playing. Escape skips.'
+      : opened?'Gate open. Move through with A/D or the buttons.'
+      : 'Gate closed. Move with A/D or the buttons.');
+    if(status.textContent!==message) status.textContent=message;
+    if(caption.textContent!==line) caption.textContent=line;
+    caption.hidden=!line;
+    controls.dataset.phase=String(phase);
+    controls.dataset.gate=opened?'open':'closed';
+    controls.dataset.projection=ortho?'orthographic':'perspective';
+    controls.dataset.overlay=String(overlay);
+    controls.dataset.time=String(time);
+    controls.dataset.playerX=String(x);
+    for(const button of controls.querySelectorAll('[data-cutscene-command]')) {
+      const action=Number(button.dataset.cutsceneCommand);
+      button.disabled=[4,8,9].includes(action)?!playing:playing;
+      if(action===9) button.hidden=!audioBlocked;
+    }
+  };
+  window.engineCutsceneDisposed=()=>{
+    restoreCutscene?.();
+    restoreGameplay?.();
+    document.removeEventListener('keydown',keydown);
+    document.body.classList.remove('cutscene-game');
+    controls.hidden=true;
+    caption.hidden=true;
+    delete window.engineCutsceneReport;
+    delete window.engineCutsceneDisposed;
+  };
+  if(!command(0)) {
+    window.engineCutsceneDisposed();
+    document.body.dataset.defaultModel='error';
+    return;
+  }
+  document.body.classList.add('cutscene-game');
+  controls.hidden=false;
+  document.querySelector('.scene-title h1').textContent='The Gate';
+  document.querySelector('#scene-description').textContent='Three cutscenes. One gate to open.';
+  canvas.setAttribute('aria-label','The Gate. Move with A and D.');
+  for(const button of controls.querySelectorAll('[data-cutscene-command]'))
+    button.onclick=()=>{command(Number(button.dataset.cutsceneCommand));canvas.focus();};
+  document.addEventListener('keydown',keydown);
+  document.body.dataset.defaultModel='ready';
+}
+
 if(new URLSearchParams(location.search).get('guiLayout')==='1') {
   document.querySelector('.camera-touch-controls').style.display='none';
 }
@@ -26,7 +93,9 @@ window.engineLifecycle = snapshot => {
   if (snapshot.state === 3) {
     runtimeReady = false;
     document.body.dataset.engine = 'stopped';
-    for (const control of document.querySelectorAll('button,input,select')) control.disabled = true;
+    for (const control of document.querySelectorAll('button,input,select')) {
+      if (!control.hasAttribute('data-preview-control')) control.disabled = true;
+    }
     statusText.textContent = 'Engine shut down';
   }
 };
@@ -42,7 +111,9 @@ window.engineStatus = (text, error = false) => {
   statusText.textContent = text;
   statusDot.className = `dot ${error ? 'error' : 'ready'}`;
   document.body.dataset.engine = error ? 'error' : gpuReady ? 'ready' : 'recovering';
-  for (const control of document.querySelectorAll('button:not([data-audio-control]):not(#retry-gpu), input:not([data-audio-control]), select')) control.disabled = error || !runtimeReady || !gpuReady;
+  for (const control of document.querySelectorAll('button:not([data-audio-control]):not(#retry-gpu), input:not([data-audio-control]), select')) {
+    if (!control.hasAttribute('data-preview-control')) control.disabled = error || !runtimeReady || !gpuReady;
+  }
   const capabilities = window.EngineQuality?.snapshot();
   if (capabilities?.shadows === false) {
     for (const id of ['shadows','shadow-lod','shadow-casting','shadow-receiving','shadow-culling','shadow-resolution','shadow-filter','quality-maps','quality-compressed']) document.querySelector(`#${id}`).disabled = true;
@@ -73,7 +144,7 @@ window.engineStats = (meshes, lights, layers) => {
 function resize() {
   if (runtimeReady && Module._engine_resize_quality) { Module._engine_resize_quality(); return; }
   // Bootstrap dimensions until the backend supplies its capability-constrained budget.
-  const ratio = Math.min(devicePixelRatio || 1, 2);
+  const ratio = Math.min(window.EngineMobilePreview.pixelRatio(), 2);
   canvas.width = Math.max(1, Math.min(4096, Math.round(canvas.clientWidth * ratio)));
   canvas.height = Math.max(1, Math.min(4096, Math.round(canvas.clientHeight * ratio)));
 }
@@ -127,7 +198,7 @@ window.engineImportReset = () => {
   delete document.body.dataset.importedTextures;
   delete document.body.dataset.textureOverride;
   importMessage.classList.remove('error');
-  importMessage.textContent = 'Select an FBX or GLB with companion images · 32 MB each';
+  importMessage.textContent = 'Select an FBX, GLB, or WebEngine bundle · 32 MB each';
   document.querySelector('#texture-info').textContent = 'Embedded base-color textures load automatically.';
   document.querySelector('#assembly-node').hidden = false;
   document.querySelector('#imported-node').hidden = true;
@@ -151,7 +222,7 @@ async function loadFbxBytes(name, readBytes, companions = []) {
   importMessage.classList.remove('error');
   importMessage.textContent = `Loading ${name}…`;
   let pointer = 0;
-  const measurement = window.EnginePerformance.beginAsset(name, name.toLowerCase().endsWith('.glb') ? 'glb' : 'fbx');
+  const measurement = window.EnginePerformance.beginAsset(name, /\.(glb|webengine\.zip)$/i.test(name) ? 'glb' : 'fbx');
   let loaded = false;
   const readStart = performance.now();
   let readFinished = false;
@@ -178,7 +249,7 @@ async function loadFbxBytes(name, readBytes, companions = []) {
     // Read the heap after malloc: allocation may have grown WebAssembly memory.
     Module.HEAPU8.set(bytes, pointer);
     measurement.copyMs = performance.now() - copyStart;
-    loaded = (name.toLowerCase().endsWith('.glb') ? Module._engine_import_glb : Module._engine_import_fbx)(pointer, bytes.byteLength) === 1;
+    loaded = (/\.(glb|webengine\.zip)$/i.test(name) ? Module._engine_import_glb : Module._engine_import_fbx)(pointer, bytes.byteLength) === 1;
     return loaded;
   } catch (error) {
     window.engineImportStatus(error.message || String(error), false);
@@ -242,6 +313,11 @@ for(const [id,action] of [['ai-show',0],['ai-hide',1],['ai-remove',2],['ai-block
 setInterval(()=>{if(runtimeReady&&!fatal&&Module._engine_ai_snapshot&&document.body.dataset.engine==='ready') Module._engine_ai_snapshot();},250);
 async function loadDefaultModel() {
   defaultModelStarted = true;
+  if (new URLSearchParams(location.search).get('materialDeliveryTest')==='1') {
+    const ok=Module._engine_material_delivery_fixture(1,0);
+    document.body.dataset.defaultModel=ok?'ready':'error';
+    document.querySelector('#scene-description').textContent='Material delivery acceptance';return;
+  }
   if (['ai','navmesh'].includes(new URLSearchParams(location.search).get('scene'))) {
     const ok=Module._engine_ai_demo(1);document.body.dataset.defaultModel=ok ? 'ready' : 'error';
     if(ok&&new URLSearchParams(location.search).get('scene')==='navmesh') if(!Module._engine_ai_navmesh(1)) document.body.dataset.defaultModel='error';
@@ -261,11 +337,54 @@ async function loadDefaultModel() {
   if (new URLSearchParams(location.search).get('scene') === 'materials') { Module._engine_material_scene(1); document.body.dataset.defaultModel = 'ready'; document.querySelector('#scene-description').textContent='Material showcase · drag to inspect surfaces'; return; }
   if (new URLSearchParams(location.search).get('scene') === 'physics') { Module._engine_physics_action(0,0); document.body.dataset.defaultModel = 'ready'; return; }
   const sceneName=new URLSearchParams(location.search).get('scene');
+  if(sceneName==='cutscene-game') {
+    initCutsceneGame();
+    return;
+  }
+  if(sceneName==='render-surface'||new URLSearchParams(location.search).get('renderSurfaceTest')==='1'){
+    const ok=Module._engine_render_surface_fixture(0);
+    document.body.dataset.defaultModel=ok?'ready':'error';
+    document.querySelector('#scene-description').textContent='Dashboard monitor · live rear camera texture';
+    return;
+  }
+  if(sceneName==='stone-arch'){
+    const controls=document.getElementById('stone-arch');
+    controls.hidden=false;
+    const mode=document.getElementById('stone-arch-mode'),shot=document.getElementById('stone-arch-shot');
+    const gpu=document.getElementById('stone-arch-gpu'),occluder=document.getElementById('stone-arch-occluder');
+    const hierarchy=document.getElementById('stone-arch-hierarchy');
+    if(new URLSearchParams(location.search).get('gpuHierarchy')==='1') {
+      hierarchy.checked=true;gpu.checked=true;
+    }
+    const status=document.getElementById('stone-arch-stream-status');
+    window.engineStoneArchStatus=stats=>{
+      window.stoneArchStreamStats=stats;
+      if(mode.value!=='3')return;
+      const label=stats.error||`Coarse root resident · ${stats.pages}/${stats.total} fine pages · ${Math.round(stats.bytes/1024)} KiB · ${stats.pending} pending · ${stats.failed} failed`;
+      if(status.textContent!==label)status.textContent=label;
+    };
+    document.getElementById('stone-arch-clear').onclick=()=>Module._engine_stone_arch_clear_pages();
+    const applyGpu=()=>Module._engine_stone_arch_gpu(+gpu.checked,+occluder.checked);
+    const apply=()=>{
+      const ok=Module._engine_stone_arch(Number(mode.value),Number(shot.value));
+      document.body.dataset.defaultModel=ok&&applyGpu()&&Module._engine_stone_arch_hierarchy(+hierarchy.checked)?'ready':'error';
+    };
+    mode.onchange=shot.onchange=apply;
+    gpu.onchange=occluder.onchange=applyGpu;
+    hierarchy.onchange=()=>{
+      if(hierarchy.checked)gpu.checked=true;
+      applyGpu();
+      Module._engine_stone_arch_hierarchy(+hierarchy.checked);
+    };
+    document.querySelector('#scene-description').textContent='Stone arch · compare geometry detail from three fixed viewpoints';
+    apply();return;
+  }
   if(sceneName==='content-iteration'){document.body.dataset.defaultModel='ready';document.querySelector('#scene-description').textContent='Content iteration · source dependencies, safe hot reload and nested prefabs';return;}
   if(sceneName==='replay'){const ok=Module._engine_vehicle_course();if(ok){const drive=document.getElementById('vehicle-drive');if(drive){drive.checked=true;drive.dispatchEvent(new Event('change'));}}document.body.dataset.defaultModel=ok?'ready':'error';document.querySelector('#scene-description').textContent='Driving replay lab · record, inspect and race a non-colliding ghost';return;}
   if(sceneName==='cinematic'){document.body.dataset.defaultModel=Module._engine_cinematic_example()?'ready':'error';document.querySelector('#scene-description').textContent='Cinematic sequencer · camera cuts, performer motion, animation, sound and fountain';return;}
   if(sceneName==='audio'){document.body.dataset.defaultModel='ready';document.querySelector('#scene-description').textContent='Audio lab · wall occlusion, room reverb and streamed music';return;}
-  if(sceneName==='lighting'||sceneName==='spotlight'){document.body.dataset.defaultModel='ready';return;}
+  if(sceneName==='volumetric-clouds'){document.body.dataset.defaultModel=Module._engine_cloud_demo()?'ready':'error';document.querySelector('#scene-description').textContent='Volumetric clouds · sunlit billows, self-shadowing and wind · orbit and pan to explore';return;}
+  if(sceneName==='lighting'||sceneName==='lighting-zone'||sceneName==='dynamic-gi'||sceneName==='spotlight'||sceneName==='fog-doorway'||sceneName==='fog-water-test'||sceneName==='fog-shadow-test'||sceneName==='fog-milestone-test'||sceneName==='fog-profile'){document.body.dataset.defaultModel='ready';return;}
   if(sceneName==='crowd'){document.body.dataset.defaultModel=Module._engine_crowd_demo(1)?'ready':'error';document.querySelector('#scene-description').textContent='Crowd navigation · passing characters and a changing gate';window.EngineCrowd?.open();return;}
   if(sceneName==='prefabs'){document.body.dataset.defaultModel=Module._engine_prefab_demo()?'ready':'error';document.querySelector('#scene-description').textContent='Prefab assets · linked lanterns · variants and preserved instance overrides';return;}
   if(sceneName==='retarget'){document.body.dataset.defaultModel=Module._engine_retarget_demo()?'ready':'error';document.querySelector('#scene-description').textContent='Animation retargeting · blue source, gold destination · different limb lengths and bind orientations';return;}
@@ -311,11 +430,11 @@ document.querySelector('#skeletal-demo').addEventListener('click',()=>loadFbxByt
 }));
 document.querySelector('#fbx-file').addEventListener('change', async event => {
   const files = [...event.target.files];
-  const models = files.filter(file => /\.(fbx|glb)$/i.test(file.name));
+  const models = files.filter(file => /\.(fbx|glb|webengine\.zip)$/i.test(file.name));
   const file = models[0];
   event.target.value = ''; // Allow retrying the same file.
   if (!files.length || importBusy || !runtimeReady || fatal) return;
-  if (models.length !== 1) { window.engineImportStatus('Choose one .fbx or .glb file and its companion images.', false); return; }
+  if (models.length !== 1) { window.engineImportStatus('Choose one .fbx, .glb, or .webengine.zip file and any companion images.', false); return; }
   await loadFbxBytes(file.name, () => {
     if (file.size > 32 * 1024 * 1024) throw new Error('Model file exceeds the 32 MB limit.');
     return file.arrayBuffer();

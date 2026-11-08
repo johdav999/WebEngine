@@ -16,6 +16,11 @@ Authored transforms persist; editor selection, gizmos and undo history do not.
 
 ## Saved data
 
+Format 38 introduced authored light priorities and scene lighting zones. Older
+files restore priority zero and an empty zone list. Zone environments share the
+usual immutable asset identity. Light selection, shadow reservations, tone
+mapping and the WebGL2 material tier are renderer quality settings.
+
 | Data | Contents |
 | --- | --- |
 | Hierarchy | Scene, actor, component and plain node names, ordered children, local transforms, disabled state, tags and tick flags; required effect/skeletal children are restored once |
@@ -30,6 +35,7 @@ Authored transforms persist; editor selection, gizmos and undo history do not.
 | Textures | Names, RGBA8 pixels, dimensions and wrap modes; mips and GPU resources rebuild normally |
 | Cameras | Parent hierarchy, projection/lens settings, normalized viewport, masks, ordered render views and optional clear colors |
 | Lighting | Directional/point lights, masks, shadow settings, ambient light and exact baked environment radiance/LUT with intensity/rotation |
+| Fog | Format-16 optional analytic height fog and per-view opt-out. Format 37 adds the optional world-space fog box. Format 39 appends up to three additional boxes |
 | Animation | Skeletons, bindings, baked clips/markers, shared controller definitions, typed instance parameters/triggers, current control/completion state, playback/loop/speed clocks, paused state, blend/crossfade source poses, root-motion joint/stripping and pending event/movement output |
 | Effects | Shared definitions/textures/flipbooks, curves/bursts/seeds, independent live particles, death heap, emission clocks, RNG and paused/draining states |
 | Physics | Collision shapes and geometry, body settings, actor transforms, active linear/angular velocities, gravity, layer collision matrix and debug setting |
@@ -231,10 +237,20 @@ uses the same records. Deploy matching host and isolated-worker codecs.
 See [particle FX](fx.md).
 
 
+## Current writer: format 41
+
+Current scene, asset and application writers use format 41. Sky payloads append
+the authored volumetric-cloud flag, base height, thickness, extinction, maximum
+distance, detail and anisotropy. Formats through 40 retain their existing readers
+and default volumetric clouds off. Generated noise textures and renderer sample
+budgets remain transient. Clone and editor Play use the same validated sky codec.
+See [volumetric cloud contracts](sky.md#volumetric-cloud-layer).
+
 ## Format 18: effect start delay
 
 Format 18 appends validated `startDelay` to emitter definitions. Formats 1–17
-load with delay zero. Current scene, asset and application envelopes use v23.
+load with delay zero. The format-23 generation added the shared scene, asset
+and application envelope changes described in this section.
 Standalone `.wefx` resources use the same bounded asset codec with exactly one
 EffectAsset entry and embedded shared references. Editor FX previews/history are
 transient. See [FX authoring](fx-authoring.md).
@@ -271,7 +287,7 @@ See [terrain surfaces](terrain.md#surface-relief-and-projection).
 
 See [vehicle contracts](vehicles.md) for the optional four-wheel component,
 COM/inertia and point-force body APIs, typed editor/preset/Play support and supported
-checkpoint state. Current scene/application/effect envelope writer version is 32;
+checkpoint state. Format 32 includes these scene/application/effect envelope fields;
 older formats remain readable. Vehicle configuration/checkpoints and visual saved
 references persist; commands, solver listeners and contact history do not.
 
@@ -339,7 +355,7 @@ not serialized. Library metadata is ANIM3 (reads1–2) within WEANIM1. See
 
 ## Prefab assets format 34
 
-Current writers use v34. The new PrefabInstance node kind stores an immutable
+Format 34 adds the PrefabInstance node kind, which stores an immutable
 prefab asset resource and definition-key to saved-node bindings. Asset records
 contain identity, name, revision, optional variant base and a bounded built-in
 actor definition. Template node IDs have an isolated scope while immutable

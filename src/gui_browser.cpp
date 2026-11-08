@@ -1,4 +1,5 @@
 #include "gui_browser.hpp"
+#include "browser_canvas.hpp"
 #include <emscripten.h>
 #include <emscripten/html5.h>
 #include <sstream>
@@ -19,8 +20,7 @@ std::string accessibilityJson;
 void syncAccessibility();
 void layout() {
     if(!activeGui) return;
-    double width=0,height=0;emscripten_get_element_css_size("#viewport",&width,&height);
-    activeGui->layout({float(width),float(height)});
+    activeGui->layout({float(browser::canvasCssWidth()),float(browser::canvasCssHeight())});
 }
 std::string quote(std::string_view text) {
     std::ostringstream out;out<<'"';

@@ -2,6 +2,7 @@
 #include "engine/mesh_component.hpp"
 #include "engine/scene_archive.hpp"
 #include "engine/render_frame.hpp"
+#include "archive_fixture_helpers.hpp"
 #include <iostream>
 #include <limits>
 #include <cstring>
@@ -144,7 +145,14 @@ int main() {try {
         crc=~crc;for(int i=0;i<4;++i) data[20+i]=std::byte((crc>>(i*8))&255);
     };
     auto depthAsset=std::make_shared<Material>(*material);depthAsset->water.refractionStrength=.7f;depthAsset->water.foamStrength=.6f;assets.materials={depthAsset};
-    auto currentMaterial=SceneArchive::saveAssets(assets);currentMaterial.resize(currentMaterial.size()-4); // Empty v25 physical surface catalog.
+    auto currentMaterial=SceneArchive::saveAssets(assets);
+    // Format 40 appends thirty neutral advanced floats and four null texture IDs.
+    // Remove that complete extension before assembling historical water layouts.
+    const std::array<float,30> advancedDefaults={0,.1f,0,1.5f,0,0,0,0,1,1,1,.5f,1,1,1,0,1,1,1,0,.5f,0,0,0,1,0,0,1,1,1};
+    const auto advancedBytes=std::as_bytes(std::span(advancedDefaults));std::vector<std::byte> advancedFields(advancedBytes.begin(),advancedBytes.end());advancedFields.resize(advancedFields.size()+16);
+    const auto advancedPosition=std::search(currentMaterial.begin()+24,currentMaterial.end(),advancedFields.begin(),advancedFields.end());
+    check(advancedPosition!=currentMaterial.end(),"Format-40 neutral material migration fixture missing");currentMaterial.erase(advancedPosition,advancedPosition+advancedFields.size());
+    currentMaterial.resize(currentMaterial.size()-4); // Empty v25 physical surface catalog.
     // Format 12 has layers but no caustics extension.
     const std::array<float,4> causticsDefaults={0,2,1,8};
     const auto causticsBytes=std::as_bytes(std::span(causticsDefaults));
@@ -183,7 +191,7 @@ int main() {try {
     check(oldMaterial.materials[0]->shader==MaterialShader::Water&&!oldMaterial.materials[0]->water.usesSceneInputs()
         &&oldMaterial.materials[0]->water.amplitude==settings.amplitude,"Format-7 water must retain waves with new effects disabled");
     // A no-resource format-6 scene has the same layout; it still loads with defaults.
-    Scene empty;empty.environment.reset();auto legacy=SceneArchive::save(empty);legacy.pop_back();legacy.erase(legacy.end()-8,legacy.end()-4);legacy.erase(legacy.end()-9,legacy.end()-5);repair(legacy,6);
+    Scene empty;empty.environment.reset();auto legacy=SceneArchive::save(empty);stripEmptyLightingZones(legacy);legacy.pop_back();legacy.erase(legacy.end()-8,legacy.end()-4);legacy.erase(legacy.end()-9,legacy.end()-5);repair(legacy,6);
     check(SceneArchive::load(legacy).scene!=nullptr,"Format 6 compatibility lost");
     std::cout<<"water: validation, atomic overrides, displacement bounds, batching and archives passed\n";
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

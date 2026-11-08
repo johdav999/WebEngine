@@ -15,7 +15,8 @@ void LightComponent::validate() const { Component::validate();validateSettings()
 void LightComponent::validateSettings() const {
     if(type<LightType::Directional||type>LightType::Spot||!finite(color)||color.x<0||color.y<0||color.z<0
         ||!std::isfinite(intensity)||intensity<0||!std::isfinite(range)||range<=0||!finite(direction)
-        ||!std::isfinite(dot(direction,direction))||(type!=LightType::Point&&dot(direction,direction)<1e-12f))
+        ||!std::isfinite(dot(direction,direction))||(type!=LightType::Point&&dot(direction,direction)<1e-12f)
+        ||priority< -100||priority>100)
         throw std::invalid_argument("Invalid light settings");
     cone(range,innerAngle,outerAngle);shadow.validate();
     if(type==LightType::Spot&&range<.001f)throw std::invalid_argument("Spotlight range must be at least .001 metres");

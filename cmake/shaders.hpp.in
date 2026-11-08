@@ -1,5 +1,16 @@
 #pragma once
 inline constexpr const char* fog_glsl=R"GLSL(@FOG_GLSL@)GLSL";
+inline constexpr const char* fog_volume_glsl=R"GLSL(@FOG_VOLUME_GLSL@)GLSL";
+inline constexpr const char* fog_grid_shader=R"WGSL(@FOG_GRID_SHADER@)WGSL";
+inline constexpr const char* fog_light_cache_shader=R"WGSL(@FOG_LIGHT_CACHE_SHADER@)WGSL";
+inline constexpr const char* fog_light_cache_fragment_glsl=R"GLSL(@FOG_LIGHT_CACHE_FRAGMENT_GLSL@)GLSL";
+inline constexpr const char* fog_grid_fragment_glsl=R"GLSL(@FOG_GRID_FRAGMENT_GLSL@)GLSL";
+inline constexpr const char* fog_grid_sampling_glsl=R"GLSL(@FOG_GRID_SAMPLING_GLSL@)GLSL";
+inline constexpr const char* cloud_volume_glsl=R"GLSL(@CLOUD_VOLUME_GLSL@)GLSL";
+inline constexpr const char* cloud_grid_sampling_glsl=R"GLSL(@CLOUD_GRID_SAMPLING_GLSL@)GLSL";
+inline constexpr const char* cloud_grid_fragment_glsl=R"GLSL(@CLOUD_GRID_FRAGMENT_GLSL@)GLSL";
+inline constexpr const char* cloud_shadow_fragment_glsl=R"GLSL(@CLOUD_SHADOW_FRAGMENT_GLSL@)GLSL";
+inline constexpr const char* diffuse_gi_glsl=R"GLSL(@DIFFUSE_GI_GLSL@)GLSL";
 inline constexpr const char* sky_shader = R"WGSL(@SKY_SHADER@)WGSL";
 inline constexpr const char* sky_vertex_glsl = R"GLSL(@SKY_VERTEX_GLSL@)GLSL";
 inline constexpr const char* sky_fragment_glsl = R"GLSL(@SKY_FRAGMENT_GLSL@)GLSL";
@@ -15,3 +26,6 @@ inline constexpr const char* underwater_fragment_glsl=R"GLSL(@UNDERWATER_FRAGMEN
 inline constexpr const char* post_shader=R"SHADER(@POST_SHADER@)SHADER";
 inline constexpr const char* post_vertex_glsl=R"SHADER(@POST_VERTEX_GLSL@)SHADER";
 inline constexpr const char* post_fragment_glsl=R"SHADER(@POST_FRAGMENT_GLSL@)SHADER";
+
+inline constexpr const char* cloud_grid_shader=R"WGSL(@CLOUD_GRID_SHADER@)WGSL";
+inline constexpr const char* cloud_shadow_shader=R"WGSL(@CLOUD_SHADOW_SHADER@)WGSL";

@@ -1,6 +1,7 @@
 #include "engine/render_frame.hpp"
 #include "engine/mesh_detail.hpp"
 #include "engine/camera_component.hpp"
+#include "engine/cluster_stream.hpp"
 #include <cstring>
 #include <limits>
 #include <algorithm>
@@ -9,6 +10,42 @@
 
 namespace engine {
 namespace {
+constexpr std::size_t extraClusterDraws=128; // Per camera or shadow map.
+std::size_t sourceIndexCount(const MeshDraw& draw) {
+    const auto& mesh=*draw.sourceMesh;
+    return mesh.parts.empty()?mesh.indices.size():mesh.parts[draw.part].indexCount;
+}
+bool useClusters(const MeshDraw& draw,const DetailView* detail,bool shadow) {
+    return detail&&draw.sourceBounds.valid&&(draw.sourceMesh->clusterLod||draw.sourceMesh->clusterStream)
+        &&!draw.skinPose&&!draw.morphPose&&draw.layer==RenderLayer::World
+        &&draw.blend==BlendMode::Opaque&&draw.material.alphaMode==AlphaMode::Opaque
+        &&draw.material.shader!=MaterialShader::Water&&draw.material.advanced.windAmplitude==0
+        &&(shadow?draw.lodPolicy.shadowLevel:draw.lodPolicy.cameraLevel)<0;
+}
+bool selectClusters(const MeshDraw& draw,const DetailView& detail,float scale,const Frustum* frustum,
+                    std::span<ClusterRange> output,std::size_t& count,const ClusterPageUpload& upload) {
+    const auto& source=*draw.sourceMesh;
+    if(!source.clusterStream)return source.clusterLod->select(draw.part,draw.model,detail,scale,frustum,output,count);
+    auto& stream=*source.clusterStream;
+    const auto& hierarchy=stream.asset().hierarchy();
+    if(draw.part>=hierarchy.roots().size()||!upload||!upload(stream.mesh(0),true))return false;
+    const auto ready=[&](std::uint32_t page,double priority) {
+        stream.demand(page,priority);
+        const auto& mesh=stream.mesh(page);
+        return mesh&&upload(mesh,false);
+    };
+    if(hierarchy.select(draw.part,draw.model,detail,scale,frustum,output,count,ready))return true;
+    if(output.empty())return false;
+    const auto& root=hierarchy.groups()[hierarchy.roots()[draw.part]];
+    output.front()=root.range;
+    output.front().bounds=root.bounds;
+    count=1;
+    return true;
+}
+const std::shared_ptr<const Mesh>& clusterMesh(const MeshDraw& draw,ClusterRange range) {
+    const auto& source=*draw.sourceMesh;
+    return source.clusterStream?source.clusterStream->mesh(range.page):source.clusterLod->geometry();
+}
 void useLod(MeshDraw& draw,std::size_t level) {
     if(!level) return;
     const auto& source=*draw.sourceMesh;
@@ -24,6 +61,15 @@ void useLod(MeshDraw& draw,std::size_t level) {
     draw.mesh=mesh;
 }
 }
+MeshDraw RenderFrame::batchDraw(const InstanceBatch& batch,std::uint32_t offset) const {
+    auto draw=instanceDraw(batch.firstInstance+offset);
+    if(batch.indexCount) {
+        draw.mesh=batch.mesh;
+        draw.firstIndex=batch.firstIndex;
+        draw.indexCount=batch.indexCount;
+    }
+    return draw;
+}
 std::size_t RenderFrame::chooseLod(const MeshDraw& draw,LodState& state,const DetailView* detail,bool shadow) {
     if(state.component!=draw.component || state.source.lock()!=draw.sourceMesh) state={draw.component,draw.sourceMesh,0};
     state.level=detail && !draw.skinPose && !draw.morphPose && !draw.sourceMesh->skeleton
@@ -34,7 +80,8 @@ std::size_t RenderFrame::chooseLod(const MeshDraw& draw,LodState& state,const De
         state.level=std::min(std::size_t(fixed),draw.sourceMesh->lods.size());
     return state.level;
 }
-void RenderFrame::collect(const Scene& scene,bool instancing,std::uint32_t visibilityMask,const Frustum* frustum,const DetailView* detail) {
+void RenderFrame::collect(const Scene& scene,bool instancing,std::uint32_t visibilityMask,const Frustum* frustum,
+                          const DetailView* detail,const ClusterPageUpload& upload,bool gpuHierarchy) {
     for(auto& batches:batches_) batches.clear();
     for(auto& batches:cameraBatches_) batches.clear();
     shadowBatches_.clear();
@@ -47,7 +94,8 @@ void RenderFrame::collect(const Scene& scene,bool instancing,std::uint32_t visib
         auto& draw=scene_.meshes[i];
         if(!draw.sourceMesh) draw.sourceMesh=draw.mesh;
         const auto level=chooseLod(draw,cameraLevels_[i],detail);
-        cameraLodParts_+=bool(level)&&draw.cameraVisible;useLod(draw,level);
+        cameraLodParts_+=bool(level)&&draw.cameraVisible;
+        useLod(draw,level);
     }
     const auto* white=Texture::white().get();
     const auto sourceCapacity=instanceSources_.capacity();
@@ -61,7 +109,7 @@ void RenderFrame::collect(const Scene& scene,bool instancing,std::uint32_t visib
         auto address=[](const auto* p) { return reinterpret_cast<std::uintptr_t>(p); };
         return std::tuple{address(d.mesh.get()),d.firstIndex,d.indexCount,address(d.skinPose.get()),
             address(d.morphPose.get()),d.mirrored,address(d.texture ? d.texture.get() : white),
-            address(m.baseColorTexture ? m.baseColorTexture.get() : white),address(m.metallicRoughnessTexture.get()),
+            address(m.baseColorTexture ? m.baseColorTexture.get() : white),address(m.baseColorSurface.get()),address(m.metallicRoughnessTexture.get()),
             address(m.normalTexture.get()),address(m.occlusionTexture.get()),address(m.emissiveTexture.get()),
             m.roughness,m.metallic,m.normalScale,m.occlusionStrength,m.emissive.x,m.emissive.y,m.emissive.z,
             m.uvScale.x,m.uvScale.y,m.uvOffset.x,m.uvOffset.y,m.alphaMode,m.alphaCutoff,m.doubleSided,m.shader};
@@ -100,18 +148,52 @@ void RenderFrame::collect(const Scene& scene,bool instancing,std::uint32_t visib
             storageGrowths_+=capacity!=batches.capacity();
         }
     }
-    // Split at invisible slots without repacking object data or changing draw precedence.
+    // Split at invisible slots or cluster ranges without repacking object data.
+    std::size_t extra=extraClusterDraws;
+    std::array<ClusterRange,ClusterLod::maxRanges> ranges;
     for(std::size_t layer=0;layer<batches_.size();++layer) {
         auto& visible=cameraBatches_[layer];
+        const auto append=[&](InstanceBatch batch) {
+            const auto capacity=visible.capacity();visible.push_back(batch);
+            storageGrowths_+=capacity!=visible.capacity();
+        };
         for(const auto& batch:batches_[layer]) {
             bool inRun=false;
             for(std::uint32_t i=0;i<batch.instanceCount;++i) {
                 const auto slot=batch.firstInstance+i;
-                if(!instanceDraw(slot).cameraVisible) { inRun=false;continue; }
+                const auto& draw=instanceDraw(slot);
+                if(!draw.cameraVisible) { inRun=false;continue; }
+                if(gpuHierarchy&&useClusters(draw,detail,false)) {
+                    const auto& source=*draw.sourceMesh;
+                    const auto& hierarchy=source.clusterStream?source.clusterStream->asset().hierarchy():*source.clusterLod;
+                    const auto& root=hierarchy.groups()[hierarchy.roots()[draw.part]];
+                    const auto& geometry=source.clusterStream?source.clusterStream->mesh(0):hierarchy.geometry();
+                    // GPU mode submits the pinned root and immutable tree metadata,
+                    // without running the CPU camera selector or issuing page demand.
+                    if(upload&&upload(geometry,true))
+                        append({slot,1,root.range.firstIndex,root.range.indexCount,geometry,root.bounds,true});
+                    else append({slot,1});
+                    inRun=false;
+                    continue;
+                }
+                std::size_t count=0;
+                // Cluster expansion can also break an otherwise instanced draw.
+                if(useClusters(draw,detail,false)&&selectClusters(draw,*detail,draw.lodPolicy.cameraScale,
+                    frustum,std::span(ranges).first(std::min(extra,ranges.size())),count,upload)) {
+                    extra-=count;
+                    std::size_t indices=0;
+                    for(std::size_t j=0;j<count;++j) {
+                        indices+=ranges[j].indexCount;
+                        append({slot,1,ranges[j].firstIndex,ranges[j].indexCount,clusterMesh(draw,ranges[j]),ranges[j].bounds});
+                    }
+                    cameraLodParts_-=bool(cameraLevels_[instanceSource(slot)].level);
+                    cameraLodParts_+=count&&indices<sourceIndexCount(draw);
+                    inRun=false;
+                    continue;
+                }
                 if(inRun) ++visible.back().instanceCount;
                 else {
-                    const auto capacity=visible.capacity();visible.push_back({slot,1});
-                    storageGrowths_+=capacity!=visible.capacity();inRun=true;
+                    append({slot,1});inRun=true;
                 }
             }
         }
@@ -130,12 +212,20 @@ void RenderFrame::collect(const Scene& scene,bool instancing,std::uint32_t visib
         }
     }
 }
-void RenderFrame::prepareShadow(std::size_t light,const DetailView& detail,bool lod,bool culling,bool casting) {
+void RenderFrame::prepareShadow(std::size_t light,const DetailView& detail,bool lod,bool culling,bool casting,
+                                const ClusterPageUpload& upload) {
     auto& state=shadows_.at(light);state.batches.clear();
     const auto capacity=state.levels.capacity();state.levels.resize(scene_.meshes.size());
     storageGrowths_+=capacity!=state.levels.capacity();
     if(!casting) return;
     const auto frustum=Frustum::fromMatrix(detail.viewProjection);
+    std::size_t extra=extraClusterDraws;
+    std::array<ClusterRange,ClusterLod::maxRanges> ranges;
+    const auto append=[&](ShadowBatch batch) {
+        const auto batchCapacity=state.batches.capacity();
+        state.batches.push_back(std::move(batch));
+        storageGrowths_+=batchCapacity!=state.batches.capacity();
+    };
     for(const auto& batch:shadowBatches_) {
         bool inRun=false;
         for(std::uint32_t i=0;i<batch.instanceCount;++i) {
@@ -143,6 +233,19 @@ void RenderFrame::prepareShadow(std::size_t light,const DetailView& detail,bool 
             const auto& bounds=original.sourceBounds;
             if(culling && bounds.valid && !frustum.intersectsTransformedAabb(bounds.minimum,bounds.maximum,original.model)) {
                 ++shadowCulledParts_;inRun=false;continue;
+            }
+            std::size_t count=0;
+            if(useClusters(original,lod?&detail:nullptr,true)&&selectClusters(original,detail,original.lodPolicy.shadowScale,
+                culling?&frustum:nullptr,std::span(ranges).first(std::min(extra,ranges.size())),count,upload)) {
+                extra-=count;
+                std::size_t indices=0;
+                for(std::size_t j=0;j<count;++j) {
+                    indices+=ranges[j].indexCount;
+                    append({{slot,1},clusterMesh(original,ranges[j]),ranges[j].firstIndex,ranges[j].indexCount});
+                }
+                shadowLodParts_+=count&&indices<sourceIndexCount(original);
+                inRun=false;
+                continue;
             }
             auto draw=original;draw.mesh=draw.sourceMesh;
             if(draw.mesh->parts.empty()) { draw.firstIndex=0;draw.indexCount=std::uint32_t(draw.mesh->indices.size()); }
@@ -152,9 +255,7 @@ void RenderFrame::prepareShadow(std::size_t light,const DetailView& detail,bool 
             if(inRun && state.batches.back().mesh==draw.mesh && state.batches.back().firstIndex==draw.firstIndex && state.batches.back().indexCount==draw.indexCount)
                 ++state.batches.back().instances.instanceCount;
             else {
-                const auto batchCapacity=state.batches.capacity();
-                state.batches.push_back({{slot,1},draw.mesh,draw.firstIndex,draw.indexCount});
-                storageGrowths_+=batchCapacity!=state.batches.capacity();inRun=true;
+                append({{slot,1},draw.mesh,draw.firstIndex,draw.indexCount});inRun=true;
             }
         }
     }
@@ -181,7 +282,7 @@ void RenderFrame::prepareObjects() {
     uploads_.clear();changedObjects_=0;
     for(std::size_t i=0;i<count;++i) {
         const auto& draw=instanceDraw(i);
-        const ObjectUniform object{draw.model,draw.normal,{draw.color.x,draw.color.y,draw.color.z,draw.opacity},{draw.receivesShadow ? 1.0f : 0.0f,draw.layer==RenderLayer::World&&draw.material.shader==MaterialShader::Water&&draw.material.water.usesSceneInputs() ? 1.0f : 0.0f,draw.layer==RenderLayer::World&&draw.material.shader==MaterialShader::Water ? 1.0f : 0.0f,draw.layer==RenderLayer::World ? (draw.blend==BlendMode::Additive ? 2.0f : 1.0f) : 0.0f}};
+        const ObjectUniform object{draw.model,draw.normal,{draw.color.x,draw.color.y,draw.color.z,draw.opacity},{draw.receivesShadow ? 1.0f : 0.0f,draw.layer==RenderLayer::World&&((draw.material.shader==MaterialShader::Water&&draw.material.water.usesSceneInputs())||draw.material.advanced.transmission>0) ? 1.0f : 0.0f,draw.layer==RenderLayer::World&&draw.material.shader==MaterialShader::Water ? 1.0f : 0.0f,draw.layer==RenderLayer::World ? (draw.blend==BlendMode::Additive ? 2.0f : 1.0f) : 0.0f}};
         const auto offset=i*objectStride;
         const bool changed=i>=previousCount || std::memcmp(objects_.data()+offset,&object,sizeof(object));
         if(changed) std::memcpy(objects_.data()+offset,&object,sizeof(object));

@@ -1,11 +1,22 @@
 // FOG_FUNCTIONS
+// FOG_FRAME
+@group(2) @binding(0) var<uniform> frame: Frame;
+@group(2) @binding(1) var shadowMaps: texture_depth_2d_array;
+@group(2) @binding(2) var shadowSampler: sampler_comparison;
+@group(2) @binding(4) var fogLightCache:texture_3d<f32>;
+@group(2) @binding(5) var fogLightCacheSampler:sampler;
+// FOG_VOLUME
+@group(2) @binding(3) var<storage,read> fogGrid:array<vec2u>;
+// FOG_GRID_SAMPLING
 struct Sky {
     right:vec4f, up:vec4f, forward:vec4f, horizon:vec4f, zenith:vec4f, nadir:vec4f,
-    clipFromDirection:mat4x4f, sun:vec4f, air:vec4f, clouds:vec4f, cloudWind:vec4f, fog:Fog, fogRight:vec4f, fogUp:vec4f
+    clipFromDirection:mat4x4f, sun:vec4f, air:vec4f, clouds:vec4f, cloudWind:vec4f, fog:Fog, fogRight:vec4f, fogUp:vec4f,
+    cloudLayer:vec4f,cloudShape:vec4f,cloudOrigin:vec4f,cloud:Cloud
 };
 @group(0) @binding(0) var<uniform> sky:Sky;
 @group(1) @binding(0) var panoramaSampler:sampler;
 @group(1) @binding(1) var panorama:texture_2d<f32>;
+@group(1) @binding(2) var cloudNoiseAtlas:texture_2d<f32>;
 struct Output { @builtin(position) clip:vec4f, @location(0) direction:vec3f, @location(1) offset:vec3f };
 @vertex fn vertexMain(@builtin(vertex_index) i:u32) -> Output {
     let p=array<vec2f,3>(vec2f(-1,-1),vec2f(3,-1),vec2f(-1,3));
@@ -84,6 +95,7 @@ fn cloudLayer(d:vec3f,background:vec3f) -> vec3f {
     let color=vec3f(0.015,0.025,0.05)+daylight*(vec3f(1.8,1.9,2.1)+warm)*shade;
     return mix(background,color,alpha);
 }
+// CLOUD_VOLUME
 @fragment fn fragmentMain(o:Output) -> @location(0) vec4f {
     let d=normalize(o.direction);
     var radiance=mix(sky.horizon.xyz,select(sky.nadir.xyz,sky.zenith.xyz,d.y>=0),abs(d.y));
@@ -94,6 +106,7 @@ fn cloudLayer(d:vec3f,background:vec3f) -> vec3f {
         let uv=vec2f(atan2(rotated.z,rotated.x)/6.28318530718+0.5,acos(clamp(rotated.y,-1,1))/3.14159265359);
         radiance=textureSampleLevel(panorama,panoramaSampler,uv,0).rgb;
     }
-    let linear=cloudLayer(d,radiance)*sky.horizon.w;
-    return vec4f(hdrEncode(fogApply(sky.fog,select(linear/(vec3f(1)+linear),linear,hdrOutput),sky.fog.eye.xyz+o.offset+d*(sky.fog.height.w/max(dot(d,sky.fog.forward.xyz),0.001)),false)),1);
+    var linear=volumetricClouds(d,o.offset,radiance)*sky.horizon.w;
+    if(frame.cloud.layer.w>0.5) {let medium=cloudGridMedium(sky.cloud.eye.xyz+o.offset+d*sky.cloudLayer.w);linear=medium.rgb+medium.a*radiance*sky.horizon.w;}
+    return vec4f(hdrEncode(fogVolumeApply(select(linear/(vec3f(1)+linear),linear,hdrOutput),sky.fog.eye.xyz+o.offset+d*(sky.fog.height.w/max(dot(d,sky.fog.forward.xyz),0.001)),false)),1);
 }

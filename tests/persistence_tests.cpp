@@ -1,5 +1,6 @@
 #include "engine/persistence.hpp"
 #include "engine/application.hpp"
+#include "engine/light_component.hpp"
 #include <iostream>
 #include <fstream>
 using namespace engine;
@@ -52,6 +53,10 @@ int main(int argc,char** argv) {try {
     auto invalid=linkCodec();invalid.key="";rejects([&]{ComponentCodecs{}.add(invalid);},"Invalid codec key");
     invalid=linkCodec();invalid.type=typeid(Component);rejects([&]{ComponentCodecs{}.add(invalid);},"Built-in codec cannot be replaced");
     Scene original("Saved world");original.setSavedId("world");
+    original.environment=Environment::studio();
+    original.setLightingZones({{{-2,-2,-2},{2,2,2},1,original.environment,.75f,.2f}});
+    auto& light=original.addChild<LightComponent>("Priority lamp",LightType::Spot);
+    light.setSavedId("priority.lamp");light.priority=18;
     auto& owner=original.addChild<Actor>("Same name");owner.setSavedId("owner");
     auto& link=owner.addChild<Link>("Link");link.setSavedId("link");link.setTickEnabled(true);link.value=42;
     // Deliberately forward reference a disabled actor with a duplicate display name.
@@ -60,9 +65,14 @@ int main(int argc,char** argv) {try {
     rejects([&]{link.setSavedId("target");},"Disabled node identity collision rejected");
     rejects([&]{link.setSavedId("invalid id");},"Invalid identity rejected");
     auto bytes=SceneArchive::save(original,{},{},{},{},codecs);
-    check(bytes[8]==std::byte{36},"Persistence uses archive version 36");
+    check(bytes[8]==std::byte{41},"Persistence uses archive version 41");
     rejects([&]{SceneArchive::load(bytes);},"Unregistered custom type rejected");
     auto loaded=SceneArchive::load(bytes,{},codecs);
+    const auto& zones=loaded.scene->lightingZones();
+    check(zones.size()==1&&zones.front().environment==loaded.scene->environment&&zones.front().intensity==.75f,
+          "Lighting zone settings and shared environment identity survive archive load");
+    const auto* loadedLight=dynamic_cast<LightComponent*>(loaded.scene->findSavedNode("priority.lamp"));
+    check(loadedLight&&loadedLight->priority==18,"Authored light priority survives archive load");
     auto* restored=dynamic_cast<Link*>(loaded.scene->findSavedNode("link"));
     auto* restoredTarget=dynamic_cast<Actor*>(loaded.scene->findSavedNode("target"));
     check(restored&&restored->value==42&&restored->ticks==0,"Custom data restored without executing ticks");
@@ -90,7 +100,9 @@ int main(int argc,char** argv) {try {
     auto corrupt=bytes;corrupt[37]=std::byte{' '};checksum(corrupt);
     rejects([&]{SceneArchive::load(corrupt,{},codecs);},"Invalid saved identity rejected after CRC verification");
     Scene legacyScene;legacyScene.environment.reset();legacyScene.setSavedId("legacy");
-    auto oldSceneBytes=SceneArchive::save(legacyScene);oldSceneBytes.pop_back(); // v17 absent-fog flag.
+    auto oldSceneBytes=SceneArchive::save(legacyScene);
+    oldSceneBytes.resize(oldSceneBytes.size()-4); // v38 empty lighting-zone count.
+    oldSceneBytes.pop_back(); // v17 absent-fog flag.
     oldSceneBytes.erase(oldSceneBytes.end()-9,oldSceneBytes.end()-5); // v25 empty surface catalog.
     oldSceneBytes.erase(oldSceneBytes.end()-9,oldSceneBytes.end()-5); // v10's empty terrain-library count, before metadata and sky.
     oldSceneBytes.pop_back(); // Version 5's absent-sky flag; legacy scene has no views.

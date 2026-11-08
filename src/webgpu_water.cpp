@@ -56,14 +56,25 @@ void WebGpuRenderer::prepareWaterTargets(bool required) {
         wgpu::BindGroupDescriptor binding{};binding.layout=captureLayouts_[sampleCount_>1 ? 1 : 0];binding.entryCount=2;binding.entries=entries.data();captureBinding_=device_.CreateBindGroup(&binding);
     }
 }
-void WebGpuRenderer::captureWater(wgpu::CommandEncoder& encoder,int sampleSlot,std::uint32_t ordinal,bool underwater) {
+void WebGpuRenderer::captureWater(wgpu::CommandEncoder& encoder,int sampleSlot,std::uint32_t ordinal,SnapshotUse use) {
     std::array<wgpu::RenderPassColorAttachment,2> colors{};
     colors[0].view=waterColorView_;colors[1].view=waterDepthView_;colors[1].clearValue={1,0,0,1};
     for(auto& color:colors) {color.loadOp=wgpu::LoadOp::Clear;color.storeOp=wgpu::StoreOp::Store;}
-    wgpu::RenderPassDescriptor d{};d.label="Water opaque snapshot / depth resolve";d.colorAttachmentCount=2;d.colorAttachments=colors.data();
+    wgpu::RenderPassDescriptor d{};
+    d.label=use==SnapshotUse::ScreenReflection ? "Screen reflection opaque snapshot" : "Water opaque snapshot / depth resolve";
+    d.colorAttachmentCount=2;d.colorAttachments=colors.data();
     wgpu::PassTimestampWrites times{};
-    if(sampleSlot>=0) {times.querySet=timingSlots_[sampleSlot].queries;times.beginningOfPassWriteIndex=ordinal*24+(underwater ? 20 : 14);times.endOfPassWriteIndex=times.beginningOfPassWriteIndex+1;d.timestampWrites=&times;
-        if(underwater) timingSlots_[sampleSlot].underwaterPasses[ordinal]=true;else timingSlots_[sampleSlot].waterPasses[ordinal]=true;}
+    if(sampleSlot>=0) {
+        auto& slot=timingSlots_[sampleSlot];
+        std::uint32_t offset=14;
+        switch(use) {
+        case SnapshotUse::Water: slot.waterPasses[ordinal]=true;break;
+        case SnapshotUse::Underwater: offset=20;slot.underwaterPasses[ordinal]=true;break;
+        case SnapshotUse::ScreenReflection: offset=26;slot.screenReflectionPasses[ordinal]=true;break;
+        }
+        times.querySet=slot.queries;times.beginningOfPassWriteIndex=ordinal*timingQueriesPerView+offset;
+        times.endOfPassWriteIndex=times.beginningOfPassWriteIndex+1;d.timestampWrites=&times;
+    }
     auto pass=encoder.BeginRenderPass(&d);pass.SetPipeline(capturePipelines_[sampleCount_>1 ? 1 : 0]);pass.SetBindGroup(0,captureBinding_);
     const auto& view=resolvedViews_[ordinal];pass.SetScissorRect(view.x,view.y,view.width,view.height);pass.Draw(3);pass.End();
     ++counters_.passes;++counters_.drawCalls;++counters_.triangles;
@@ -112,7 +123,7 @@ void WebGpuRenderer::drawUnderwater(wgpu::CommandEncoder& encoder,wgpu::TextureV
     }
     wgpu::RenderPassColorAttachment color{};color.view=target;color.loadOp=wgpu::LoadOp::Load;color.storeOp=wgpu::StoreOp::Store;
     wgpu::RenderPassDescriptor d{};d.label="Underwater fog / absorption";d.colorAttachmentCount=1;d.colorAttachments=&color;
-    wgpu::PassTimestampWrites times{};if(sampleSlot>=0) {times.querySet=timingSlots_[sampleSlot].queries;times.beginningOfPassWriteIndex=ordinal*24+22;times.endOfPassWriteIndex=ordinal*24+23;d.timestampWrites=&times;}
+    wgpu::PassTimestampWrites times{};if(sampleSlot>=0) {times.querySet=timingSlots_[sampleSlot].queries;times.beginningOfPassWriteIndex=ordinal*timingQueriesPerView+22;times.endOfPassWriteIndex=ordinal*timingQueriesPerView+23;d.timestampWrites=&times;}
     auto pass=encoder.BeginRenderPass(&d);pass.SetPipeline(underwaterPipeline_);pass.SetBindGroup(0,view.underwaterBinding);
     pass.SetScissorRect(resolved.x,resolved.y,resolved.width,resolved.height);pass.Draw(3);pass.End();
     ++counters_.passes;++counters_.drawCalls;++counters_.triangles;
@@ -139,7 +150,7 @@ void WebGpuRenderer::drawPost(wgpu::CommandEncoder& encoder,wgpu::TextureView ta
         wgpu::TextureDescriptor d{};d.size={w,h,1};d.format=wgpu::TextureFormat::RGBA16Float;d.usage=wgpu::TextureUsage::TextureBinding|wgpu::TextureUsage::RenderAttachment;
         bloomTexture_=device_.CreateTexture(&d);bloomView_=bloomTexture_.CreateView();postWidth_=w;postHeight_=h;
     }
-    const auto& p=quality_.post;const std::array<float,8> values={std::exp2(p.exposure),p.bloomStrength,p.bloomThreshold,0,p.saturation,p.contrast,0,0};
+    const auto& p=quality_.post;const std::array<float,8> values={std::exp2(p.exposure),p.bloomStrength,p.bloomThreshold,0,p.saturation,p.contrast,float(p.toneMapper),0};
     if(values!=postValues_){device_.GetQueue().WriteBuffer(postBuffer_,0,values.data(),32);postValues_=values;++counters_.uploadCalls;counters_.uploadBytes+=32;}
     auto binding=[&](wgpu::TextureView bloom){std::array<wgpu::BindGroupEntry,4> e{};
         e[0].binding=0;e[0].textureView=sceneColorView_;e[1].binding=1;e[1].textureView=bloom;e[2].binding=2;e[2].sampler=waterSampler_;e[3].binding=3;e[3].buffer=postBuffer_;e[3].size=32;

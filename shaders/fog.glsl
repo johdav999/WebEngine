@@ -1,4 +1,11 @@
-struct Fog { vec4 colorDensity; vec4 height; vec4 eye; vec4 forward; };
+struct FogVolumeData { vec4 minimumFade,maximumDistance,colorDensity; };
+struct FogLightCacheData { vec4 minimumIndex,maximum; };
+struct Fog {
+    vec4 colorDensity,height,eye,forward,volumeMinSteps,volumeMaxDistance,volumeColorDensity,volumeOptions;
+    FogVolumeData additionalVolumes[3];
+    vec4 volumeLighting;
+    FogLightCacheData lightCache[4];
+};
 uniform Fog fog;
 float fogDepth(Fog f,vec3 origin,vec3 end,float start) {
     float distance=length(end-origin);

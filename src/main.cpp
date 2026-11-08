@@ -3,6 +3,15 @@
 #include "../examples/multiplayer/gameplay.hpp"
 #include "engine/editor.hpp"
 #endif
+#include "../examples/fog_doorway.hpp"
+#include "../examples/lighting_zone_doorway.hpp"
+#include "../examples/dynamic_gi_doorway.hpp"
+#include "../examples/fog_milestones.hpp"
+#include "../examples/fog_profile.hpp"
+#include "../examples/volumetric_clouds.hpp"
+#include "../examples/stone_arch.hpp"
+#include "../examples/ranked_lighting.hpp"
+#include "../examples/volumetric_water_fixture.hpp"
 #include <set>
 #include <sstream>
 #include <iomanip>
@@ -31,7 +40,10 @@
 #include "engine/physics_demo.hpp"
 #include "engine/ship_stress_demo.hpp"
 #include "gui_browser.hpp"
+#include "browser_canvas.hpp"
 #include "compositing_demo.hpp"
+#include "../examples/render_surface_demo.hpp"
+#include "../examples/material_delivery_gallery.hpp"
 #include "sky_demo.hpp"
 #include "water_demo.hpp"
 #include "terrain_demo.hpp"
@@ -42,10 +54,16 @@
 #include "fx_contact_fixture.hpp"
 #include "editor_browser.hpp"
 namespace {void advanceContentIteration(double);void advanceAuthoringPanel();}
+namespace {
+std::unique_ptr<engine::dynamic_gi_example::Doorway> dynamicGiDoorway;
+double dynamicGiPeakUpdateMs=0;
+}
 #include "audio_demo.hpp"
 #include "engine/editor_cinematic.hpp"
 #include "engine/audio_browser.hpp"
+#include "engine/asset_browser.hpp"
 #include "cinematic_example.hpp"
+#include "../examples/cutscene_demo.hpp"
 #include "route_example.hpp"
 #include "driving_audio_demo.hpp"
 #include <emscripten.h>
@@ -60,6 +78,11 @@ bool cinematicActive();
 void advanceCinematic(double seconds);
 void suspendCinematic(bool value);
 void shutdownCinematic();
+bool cutsceneGameActive();
+bool cutsceneDemoInput(Scene&,const InputSystem&,double);
+bool advanceCutsceneDemo(Scene&,double);
+void suspendCutsceneDemo(bool);
+void shutdownCutsceneDemo();
 bool replayReviewing();
 bool replayBusy();
 void advanceReplay(Scene&,double,double);
@@ -69,6 +92,40 @@ namespace {
 Application application;
 const SceneId playgroundSceneId=application.loadScene(std::make_unique<Scene>("Demo scene"));
 Scene& scene=*application.findScene(playgroundSceneId);
+std::unique_ptr<AssetManager> stoneArchAssets;
+AssetRequest stoneArchManifest;
+std::shared_ptr<ClusterPageStream> stoneArchStream;
+int stoneArchMode=3;
+const AssetId stoneArchAssetId{"stone-arch/manifest"};
+void advanceStoneArch() {
+    if(!stoneArchAssets)return;
+    stoneArchAssets->update();
+    if(!stoneArchStream) {
+        const auto progress=stoneArchManifest.progress();
+        if(progress.status==AssetStatus::Failed) {
+            EM_ASM({window.engineStoneArchStatus?.({error:UTF8ToString($0)});},progress.error.c_str());
+            stoneArchManifest={};stoneArchAssets.reset();
+            return;
+        }
+        if(auto asset=stoneArchManifest.get<ClusterPageAsset>()) {
+            stoneArchStream=std::make_shared<ClusterPageStream>(asset,[](auto source,std::uint32_t page) {
+                const auto path=std::string("assets/")+stone_arch_example::directory+"/"+stone_arch_example::pageName(page);
+                return browserAssetLoader(path,[source,page](auto bytes,const AssetLoadContext& context) {
+                    context.complete(source->decode(page,bytes));
+                },{source->pages()[page].bytes,15000});
+            },ClusterStreamSettings{16*1024*1024,4,60});
+            stone_arch_example::bindStream(scene,stoneArchStream);
+            stone_arch_example::select(scene,stoneArchMode);
+            stoneArchManifest={};stoneArchAssets->unload(stoneArchAssetId);
+        }
+    }
+    if(!stoneArchStream)return;
+    stoneArchStream->update();
+    const auto stats=stoneArchStream->stats();
+    EM_ASM({window.engineStoneArchStatus?.({pages:$0,bytes:$1,pending:$2,failed:$3,reads:$4,evictions:$5,total:$6,rootBytes:$7});},
+        stats.residentPages,stats.residentBytes,stats.pendingPages,stats.failedPages,double(stats.reads),double(stats.evictions),
+        stoneArchStream->asset().pages().size()-1,stoneArchStream->asset().pages()[0].bytes);
+}
 PhysicsDemo physicsDemo{scene};
 ShipStressDemo shipStress{scene};
 double lastPhysicsReport=-1000;
@@ -87,7 +144,7 @@ std::unique_ptr<FrameTimeline> detailedTimeline;
 std::unique_ptr<ProfileSession> detailedProfileSession;
 AdaptiveQuality adaptiveQuality;
 EM_JS(int,adaptive_replay_enabled,(),{return new URLSearchParams(location.search).get('adaptiveTest')==='1';});
-EM_JS(int,adaptive_viewport_changed,(),{const c=Module.canvas,key=[c.clientWidth,c.clientHeight,devicePixelRatio].join(',');const changed=Module.__adaptiveViewport!==key;Module.__adaptiveViewport=key;return changed;});
+EM_JS(int,adaptive_viewport_changed,(double pixelRatio),{const c=Module.canvas,key=[c.clientWidth,c.clientHeight,pixelRatio].join(',');const changed=Module.__adaptiveViewport!==key;Module.__adaptiveViewport=key;return changed;});
 EM_JS(void,report_adaptive_quality,(int enabled,double target,double pressure,double smoothed,double changes,const char* phase,double ceilingScale,int ceilingShadow,int ceilingMaps,double ceilingDetail),{
     window.EngineQuality?.adaptiveReport({enabled:!!enabled,targetMs:target,pressure,smoothedMs:smoothed,changes,phase:UTF8ToString(phase),source:new URLSearchParams(location.search).get('adaptiveTest')==='1'?'test replay':'frame intervals',ceiling:{resolutionScale:ceilingScale,shadowResolution:ceilingShadow,maxShadowMaps:ceilingMaps,detailScale:ceilingDetail}});
 });
@@ -248,8 +305,8 @@ EM_JS(float, drain_browser_input, (), {
     window.EngineInput?.instance?.flush(window.Module);
     return document.querySelector('#viewport').clientHeight;
 });
-EM_JS(void, report_sky_state, (int mode,int geometry,float brightness,float rotation,int clouds,float coverage,float density,float rayleigh,float mie,int cycle,int running,double hour,double daySeconds), {
-    window.engineSkyState?.({mode,geometry,brightness,rotation,clouds:!!clouds,coverage,density,rayleigh,mie,cycle:!!cycle,running:!!running,hour,daySeconds});
+EM_JS(void, report_sky_state, (int mode,int geometry,float brightness,float rotation,int clouds,float coverage,float density,float rayleigh,float mie,int cycle,int running,double hour,double daySeconds,int volumetric,int cloudSteps), {
+    window.engineSkyState?.({mode,geometry,brightness,rotation,clouds:!!clouds,coverage,density,rayleigh,mie,cycle:!!cycle,running:!!running,hour,daySeconds,volumetric:!!volumetric,cloudSteps});
 });
 EM_JS(void, report_fog_state, (int enabled,float density,float start,float base,float falloff,float r,float g,float b), {
     window.engineFogState?.({enabled:!!enabled,density,start,base,falloff,color:[r,g,b]});
@@ -258,8 +315,8 @@ void reportSkyState() {
     const auto& fog=displayedScene().fog();const auto f=fog.value_or(FogSettings{});
     report_fog_state(bool(fog),f.density,f.startDistance,f.baseHeight,f.heightFalloff,f.color.x,f.color.y,f.color.z);
     const auto& setting=displayedScene().sky();
-    if(!setting) {report_sky_state(0,0,1,0,0,0.5f,1,1,1,0,0,12,180);return;}
-    const auto& s=*setting;report_sky_state(int(s.mode)+1,int(s.geometry),s.brightness,s.rotation,s.clouds.enabled,s.clouds.coverage,s.clouds.density,s.atmosphere.rayleigh,s.atmosphere.mie,s.dayNight.enabled,s.dayNight.running,s.dayNight.hour,s.dayNight.daySeconds);
+    if(!setting) {report_sky_state(0,0,1,0,0,0.5f,1,1,1,0,0,12,180,0,0);return;}
+    const auto& s=*setting;report_sky_state(int(s.mode)+1,int(s.geometry),s.brightness,s.rotation,s.clouds.enabled,s.clouds.coverage,s.clouds.density,s.atmosphere.rayleigh,s.atmosphere.mie,s.dayNight.enabled,s.dayNight.running,s.dayNight.hour,s.dayNight.daySeconds,s.clouds.volumetric,renderer->quality().volumetricCloudSteps);
 }
 EM_BOOL frame(double time,void*) {
     ProfileFrame detailedFrame;
@@ -268,8 +325,8 @@ EM_BOOL frame(double time,void*) {
     const bool suspended=hostSuspended||!renderer->ready();
     if(crowdDemo.active()&&!openedScene){const auto dt=paused()||suspended||crowdLastTime<0?0:std::clamp((time-crowdLastTime)/1000,0.,.25);if(!suspended){crowdDemo.prepare(scene,dt);crowdDemo.debug(scene);}crowdLastTime=time;}
     if(suspended)adaptiveQuality.resetEvidence();
-    if(adaptiveQuality.enabled()&&adaptive_viewport_changed())adaptiveQuality.resetEvidence();
-    if(application.suspended()!=suspended) {suspendAudioDemo(suspended);suspendDrivingAudio(suspended);suspendCinematic(suspended);}
+    if(adaptiveQuality.enabled()&&adaptive_viewport_changed(browser::canvasPixelRatio()))adaptiveQuality.resetEvidence();
+    if(application.suspended()!=suspended) {suspendAudioDemo(suspended);suspendDrivingAudio(suspended);suspendCinematic(suspended);suspendCutsceneDemo(suspended);}
     application.setSuspended(suspended);
     if(browserEditorPlaying())browserEditorPlaySession().setSuspended(suspended);
     const float inputHeight=drain_browser_input();
@@ -278,6 +335,7 @@ EM_BOOL frame(double time,void*) {
         ApplicationFrameCallbacks callbacks;
         callbacks.input=[&](Scene& active,const InputSystem& snapshot,const ApplicationFrame& clocks) {
             if(cinematicActive()||replayReviewing())return;
+            if(cutsceneDemoInput(active,snapshot,clocks.input.delta)) return;
             if(!browserEditorActive()){
                 prepareDrivingAudio(active);
                 if(formulaDemo.active(active)){
@@ -311,6 +369,7 @@ EM_BOOL frame(double time,void*) {
         };
         callbacks.afterSimulation=[&](Scene& active,const ApplicationFrame& clocks) {
             if(cinematicActive()){advanceCinematic(clocks.presentation.delta);return;}
+            if(advanceCutsceneDemo(active,clocks.presentation.delta)) return;
             advanceReplay(active,clocks.simulation.delta,clocks.presentation.delta);
             if(!browserEditorActive()&&formulaDemo.active(active)) {
                 formulaDemo.update(active,clocks.simulation.delta);
@@ -388,8 +447,28 @@ EM_BOOL frame(double time,void*) {
                 }
             }
         };
-        callbacks.present=[&](Scene&,const ApplicationFrame& clocks) {
+        callbacks.present=[&](Scene& active,const ApplicationFrame& clocks) {
             advanceContentIteration(time/1000);advanceAuthoringPanel();
+            advanceStoneArch();
+            if(dynamicGiDoorway && &active==&scene && !browserEditorPlaying()) {
+                const auto start=emscripten_get_now();
+                if(dynamicGiDoorway->advance(active))
+                    dynamicGiPeakUpdateMs=std::max(dynamicGiPeakUpdateMs,emscripten_get_now()-start);
+                int width=1,height=1;
+                emscripten_get_canvas_element_size("#viewport",&width,&height);
+                const auto sample=camera->worldToScreen(dynamic_gi_example::samplePosition,camera->pixelViewport(float(width),float(height))).pixel;
+                EM_ASM({window.engineDynamicGiState=Object.assign({}, {revision:$0,settled:!!$1,enabled:!!$2,open:!!$3,peakUpdateMs:$4,sample:[$5,$6],extent:[$7,$8]});},
+                       double(dynamicGiDoorway->revision()),int(dynamicGiDoorway->settled()),int(dynamicGiDoorway->enabled()),
+                       int(dynamicGiDoorway->open()),dynamicGiPeakUpdateMs,sample.x,sample.y,width,height);
+                const auto viewport=camera->pixelViewport(float(width),float(height));
+                const auto mirror=camera->worldToScreen(dynamic_gi_example::mirrorPosition,viewport).pixel;
+                const auto bounce=camera->worldToScreen(dynamic_gi_example::bounceSamplePosition,viewport).pixel;
+                const auto sourceRight=dynamic_gi_example::sourceScreenRight(*camera,viewport);
+                EM_ASM({Object.assign(window.engineDynamicGiState,{bounces:$0,offscreen:!!$1,reflectionRevision:$2,reflectionProgress:$3,mirror:[$4,$5],bounceSample:[$6,$7],sourceRight:$8});},
+                       dynamicGiDoorway->bounces(),int(dynamicGiDoorway->offscreenReflections()),
+                       double(dynamicGiDoorway->reflectionRevision()),dynamicGiDoorway->reflectionProgress(),
+                       mirror.x,mirror.y,bounce.x,bounce.y,sourceRight);
+            }
             static double lastSkyReport=-1000;
             if(time-lastSkyReport>=250) {reportSkyState();lastSkyReport=time;}
             renderer->render(emscripten_get_now()-updateStart,clocks.interval*1000);
@@ -1141,6 +1220,41 @@ EMSCRIPTEN_KEEPALIVE int engine_sky_texture(const void* data,int bytes) {
         displayedScene().setSky(std::move(sky));return 1;
     } catch(const std::exception& error) { material_message(error.what(),1);return 0; }
 }
+EMSCRIPTEN_KEEPALIVE int engine_sky_volume(int enabled,int steps) {
+    try {
+        if((enabled!=0&&enabled!=1)||steps<1||steps>64||!displayedScene().sky())throw std::invalid_argument("Invalid volumetric cloud settings");
+        auto sky=*displayedScene().sky();auto quality=manualQuality();
+        sky.clouds.volumetric=enabled!=0;quality.volumetricCloudSteps=enabled?steps:0;
+        sky.validate();quality.validate();
+        applyManualQuality(quality);displayedScene().setSky(sky);reportSkyState();return 1;
+    }catch(const std::exception& error){material_message(error.what(),1);return 0;}
+}
+EM_JS(int,cloud_fixture_enabled,(),{const p=new URLSearchParams(location.search);return p.get('scene')==='volumetric-clouds'||p.get('cloudTest')==='1';});
+EMSCRIPTEN_KEEPALIVE int engine_cloud_fixture(int mode) {
+    if(!cloud_fixture_enabled()||!renderer||openedScene||browserEditorActive()||mode<0||mode>=engine::cloud_example::fixtureCount)return 0;
+    try {
+        if(auto* previous=dynamic_cast<Actor*>(scene.findSavedNode("cloud.fixture.root"))) {previous->destroy();scene.flushPendingDestroy();}
+        for(const auto& child:scene.children())child->enabled=false;
+        camera->enabled=true;
+        auto quality=manualQuality();engine::cloud_example::configure(scene,*camera,quality,mode);
+        auto& root=scene.spawn("Volumetric cloud fixture");root.setSavedId("cloud.fixture.root");
+        engine::cloud_example::populate(scene,root,*camera,mode);
+        applyManualQuality(quality);renderer->setShadowsEnabled(true);setPaused(true);orbit->adoptCamera(8000);
+        RenderView view{camera};view.skyEnabled=mode!=18;view.clearColor=std::array<float,4>{.02f,.03f,.04f,1};
+        renderer->setViews(std::span(&view,1));renderer->setGui(nullptr);scene.synchronize();reportSkyState();
+        EM_ASM({window.engineCloudFixture=({mode:$0,steps:$1,volumetric:!!$2});},mode,quality.volumetricCloudSteps,scene.sky()->clouds.volumetric);
+        return 1;
+    }catch(const std::exception& error){material_message(error.what(),1);return 0;}
+}
+EMSCRIPTEN_KEEPALIVE int engine_cloud_demo() {
+    if(!engine_cloud_fixture(2))return 0;
+    auto quality=manualQuality();quality.resolution={1,1,1280,1280*720};applyManualQuality(quality);
+    setPaused(false);return 1;
+}
+EMSCRIPTEN_KEEPALIVE int engine_cloud_step(double delta) {
+    if(!cloud_fixture_enabled())return 0;
+    try{advanceSky(displayedScene(),delta);reportSkyState();return 1;}catch(const std::exception&){return 0;}
+}
 EM_JS(int, sky_fixture_enabled, (), { return new URLSearchParams(location.search).get('skyTest')==='1'; });
 EMSCRIPTEN_KEEPALIVE int engine_sky_fixture(int mode) {
     if(!sky_fixture_enabled()) return 0;
@@ -1166,6 +1280,28 @@ EMSCRIPTEN_KEEPALIVE int engine_environment_texture(const void* data,int bytes) 
 }
 // Pixel acceptance fixtures: isolated static/skinned and mirrored tangent bases.
 EM_JS(int, material_fixture_enabled, (), { return new URLSearchParams(location.search).get('materialTest')==='1'; });
+// Explicit acceptance-only fixture in the playground's owned scene.
+EM_JS(int,material_delivery_fixture_enabled,(),{return new URLSearchParams(location.search).get('materialDeliveryTest')==='1';});
+EMSCRIPTEN_KEEPALIVE int engine_material_delivery_fixture(int enabled,double seconds,int maps) {
+    if(!material_delivery_fixture_enabled()||!renderer||openedScene||!std::isfinite(seconds)||seconds<0||seconds>1000000)return 0;
+    try {
+        static Actor* retained=nullptr;
+        auto pending=material_delivery_example::build(enabled!=0,maps!=0);
+        if(retained){retained->destroy();scene.flushPendingDestroy();retained=nullptr;}
+        for(const auto& child:scene.children())child->enabled=false;
+        camera->enabled=true;camera->transform=pending.camera->transform;
+        camera->setOrthographic(9,.1f,50);orbit->adoptCamera(15);
+        scene.ambient=pending.world->ambient;scene.environment=pending.world->environment;
+        scene.environmentIntensity=pending.world->environmentIntensity;scene.setSky(std::nullopt);scene.setFog(std::nullopt);
+        retained=&scene.spawn("Material delivery acceptance");
+        while(!pending.world->children().empty()) {
+            auto node=pending.world->detachChild(*pending.world->children().back());
+            if(node->findSavedNode(pending.camera->savedId())==pending.camera||node.get()==pending.camera)continue;
+            retained->adoptChild(std::move(node));
+        }
+        setPaused(true);scene.update(0);renderer->setWaterTime(seconds);waterSeconds=seconds;return 1;
+    }catch(const std::exception& error){material_message(error.what(),1);return 0;}
+}
 EMSCRIPTEN_KEEPALIVE int engine_material_fixture(int mode) {
     if(!material_fixture_enabled()||mode<0||mode>7) return 0;
     static Actor* fixture=nullptr;
@@ -1203,6 +1339,31 @@ EMSCRIPTEN_KEEPALIVE int engine_compositing_fixture(int mode) {
     if(!compositing_fixture_enabled()) return 0;
     try { setPaused(true);setCompositingFixture(scene,*camera,*renderer,mode);return 1; }
     catch(const std::exception&) { return 0; }
+}
+EM_JS(int, render_surface_fixture_enabled, (), {
+    const params=new URLSearchParams(location.search);
+    return params.get('scene')==='render-surface'||params.get('renderSurfaceTest')==='1';
+});
+EMSCRIPTEN_KEEPALIVE int engine_render_surface_fixture(int mode) {
+    using namespace render_surface_demo;
+    if(!render_surface_fixture_enabled()||!renderer||!camera||mode<0||mode>int(Mode::Removed)) return 0;
+    try {
+        static std::unique_ptr<Monitor> monitor;
+        setPaused(true);
+        if(!monitor) {
+            for(const auto& child:scene.children()) child->enabled=false;
+            camera->enabled=true;
+            monitor=std::make_unique<Monitor>(scene.spawn("Render surface monitor"),*camera);
+        }
+        const auto value=static_cast<Mode>(mode);
+        const auto views=monitor->configure(value);
+        renderer->setViews({views.data(),value==Mode::Removed ? 1u : views.size()});
+        scene.synchronize();
+        return 1;
+    } catch(const std::exception& e) {
+        emscripten_log(EM_LOG_ERROR,"Render surface fixture: %s",e.what());
+        return 0;
+    }
 }
 EMSCRIPTEN_KEEPALIVE void engine_reset_metrics() { if(renderer) renderer->resetMeasurements(); }
 EMSCRIPTEN_KEEPALIVE int engine_input_submit(const InputPacket* packets,int count) {
@@ -1330,7 +1491,7 @@ EM_JS(void, dispose_browser_host, (), {
 });
 EMSCRIPTEN_KEEPALIVE void engine_shutdown() {
     if(application.state()==ApplicationState::Stopped) return;
-    shutdownReplay();shutdownCinematic();dispose_browser_host();shutdownAudioDemo();shutdownDrivingAudio();stopShipStress();stopPhysicsDemo();
+    shutdownReplay();shutdownCinematic();shutdownCutsceneDemo();dispose_browser_host();shutdownAudioDemo();shutdownDrivingAudio();stopShipStress();stopPhysicsDemo();
     crowdDemo.stop(scene,*orbit);aiDemo.stop(scene,*orbit);
     attachBrowserGui(nullptr);application.shutdown();
     openedScene=nullptr;openedSceneId={};openedOrbit.reset();openedDocument={};
@@ -1373,10 +1534,30 @@ EMSCRIPTEN_KEEPALIVE int engine_adaptive_sample(double ms,int count) {
     if(!renderer||!renderer->ready()||!adaptive_replay_enabled()||count<1||count>2000||!std::isfinite(ms)||ms<=0||ms>250)return 0;
     for(int i=0;i<count;++i)sampleAdaptiveQuality(ms);reportAdaptiveQuality();return 1;
 }
-EMSCRIPTEN_KEEPALIVE int engine_lighting(int enabled,float exposure,float bloom,float threshold,float saturation,float contrast,int cascades,float distance) {
+static int applyLighting(int enabled,float exposure,float bloom,float threshold,float saturation,float contrast,
+                         int cascades,float distance,std::optional<ToneMapper> toneMapper) {
     if(!renderer)return 0;
-    try {auto q=manualQuality();q.post={enabled!=0,exposure,bloom,threshold,saturation,contrast};q.directionalCascades=std::uint32_t(cascades);q.shadowDistance=distance;applyManualQuality(q);return 1;}
+    try {
+        auto q=manualQuality();
+        q.post={enabled!=0,exposure,bloom,threshold,saturation,contrast,toneMapper.value_or(q.post.toneMapper)};
+        q.directionalCascades=std::uint32_t(cascades);q.shadowDistance=distance;
+        applyManualQuality(q);return 1;
+    }
     catch(const std::exception&){return 0;}
+}
+EMSCRIPTEN_KEEPALIVE int engine_lighting(int enabled,float exposure,float bloom,float threshold,float saturation,float contrast,int cascades,float distance) {
+    return applyLighting(enabled,exposure,bloom,threshold,saturation,contrast,cascades,distance,std::nullopt);
+}
+EMSCRIPTEN_KEEPALIVE int engine_lighting_with_tone_mapper(int enabled,float exposure,float bloom,float threshold,float saturation,float contrast,
+                                                         int cascades,float distance,int toneMapper) {
+    return applyLighting(enabled,exposure,bloom,threshold,saturation,contrast,cascades,distance,static_cast<ToneMapper>(toneMapper));
+}
+EMSCRIPTEN_KEEPALIVE int engine_webgl_pbr(int enabled) {
+    if(!renderer||renderer->capabilities().backend!=RenderBackend::WebGl2||(enabled!=0&&enabled!=1))return 0;
+    try {
+        auto q=manualQuality();q.webGlPbr=enabled!=0;
+        applyManualQuality(q);return 1;
+    }catch(const std::exception&){return 0;}
 }
 EMSCRIPTEN_KEEPALIVE int engine_msaa(int samples) {
     if(!renderer) return 0;
@@ -1547,7 +1728,7 @@ EMSCRIPTEN_KEEPALIVE int engine_fog_fixture(int mode) {
     renderer->setViews(views);return 1;
 }
 EMSCRIPTEN_KEEPALIVE int engine_fog(int enabled,float density,float start,float base,float falloff,float r,float g,float b) {
-    try {FogSettings f;f.density=density;f.startDistance=start;f.baseHeight=base;f.heightFalloff=falloff;f.color={r,g,b};f.validate();displayedScene().setFog(enabled ? std::optional(f) : std::nullopt);return 1;}
+    try {auto& scene=displayedScene();auto f=scene.fog().value_or(FogSettings{});f.density=density;f.startDistance=start;f.baseHeight=base;f.heightFalloff=falloff;f.color={r,g,b};scene.setFog(enabled ? std::optional(f) : std::nullopt);return 1;}
     catch(const std::exception&) {return 0;}
 }
 EMSCRIPTEN_KEEPALIVE int engine_fog_view(int index,int enabled) {
@@ -1977,7 +2158,281 @@ extern "C" EMSCRIPTEN_KEEPALIVE int engine_route_resources(){
 }
 
 #include "spotlight_example.inc"
+
+EM_JS(int,volumetric_water_requested,(),{return new URLSearchParams(location.search).get('scene')==='fog-water-test';});
+extern "C" EMSCRIPTEN_KEEPALIVE int engine_volumetric_water_fixture(int mode,int orthographic) {
+    using namespace engine::volumetric_water_example;
+    if(!volumetric_water_requested()||mode<0||mode>=Count||openedScene)return 0;
+    try {
+        if(auto* previous=dynamic_cast<Actor*>(scene.findSavedNode("fog.water.fixture"))){
+            previous->destroy();
+            scene.flushPendingDestroy();
+        }
+        for(const auto& child:scene.children())child->enabled=false;
+        auto& root=scene.spawn("Volumetric water fixture");
+        root.setSavedId("fog.water.fixture");
+        camera->enabled=true;
+        configure(scene,root,*camera,static_cast<Case>(mode),orthographic!=0);
+        setPaused(true);
+        renderer->setViews(std::array{RenderView{camera}});
+        return 1;
+    }catch(const std::exception& error){archive_message(error.what(),1);return 0;}
+}
+
+EM_JS(int,stone_arch_requested,(),{return new URLSearchParams(location.search).get('scene')==='stone-arch';});
+extern "C" EMSCRIPTEN_KEEPALIVE int engine_stone_arch(int mode,int shot) {
+    if(!stone_arch_requested()||mode<0||mode>3||shot<0||shot>2||openedScene||browserEditorPlaying()||browserEditorFxActive())return 0;
+    try {
+        if(!scene.findSavedNode(stone_arch_example::savedId)) {
+            auto& root=scene.spawn("Stone arch comparison");
+            stone_arch_example::build(root,*camera,scene,mode!=3);
+            for(const auto& child:scene.children())if(child.get()!=&root)child->enabled=false;
+            camera->enabled=true;
+            camera->setViewport({});
+            camera->setVisibilityMask(~0u);
+            scene.environment.reset();
+            scene.setFog(std::nullopt);
+            renderer->setViews(std::array{RenderView{camera}});
+            auto quality=manualQuality();
+            quality.lod=quality.shadowLod=true;
+            applyManualQuality(quality);
+            setPaused(true);
+        }
+        stone_arch_example::pose(*camera,shot);
+        const auto offset=camera->transform.position-Vec3{0,2.25f,0};
+        orbit->adoptCamera(std::sqrt(dot(offset,offset)));
+        stoneArchMode=mode;
+        if(mode==3&&!stoneArchAssets) {
+            stoneArchAssets=std::make_unique<AssetManager>();
+            stoneArchAssets->registerAsset<ClusterPageAsset>(stoneArchAssetId,
+                browserAssetLoader("assets/stone-arch-lod/arch.wecl",[](auto bytes,const AssetLoadContext& context) {
+                    context.complete(ClusterPageAsset::open(bytes));
+                },{ClusterPageAsset::maxManifestBytes,15000}));
+            stoneArchManifest=stoneArchAssets->load<ClusterPageAsset>(stoneArchAssetId);
+        }
+        stone_arch_example::select(scene,mode);
+        return 1;
+    }catch(const std::exception& error){archive_message(error.what(),1);return 0;}
+}
+extern "C" EMSCRIPTEN_KEEPALIVE void engine_stone_arch_clear_pages() {
+    if(stoneArchStream)stoneArchStream->clear();
+}
+extern "C" EMSCRIPTEN_KEEPALIVE int engine_stone_arch_gpu(int enabled,int occluder) {
+    if(!stone_arch_requested()||openedScene||browserEditorPlaying()||browserEditorFxActive()
+        ||!scene.findSavedNode(stone_arch_example::savedId))return 0;
+    auto quality=manualQuality();
+    if(quality.gpuClusterCulling!=(enabled!=0)) {
+        quality.gpuClusterCulling=enabled!=0;
+        applyManualQuality(quality);
+    }
+    stone_arch_example::showOccluder(scene,occluder!=0);
+    return 1;
+}
+extern "C" EMSCRIPTEN_KEEPALIVE int engine_stone_arch_hierarchy(int enabled) {
+    if(!stone_arch_requested()||openedScene||browserEditorPlaying()||browserEditorFxActive()
+        ||!scene.findSavedNode(stone_arch_example::savedId))return 0;
+    auto quality=manualQuality();
+    if(quality.gpuClusterHierarchy!=(enabled!=0)) {
+        quality.gpuClusterHierarchy=enabled!=0;
+        if(enabled)quality.gpuClusterCulling=true;
+        applyManualQuality(quality);
+    }
+    return 1;
+}
+
+EM_JS(int,fog_doorway_requested,(),{return new URLSearchParams(location.search).get('scene')==='fog-doorway';});
+EM_JS(int,lighting_zone_requested,(),{return new URLSearchParams(location.search).get('scene')==='lighting-zone';});
+EM_JS(int,dynamic_gi_requested,(),{return new URLSearchParams(location.search).get('scene')==='dynamic-gi';});
+extern "C" EMSCRIPTEN_KEEPALIVE int engine_dynamic_gi(int open,int enabled,int reflections) {
+    if(!dynamic_gi_requested()||openedScene||browserEditorPlaying()||browserEditorFxActive())return 0;
+    try {
+        const bool initializing=!dynamicGiDoorway;
+        if(!dynamicGiDoorway) {
+            for(const auto& child:scene.children())child->enabled=false;
+            camera->enabled=true;
+            camera->setViewport({});
+            camera->setVisibilityMask(~0u);
+            dynamicGiDoorway=std::make_unique<dynamic_gi_example::Doorway>(scene,*camera);
+            renderer->setViews(std::array{RenderView{camera}});
+            renderer->setShadowsEnabled(false);
+            setPaused(true);
+        }
+        auto quality=manualQuality();
+        if(initializing) {
+            quality.webGlPbr=true;
+            quality.post.enabled=true;
+            quality.post.bloomStrength=0;
+        }
+        if(initializing||quality.screenSpaceReflections!=(reflections!=0)) {
+            quality.screenSpaceReflections=reflections!=0;
+            applyManualQuality(quality);
+        }
+        if(dynamicGiDoorway->open()!=(open!=0))dynamicGiPeakUpdateMs=0;
+        dynamicGiDoorway->setDoor(scene,open!=0);
+        dynamicGiDoorway->setEnabled(scene,enabled!=0);
+        return 1;
+    } catch(const std::exception& error){archive_message(error.what(),1);return 0;}
+}
+extern "C" EMSCRIPTEN_KEEPALIVE int engine_dynamic_gi_options(int bounces,int offscreen) {
+    if(!dynamic_gi_requested()||!dynamicGiDoorway||openedScene||browserEditorPlaying()||browserEditorFxActive()||bounces<1||bounces>4)return 0;
+    try {
+        if(dynamicGiDoorway->bounces()!=unsigned(bounces)||dynamicGiDoorway->offscreenReflections()!=(offscreen!=0))dynamicGiPeakUpdateMs=0;
+        dynamicGiDoorway->setBounces(unsigned(bounces));
+        dynamicGiDoorway->setOffscreenReflections(scene,offscreen!=0);
+        return 1;
+    }catch(const std::exception& error){archive_message(error.what(),1);return 0;}
+}
+extern "C" EMSCRIPTEN_KEEPALIVE int engine_lighting_zone(int stop,int local) {
+    if(!lighting_zone_requested()||stop<0||stop>2||openedScene||browserEditorPlaying()||browserEditorFxActive())return 0;
+    try {
+        using namespace engine::lighting_zone_example;
+        auto* samples=dynamic_cast<Actor*>(scene.findSavedNode("lighting.doorway.samples"));
+        if(!samples) {
+            for(const auto& child:scene.children()) child->enabled=false;
+            camera->enabled=true;
+            camera->setViewport({});
+            camera->setVisibilityMask(~0u);
+            samples=&build(scene,*camera);
+            scene.setFog(std::nullopt);
+            renderer->setViews(std::array{RenderView{camera}});
+            scene.update(.01f);
+            setPaused(true);
+        }
+        place(*samples,static_cast<Stop>(stop));
+        setLocalLighting(scene,local!=0);
+        scene.synchronize();
+        return 1;
+    }catch(const std::exception& error){archive_message(error.what(),1);return 0;}
+}
+extern "C" EMSCRIPTEN_KEEPALIVE int engine_fog_doorway(int mode) {
+    if(!fog_doorway_requested()||mode<0||mode>3||openedScene||browserEditorPlaying()||browserEditorFxActive())return 0;
+    try {
+        if(!scene.findSavedNode("fog.doorway")) {
+            for(const auto& child:scene.children())child->enabled=false;
+            auto& root=scene.spawn("Fog doorway");
+            root.setSavedId("fog.doorway");
+            camera->enabled=true;
+            engine::fog_example::build(root,*camera).setSavedId("fog.doorway.water");
+            camera->setViewport({});
+            camera->setVisibilityMask(~0u);
+            engine::fog_example::atmosphere(scene);
+            scene.environment.reset();
+            renderer->setViews(std::array{RenderView{camera}});
+            orbit->adoptCamera(10);
+            scene.update(.01f);
+            setPaused(true);
+        }
+        auto quality=manualQuality();
+        quality.volumetricFogGrid=mode!=3;
+        applyManualQuality(quality);
+        scene.setFog(mode==0?std::nullopt:std::optional(engine::fog_example::settings(mode>=2)));
+        scene.synchronize();
+        return 1;
+    }catch(const std::exception& error){archive_message(error.what(),1);return 0;}
+}
+extern "C" EMSCRIPTEN_KEEPALIVE void engine_fog_doorway_options(int selfShadows,int water) {
+    if(!fog_doorway_requested()||openedScene||browserEditorPlaying()||browserEditorFxActive())return;
+    if(auto* mesh=dynamic_cast<MeshComponent*>(scene.findSavedNode("fog.doorway.water"))){
+        auto quality=manualQuality();
+        quality.volumetricFogSelfShadows=selfShadows!=0;
+        applyManualQuality(quality);
+        mesh->enabled=water!=0;
+        scene.synchronize();
+    }
+}
+
+EM_JS(int,fog_shadow_check_requested,(),{return new URLSearchParams(location.search).get('scene')==='fog-shadow-test';});
+EM_JS(int,fog_milestone_check_requested,(),{return new URLSearchParams(location.search).get('scene')==='fog-milestone-test';});
+static int applyFogFixture(int mode,bool milestone) {
+    using namespace engine::fog_example;
+    const int count=milestone?int(MilestoneCaseCount):int(ShadowCaseCount);
+    if(mode<0||mode>=count||openedScene)return 0;
+    try {
+        if(auto* previous=dynamic_cast<Actor*>(scene.findSavedNode("fog.shadow.fixture"))){
+            previous->destroy();
+            scene.flushPendingDestroy();
+        }
+        for(const auto& child:scene.children())child->enabled=false;
+        auto& root=scene.spawn("Fog shadow acceptance");
+        root.setSavedId("fog.shadow.fixture");
+        camera->enabled=true;
+        auto quality=manualQuality();
+        if(milestone){
+            const auto check=static_cast<MilestoneCase>(mode);
+            configureMilestone(scene,root,*camera,check);
+            milestoneQuality(quality,check);
+        }else{
+            const auto check=static_cast<ShadowCase>(mode);
+            configureShadowCheck(scene,root,*camera,check);
+            shadowCheckQuality(quality,check);
+        }
+        applyManualQuality(quality);
+        setPaused(true);
+        renderer->setViews(std::array{RenderView{camera}});
+        return 1;
+    }catch(const std::exception& error){archive_message(error.what(),1);return 0;}
+}
+extern "C" EMSCRIPTEN_KEEPALIVE int engine_fog_shadow_fixture(int mode) {
+    return fog_shadow_check_requested()?applyFogFixture(mode,false):0;
+}
+extern "C" EMSCRIPTEN_KEEPALIVE int engine_fog_milestone_fixture(int mode) {
+    return fog_milestone_check_requested()?applyFogFixture(mode,true):0;
+}
+EM_JS(int,fog_profile_requested,(),{return new URLSearchParams(location.search).get('scene')==='fog-profile';});
+static int activeFogProfileScenario=-1,activeFogProfileSteps=16;
+extern "C" EMSCRIPTEN_KEEPALIVE int engine_fog_profile_fixture(int scenario,int variant,int steps) {
+    using namespace engine::fog_example;
+    if(!fog_profile_requested()||openedScene||browserEditorActive()||browserEditorPlaying()||browserEditorFxActive()||!renderer)return 0;
+    try {
+        validateProfile(scenario,variant,steps);
+        if(auto* previous=dynamic_cast<Actor*>(scene.findSavedNode("fog.profile.fixture"))) {
+            previous->destroy();
+            scene.flushPendingDestroy();
+        }
+        for(const auto& child:scene.children())child->enabled=false;
+        auto& root=scene.spawn("Fog profiling probe");
+        root.setSavedId("fog.profile.fixture");
+        camera->enabled=true;
+        configureProfile(scene,root,*camera,scenario,variant);
+        auto quality=manualQuality();
+        profileQuality(quality,scenario,variant,steps);
+        applyManualQuality(quality);
+        renderer->setShadowsEnabled(true);
+        setPaused(true);
+        renderer->setViews(std::array{RenderView{camera}});
+        renderer->setGui(nullptr);
+        const auto lightCount=scene.collect().lights.size();
+        const auto& fog=*scene.fog();
+        unsigned volumeCount=fog.volume&&fog.volume->density>0?1:0;
+        for(const auto& box:fog.additionalVolumes)volumeCount+=box.density>0;
+        activeFogProfileScenario=scenario;
+        activeFogProfileSteps=steps;
+        EM_ASM({window.fogProfileFixture=({scenario:$0,variant:$1,steps:$2,lightCount:$3,volumeCount:$4});},scenario,variant,steps,lightCount,volumeCount);
+        return 1;
+    }catch(const std::exception& error){archive_message(error.what(),1);return 0;}
+}
+extern "C" EMSCRIPTEN_KEEPALIVE int engine_fog_profile_update(int operation,float phase) {
+    if(!fog_profile_requested()||activeFogProfileScenario<0||operation<0||operation>5||!std::isfinite(phase)||
+       openedScene||browserEditorActive()||browserEditorPlaying()||browserEditorFxActive()||!renderer)return 0;
+    auto* root=dynamic_cast<Actor*>(scene.findSavedNode("fog.profile.fixture"));
+    if(!root)return 0;
+    try {
+        if(operation<=2)engine::fog_example::updateProfile(scene,*root,*camera,activeFogProfileScenario,operation,phase);
+        else if(operation==3) {
+            RenderView view{camera};
+            view.fogEnabled=phase>0;
+            renderer->setViews(std::array{view});
+        }else{
+            auto quality=manualQuality();
+            if(operation==4)quality.volumetricFogSteps=phase>0?activeFogProfileSteps:0;
+            else quality.volumetricFogLightCache=phase>0;
+            applyManualQuality(quality);
+        }
+        return 1;
+    }catch(const std::exception& error){archive_message(error.what(),1);return 0;}
+}
 #include "cinematic_browser.inc"
+#include "cutscene_demo_browser.inc"
 #include "replay_browser.inc"
 #include "content_iteration_browser.inc"
 

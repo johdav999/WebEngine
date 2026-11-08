@@ -13,7 +13,7 @@ using exactly the same panel and command implementations.
 | AI | Read/edit/add states and named behaviors, add ordered conditional/delayed transitions, remove the last transition, assign through built-in binding validation, save/open `.weai` and independently undo/redo. Click an overview card to select a state. |
 | Prefab | Open `.weprefab` or capture a built-in actor, inspect indexed definition nodes, rename/move nodes, capture another actor as a nested source, nest, place linked instances and explicitly publish revisions. Definition history is independent; publication uses scene history and retains supported instance overrides. |
 | FX | Capture an effect or choose Campfire/Explosion, read/edit emitter rate/lifetime and size endpoints, place/assign immutable candidates, save/open `.wefx` and independently undo/redo. Assignment and placement use scene history. |
-| Cinematic | Open/save `.wecin`, add all five existing track types, enter ranges/resources, record target poses/lenses at a time, select tracks in a timeline, remove tracks and undo/redo. Apply sampled track pose explicitly commits a transform to scene history. |
+| Cinematic | Open/save `.wecin`, add all seven track types, enter clip ranges and resources, edit atlas settings and subtitle text, record target poses/lenses, select tracks, remove tracks and undo/redo. Apply sampled track pose explicitly commits a transform to scene history. |
 
 Indices start at zero. Enter numbers with a decimal point. Read buttons populate
 forms from the chosen document item. Invalid candidates retain the last valid

@@ -2,14 +2,14 @@
 EM_JS(int,spotlight_requested,(),{const q=new URLSearchParams(location.search);return ['spotlight','lighting'].includes(q.get('scene'))||q.get('spotlightTest')==='1';});
 extern "C" EMSCRIPTEN_KEEPALIVE int engine_spotlight_fixture(int mode){
     try{
-        if(!spotlight_requested()||mode<0||mode>10||openedScene||browserEditorPlaying()||browserEditorFxActive())return 0;
+        if(!spotlight_requested()||mode<0||mode>11||openedScene||browserEditorPlaying()||browserEditorFxActive())return 0;
         const bool showcase=mode>=8;
         auto candidate=std::make_unique<Actor>("Spotlight fixture");candidate->setSavedId("spotlight.fixture");
         auto material=std::make_shared<Material>();material->roughness=1;material->metallic=0;
         auto mesh=std::make_shared<Mesh>(*Mesh::plane(20));mesh->materials={material};
         auto& receiver=candidate->addComponent<MeshComponent>("Light receiver",mesh);receiver.color={.6f,.6f,.6f};
         if(!showcase)receiver.transform.rotation.x=pi/2;
-        const int count=mode==8?2:mode==5?2:mode==6||mode==7?9:1;
+        const int count=mode==11?0:mode==8?2:mode==5?2:mode==6||mode==7?9:1;
         for(int i=0;i<count;++i){
             auto& light=candidate->addComponent<LightComponent>(i==0?"Spotlight":"Additional light",mode==1?LightType::Point:LightType::Spot);
             light.transform.position=mode==8?Vec3{i==0?-.8f:.8f,1.1f,3}:Vec3{0,0,4};
@@ -27,7 +27,8 @@ extern "C" EMSCRIPTEN_KEEPALIVE int engine_spotlight_fixture(int mode){
             auto& body=candidate->addComponent<MeshComponent>("Example chassis",Mesh::cube());body.transform.position={0,.6f,4.4f};body.transform.scale={2,.8f,3};body.color={.05f,.2f,.5f};
             auto& cabin=candidate->addComponent<MeshComponent>("Example cabin",Mesh::cube());cabin.transform.position={0,1.2f,4.7f};cabin.transform.scale={1.6f,.6f,1.4f};cabin.color={.15f,.25f,.35f};
         }
-        if(showcase){
+        if(mode==11) { receiver.enabled=false;ranked_lighting_example::populate(*candidate); }
+        if(showcase&&mode!=11){
             for(int i=0;i<3;++i){auto& blocker=candidate->addComponent<MeshComponent>("Shadow pillar",Mesh::cube());blocker.transform.position={float(i-1)*2, .8f, float(-i)};blocker.transform.scale={.65f,1.6f,.65f};blocker.color={.3f,.4f,.55f};}
             auto glowMaterial=std::make_shared<Material>();glowMaterial->shader=MaterialShader::Unlit;glowMaterial->emissive={16,5,1};
             auto glowMesh=std::make_shared<Mesh>(*Mesh::cube());glowMesh->materials={glowMaterial};
@@ -43,6 +44,16 @@ extern "C" EMSCRIPTEN_KEEPALIVE int engine_spotlight_fixture(int mode){
         if(mode==5){camera->setVisibilityMask(1);camera->setViewport({0,0,.5f,1});auto& second=root->addComponent<CameraComponent>("Masked second view");second.transform=camera->transform;second.setOrthographic(8,.1f,60);second.setVisibilityMask(2);second.setViewport({.5f,0,.5f,1});receiver.visibilityMask=3;renderer->setViews(std::array{RenderView{camera},RenderView{&second}});}
         orbit->adoptCamera(showcase?15:8);scene.synchronize();if(browserEditorActive())bindBrowserEditor(scene,*camera,*orbit,displayedLibrary(),renderer->views());return 1;
     }catch(const std::exception& error){archive_message(error.what(),1);return 0;}
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE int engine_ranked_lights(int enabled,int reserve) {
+    if(!renderer)return 0;
+    try {
+        auto quality=manualQuality();
+        quality.rankedLights=enabled!=0;
+        quality.localShadowReserve=std::uint32_t(reserve);
+        applyManualQuality(quality);return 1;
+    } catch(const std::exception&) { return 0; }
 }
 
 extern "C" EMSCRIPTEN_KEEPALIVE int engine_lighting_fixture(int directional) {

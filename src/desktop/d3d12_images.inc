@@ -65,13 +65,20 @@ std::array<std::shared_ptr<const Texture>,9> drawTextures(const MeshDraw& draw) 
     if(!draw.material.layers.enabled&&!draw.material.baseColorTexture&&draw.texture)sources[0]=draw.texture;
     return sources;
 }
-D3D12_GPU_DESCRIPTOR_HANDLE materialBinding(Frame& frame,const MeshDraw& draw) {
-    const auto sources=drawTextures(draw);MaterialKey key;key.second=draw.material.layers.enabled;
-    for(UINT i=0;i<9;++i)key.first[i]=sources[i].get();
+D3D12_GPU_DESCRIPTOR_HANDLE materialBinding(Frame& frame,const MeshDraw& draw,const std::shared_ptr<SurfaceTarget>& surface) {
+    const auto sources=drawTextures(draw);
+    std::array<const Texture*,9> identities{};
+    for(UINT i=0;i<9;++i)identities[i]=sources[i].get();
+    const MaterialKey key{identities,draw.material.layers.enabled,surface.get()};
     if(auto it=frame.materialSlots.find(key);it!=frame.materialSlots.end())return srvGpu(frame,it->second);
     const auto first=reserveDescriptors(frame,9);
     const auto semantics=materialTextureSemantics(draw.material);
     for(UINT i=0;i<9;++i){
+        if(i==0&&surface){
+            imageView(frame,first,surface->color.Get(),DXGI_FORMAT_R8G8B8A8_UNORM_SRGB);
+            frame.retainedSurfaces.push_back(surface);
+            continue;
+        }
         textureSlot(frame,sources[i],semantics[i]); // Ensure upload/cache publication first.
         const auto& gpu=textures_.at({sources[i].get(),semantics[i],false});const auto& image=gpu.image;
         D3D12_SHADER_RESOURCE_VIEW_DESC view{};view.Format=gpu.format;
@@ -82,32 +89,45 @@ D3D12_GPU_DESCRIPTOR_HANDLE materialBinding(Frame& frame,const MeshDraw& draw) {
 }
 D3D12_GPU_DESCRIPTOR_HANDLE environmentBinding(Frame& frame) {
     static const auto fallback=Environment::studio();const auto source=scene_->environment?scene_->environment:fallback;
-    if(environment_.source.lock()!=source){
-        GpuEnvironment next;next.source=source;next.levels=UINT(source->specular.size());
+    const auto& zones=scene_->lightingZones();
+    const auto zoneSources=lightingZoneSources(zones);
+    const auto& probe=scene_->reflectionProbe();
+    const auto reflectionSource=probe?probe->environment:std::shared_ptr<const Environment>{};
+    if(environment_.source.lock()!=source||environment_.zoneSources!=zoneSources||environment_.reflectionSource!=reflectionSource){
+        GpuEnvironment next;next.source=source;next.zoneSources=zoneSources;next.reflectionSource=reflectionSource;
+        next.levels=UINT(source->specular.size());next.cubeCount=UINT(1+zones.size()+(reflectionSource?1:0));
+        const bool packedRequired=!zones.empty()||bool(reflectionSource);
+        const auto packed=packedRequired?packLightingEnvironments(*source,zones,reflectionSource.get()):LightingEnvironmentArray{};
+        const auto& specular=packedRequired?packed.specular:source->specular;
+        const auto& diffuse=packedRequired?packed.diffuse:source->diffuse;
         auto halfPixels=[](const std::array<float,4>* data,std::size_t count){
             std::vector<unsigned char> bytes(count*8);for(std::size_t i=0;i<count;++i)for(UINT c=0;c<4;++c){const auto h=floatToHalf(data[i][c]);std::memcpy(bytes.data()+i*8+c*2,&h,2);}return bytes;
         };
-        D3D12_RESOURCE_DESC desc{};desc.Dimension=D3D12_RESOURCE_DIMENSION_TEXTURE2D;desc.Format=DXGI_FORMAT_R16G16B16A16_FLOAT;desc.SampleDesc.Count=1;desc.DepthOrArraySize=6;
-        desc.Width=desc.Height=source->specular.front().size;desc.MipLevels=UINT16(next.levels);
+        D3D12_RESOURCE_DESC desc{};desc.Dimension=D3D12_RESOURCE_DIMENSION_TEXTURE2D;desc.Format=DXGI_FORMAT_R16G16B16A16_FLOAT;desc.SampleDesc.Count=1;desc.DepthOrArraySize=UINT16(next.cubeCount*6);
+        desc.Width=desc.Height=specular.front().size;desc.MipLevels=UINT16(next.levels);
         std::vector<std::vector<unsigned char>> pixels;
-        for(UINT face=0;face<6;++face)for(const auto& level:source->specular){const std::size_t count=std::size_t(level.size)*level.size;pixels.push_back(halfPixels(level.pixels.data()+face*count,count));}
+        for(UINT face=0;face<desc.DepthOrArraySize;++face)for(const auto& level:specular){const std::size_t count=std::size_t(level.size)*level.size;pixels.push_back(halfPixels(level.pixels.data()+face*count,count));}
         next.images[0]=uploadImage(frame,desc,pixels);
-        desc.Width=desc.Height=source->diffuse.size;desc.MipLevels=1;pixels.clear();
-        const auto count=std::size_t(source->diffuse.size)*source->diffuse.size;
-        for(UINT face=0;face<6;++face)pixels.push_back(halfPixels(source->diffuse.pixels.data()+face*count,count));
+        desc.Width=desc.Height=diffuse.size;desc.MipLevels=1;pixels.clear();
+        const auto count=std::size_t(diffuse.size)*diffuse.size;
+        for(UINT face=0;face<desc.DepthOrArraySize;++face)pixels.push_back(halfPixels(diffuse.pixels.data()+face*count,count));
         next.images[1]=uploadImage(frame,desc,pixels);
         desc.Width=desc.Height=source->lutSize;desc.DepthOrArraySize=1;pixels={halfPixels(source->brdf.data(),source->brdf.size())};next.images[2]=uploadImage(frame,desc,pixels);
         for(auto& image:environment_.images)if(image)frame.retained.push_back(std::move(image));environment_=std::move(next);
     }
     const auto first=reserveDescriptors(frame,3);
     for(UINT i=0;i<3;++i){D3D12_SHADER_RESOURCE_VIEW_DESC view{};view.Format=DXGI_FORMAT_R16G16B16A16_FLOAT;view.Shader4ComponentMapping=D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-        if(i<2){view.ViewDimension=D3D12_SRV_DIMENSION_TEXTURECUBE;view.TextureCube.MipLevels=i==0?environment_.levels:1;}
+        if(i<2){view.ViewDimension=D3D12_SRV_DIMENSION_TEXTURECUBEARRAY;view.TextureCubeArray.MipLevels=i==0?environment_.levels:1;view.TextureCubeArray.NumCubes=environment_.cubeCount;}
         else {view.ViewDimension=D3D12_SRV_DIMENSION_TEXTURE2D;view.Texture2D.MipLevels=1;}
         device_->CreateShaderResourceView(environment_.images[i].Get(),&view,srvCpu(frame,first+i));}
     return srvGpu(frame,first);
 }
 void prepareShadowTargets() {
-    const UINT resolution=quality_.shadowResolution,layers=std::max(1u,quality_.maxShadowMaps);
+    const bool cloudShadows=scene_&&std::any_of(views_.views().begin(),views_.views().end(),[&](const RenderView& view) {
+        return !view.target&&view.camera&&view.camera->enabled&&
+            prepareRenderClouds(scene_->sky(),*view.camera,quality_,view.skyEnabled,quality_.shadowResolution,shadowsEnabled_).sun[3]>0;
+    });
+    const UINT resolution=quality_.shadowResolution,layers=cloudShadows?5u:std::max(1u,quality_.maxShadowMaps);
     if(resolution==shadowResolution_&&layers==shadowLayers_)return;idle();
     D3D12_RESOURCE_DESC desc{};desc.Dimension=D3D12_RESOURCE_DIMENSION_TEXTURE2D;desc.Width=desc.Height=resolution;desc.DepthOrArraySize=UINT16(layers);desc.MipLevels=1;
     desc.Format=DXGI_FORMAT_R32_TYPELESS;desc.SampleDesc.Count=1;desc.Flags=D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
