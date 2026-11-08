@@ -27,6 +27,9 @@ public:
     void setMaterial(std::size_t slot,MaterialInstance instance);
     void clearMaterial(std::size_t slot);
     Material resolvedMaterial(std::size_t slot,bool metadata=true) const;
+    // Cached, validated metadata-free draw materials. Public override edits are
+    // detected by value; published mesh/material assets must remain immutable.
+    const std::vector<Material>& renderMaterials() const;
     BlendMode blend=BlendMode::Opaque;
     float opacity=1; // Alpha/Additive meshes depth-test, without writing depth.
     RenderLayer layer=RenderLayer::World;
@@ -46,6 +49,13 @@ public:
     virtual std::shared_ptr<const MorphPose> morphPose() const; // Null when all weights are zero.
     MeshBounds localBounds(const std::shared_ptr<const SkinPose>& pose={}) const;
 private:
+    Material resolveMaterial(std::size_t slot,bool metadata) const;
+    mutable std::weak_ptr<const Mesh> renderMesh_;
+    mutable std::shared_ptr<const Texture> renderTexture_;
+    mutable BlendMode renderBlend_=BlendMode::Opaque;
+    mutable bool renderMaterialsValid_=false;
+    mutable std::vector<std::optional<MaterialInstance>> renderOverrides_;
+    mutable std::vector<Material> renderMaterials_;
     MeshBounds geometryBounds(const std::shared_ptr<const SkinPose>& pose) const;
     void synchronizeMorphs() const;
     mutable std::weak_ptr<const Mesh> morphMesh_;

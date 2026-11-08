@@ -81,12 +81,12 @@ std::size_t RenderFrame::chooseLod(const MeshDraw& draw,LodState& state,const De
     return state.level;
 }
 void RenderFrame::collect(const Scene& scene,bool instancing,std::uint32_t visibilityMask,const Frustum* frustum,
-                          const DetailView* detail,const ClusterPageUpload& upload,bool gpuHierarchy) {
+                          const DetailView* detail,const ClusterPageUpload& upload,bool gpuHierarchy,bool cullUnused) {
     for(auto& batches:batches_) batches.clear();
     for(auto& batches:cameraBatches_) batches.clear();
     shadowBatches_.clear();
     for(auto& shadow:shadows_) shadow.batches.clear();
-    scene.collect(scene_,visibilityMask,frustum);storageGrowths_=scene_.storageGrowths;
+    scene.collect(scene_,visibilityMask,frustum,cullUnused);storageGrowths_=scene_.storageGrowths;
     cameraLodParts_=shadowLodParts_=shadowCulledParts_=0;
     const auto levelsCapacity=cameraLevels_.capacity();cameraLevels_.resize(scene_.meshes.size());
     storageGrowths_+=levelsCapacity!=cameraLevels_.capacity();

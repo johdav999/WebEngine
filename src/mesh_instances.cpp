@@ -97,7 +97,7 @@ void MeshInstancesComponent::setInstances(std::shared_ptr<const MeshInstanceSet>
 void MeshInstancesComponent::setBend(std::shared_ptr<const MeshBend> bend,std::shared_ptr<const MeshWindState> wind) {
     require((!bend&&!wind)||(bend&&wind&&bend->mesh()==mesh),"Mesh bend/source/state mismatch");bend_=std::move(bend);wind_=std::move(wind);
 }
-void MeshInstancesComponent::appendDraws(SceneFrame& frame,const Mat4& world,const Frustum* frustum) const {
+void MeshInstancesComponent::appendDraws(SceneFrame& frame,const Mat4& world,const Frustum* frustum,bool retainOffCamera) const {
     if(!instances_)return;require(instances_->mesh()==mesh&&(!bend_||bend_->mesh()==mesh),"Bulk mesh source replaced without its instance data");
     lodPolicy.validate();require(blend==BlendMode::Opaque&&std::isfinite(opacity)&&opacity>=0&&opacity<=1,"Invalid bulk mesh blending");
     std::vector<Material> materials;const auto slots=std::max<std::size_t>(1,mesh->materials.size());materials.reserve(slots);
@@ -112,6 +112,7 @@ void MeshInstancesComponent::appendDraws(SceneFrame& frame,const Mat4& world,con
         const auto bounds=paddedBounds(mesh->localBounds(),normal,wind_.get());
         const bool visible=cellVisible&&(!frustum||!frustumCulling||!bounds.valid||frustum->intersectsTransformedAabb(bounds.minimum,bounds.maximum,model));
         ++frame.meshCount;frame.culledMeshes+=!visible;
+        if(!visible&&!retainOffCamera)continue;
         std::uint32_t part=0;
         auto append=[&](std::size_t slot,std::uint32_t first,std::uint32_t count) {
             require(slot<materials.size()&&std::uint64_t(first)+count<=mesh->indices.size()&&count%3==0,"Invalid bulk mesh material range");

@@ -291,18 +291,31 @@ std::size_t SceneFrame::storageBytes() const {
     for(const auto& layer:layerDraws) bytes+=layer.capacity()*sizeof(std::uint32_t);
     return bytes;
 }
-SceneFrame Scene::collect(std::uint32_t visibilityMask,const Frustum* frustum) const {
-    SceneFrame frame;collect(frame,visibilityMask,frustum);return frame;
+SceneFrame Scene::collect(std::uint32_t visibilityMask,const Frustum* frustum,bool cullUnused) const {
+    SceneFrame frame;collect(frame,visibilityMask,frustum,cullUnused);return frame;
 }
 void Scene::updateAnimations(double delta) {
     update(delta);
 }
-void Scene::collect(SceneFrame& frame,std::uint32_t visibilityMask,const Frustum* frustum) const {
+void Scene::collect(SceneFrame& frame,std::uint32_t visibilityMask,const Frustum* frustum,bool cullUnused) const {
     ProfileScope profile(ProfileCategory::Render,"Scene collection",name);
     frame.clear();
+    // Shadow maps and planar captures require geometry outside the main camera.
+    // Complete collection remains the default for picking/GI/manual shadow users.
+    bool retainOffCamera=!cullUnused||!frustum;
+    if(!retainOffCamera)visit([&](const Node& node,const Mat4&) {
+        if(retainOffCamera)return;
+        if(const auto* light=dynamic_cast<const LightComponent*>(&node);light&&(light->visibilityMask&visibilityMask)&&light->shadow.enabled)retainOffCamera=true;
+        if(const auto* mesh=dynamic_cast<const MeshComponent*>(&node);mesh&&mesh->mesh&&(mesh->visibilityMask&visibilityMask)&&mesh->layer==RenderLayer::World)
+            for(const auto& material:mesh->renderMaterials())
+                if(material.shader==MaterialShader::Water&&material.water.planarReflectionStrength>0&&material.water.reflectionStrength>0)retainOffCamera=true;
+    },Mat4::identity(),&frame.transformRebuilds);
     // One reference keeps the traversal callback within std::function's small storage.
-    struct { SceneFrame& frame;std::uint32_t mask;const Frustum* frustum;const PhysicsWorld* physics; } context{frame,visibilityMask,frustum,physics_.get()};
+    struct { SceneFrame& frame;std::uint32_t mask;const Frustum* frustum;const PhysicsWorld* physics;bool retainOffCamera; } context{frame,visibilityMask,frustum,physics_.get(),retainOffCamera};
     visit([&context](const Node& node,const Mat4& authoritativeWorld) {
+        // Hierarchy-only nodes need no physics presentation lookup.
+        if(!dynamic_cast<const MeshComponent*>(&node)&&!dynamic_cast<const LightComponent*>(&node)&&!dynamic_cast<const ParticleEmitterComponent*>(&node))return;
+        if(const auto* mesh=dynamic_cast<const MeshComponent*>(&node);mesh&&!mesh->mesh)mesh->renderMaterials();
         const auto world=context.physics ? context.physics->renderMatrix(node,authoritativeWorld) : authoritativeWorld;
         auto& frame=context.frame;const auto visibilityMask=context.mask;
         auto appendDraw=[&frame](MeshDraw draw) {
@@ -316,14 +329,14 @@ void Scene::collect(SceneFrame& frame,std::uint32_t visibilityMask,const Frustum
             frame.storageGrowths+=(meshCapacity!=frame.meshes.capacity())+(layerCapacity!=frame.layerDraws[layer].capacity());
         };
         const auto* instances=dynamic_cast<const MeshInstancesComponent*>(&node);
-        if(instances&&(instances->visibilityMask&visibilityMask))instances->appendDraws(frame,world,context.frustum);
+        if(instances&&(instances->visibilityMask&visibilityMask))instances->appendDraws(frame,world,context.frustum,context.retainOffCamera);
         if(const auto* mesh=dynamic_cast<const MeshComponent*>(&node); !instances && mesh && mesh->mesh && !mesh->mesh->indices.empty() && (mesh->visibilityMask&visibilityMask)) {
+            if(static_cast<std::size_t>(mesh->layer)>=frame.layerDraws.size())throw std::invalid_argument("Invalid mesh render layer");
             mesh->lodPolicy.validate();
             if(!std::isfinite(mesh->opacity)||mesh->opacity<0||mesh->opacity>1
                 ||(mesh->blend!=BlendMode::Opaque&&mesh->blend!=BlendMode::Alpha&&mesh->blend!=BlendMode::Additive))
                 throw std::invalid_argument("Invalid mesh blending or opacity");
             ++frame.meshCount;
-            const auto& normal=node.normalMatrix(world);
             const auto* skeletal=dynamic_cast<const SkeletalMeshComponent*>(mesh);
             const auto skin=skeletal ? skeletal->skinPose() : nullptr;
             const auto morph=mesh->morphPose();
@@ -334,9 +347,12 @@ void Scene::collect(SceneFrame& frame,std::uint32_t visibilityMask,const Frustum
                 if(bounds.valid) visible=context.frustum->intersectsTransformedAabb(bounds.minimum,bounds.maximum,world);
             }
             frame.culledMeshes+=!visible;
+            if(!visible&&!context.retainOffCamera)return;
+            const auto& normal=node.normalMatrix(world);
+            const auto& materials=mesh->renderMaterials();
             std::uint32_t partIndex=0;
             auto materialDraw=[&](std::size_t slot,std::uint32_t first,std::uint32_t count) {
-                auto material=mesh->resolvedMaterial(slot,false);
+                auto material=materials.at(slot);
                 const Vec3 color{mesh->color.x*material.baseColor.x,mesh->color.y*material.baseColor.y,mesh->color.z*material.baseColor.z};
                 const auto blend=material.alphaMode==AlphaMode::Blend ? BlendMode::Alpha : material.alphaMode==AlphaMode::Additive ? BlendMode::Additive : BlendMode::Opaque;
                 const Vec3 x{world.m[0],world.m[1],world.m[2]},y{world.m[4],world.m[5],world.m[6]},z{world.m[8],world.m[9],world.m[10]};

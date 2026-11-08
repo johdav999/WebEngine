@@ -105,9 +105,9 @@ public:
     PhysicsWorld* physicsIfCreated() { return physics_.get(); }
     const PhysicsWorld* physicsIfCreated() const { return physics_.get(); }
     void flushPendingDestroy(); // Idle only; update/fixedUpdate flush automatically.
-    SceneFrame collect(std::uint32_t visibilityMask=0xffffffffu,const Frustum* frustum=nullptr) const;
+    SceneFrame collect(std::uint32_t visibilityMask=0xffffffffu,const Frustum* frustum=nullptr,bool cullUnused=false) const;
     void updateAnimations(double deltaSeconds); // Compatibility alias for update().
-    void collect(SceneFrame& frame,std::uint32_t visibilityMask=0xffffffffu,const Frustum* frustum=nullptr) const; // Refill caller-owned reusable storage.
+    void collect(SceneFrame& frame,std::uint32_t visibilityMask=0xffffffffu,const Frustum* frustum=nullptr,bool cullUnused=false) const; // Refill caller-owned reusable storage.
 protected:
     virtual void onLoad() {} // May throw; Application rolls back ownership and calls onUnload.
     virtual void onUnload() noexcept {}

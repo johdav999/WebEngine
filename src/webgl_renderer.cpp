@@ -1660,7 +1660,7 @@ void WebGlRenderer::drawSurfaces(const ClusterPageUpload& uploadCluster,FrameTim
         const DetailView detail{vp,resolved.viewport.width*quality_.detailScale,
             resolved.viewport.height*quality_.detailScale};
         frame_.collect(*scene_,false,camera.visibilityMask(),culling_ ? &camera.frustum(aspect) : nullptr,
-            quality_.lod ? &detail : nullptr,uploadCluster);
+            quality_.lod ? &detail : nullptr,uploadCluster,false,true);
         const auto& scene=frame_.sceneFrame();
         timing.collectMs+=emscripten_get_now()-collectStart;
         counters_.meshes+=scene.meshCount;
@@ -1791,7 +1791,7 @@ void WebGlRenderer::render(double updateMs,double intervalMs) {
             glScissor(resolved.x,height_-resolved.y-resolved.height,resolved.width,resolved.height);glDepthMask(GL_TRUE);glDepthRangef(0,1);
             if(view.clearColor) { const auto& color=*view.clearColor;glClearColor(color[0],color[1],color[2],color[3]);glClear(GL_COLOR_BUFFER_BIT); }
             const double collectStart=emscripten_get_now();const auto& vp=camera.viewProjection(aspect);const DetailView detail{vp,resolved.viewport.width*quality_.detailScale,resolved.viewport.height*quality_.detailScale};
-            frame_.collect(*scene_,instancing_,camera.visibilityMask(),culling_ ? &camera.frustum(aspect) : nullptr,quality_.lod ? &detail : nullptr,uploadCluster);
+            frame_.collect(*scene_,instancing_,camera.visibilityMask(),culling_ ? &camera.frustum(aspect) : nullptr,quality_.lod ? &detail : nullptr,uploadCluster,false,true);
             prepareObjects();
             const auto& scene=frame_.sceneFrame();fx_.prepare(scene,camera.view());timing.collectMs+=emscripten_get_now()-collectStart;
             const auto shadowResolution=std::min(quality_.shadowResolution,capabilities_.maxTextureDimension2D);
