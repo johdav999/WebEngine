@@ -17,6 +17,15 @@ The default script uses CMake's `Visual Studio 18 2026` generator; VS2022 can be
 selected explicitly if installed. The pinned Dawn package is Release x64 MSVC;
 build this proof in Release, not Debug or MinGW.
 
+The pinned Dawn binary does not link with MSVC 19.44 (VS2022 17.14): it references
+newer STL symbols such as `__std_rotate`. Use a compatible newer toolchain for
+Dawn. VS2022 can build the direct D3D12 configuration with
+`-DWEBENGINE_WINDOWS_DAWN=OFF -DWEBENGINE_WINDOWS_D3D12=ON`.
+
+Shader embedding uses adjacent raw string literals to stay within MSVC's
+individual-literal size limit. Keep this splitting in `cmake/shaders.cmake` when
+adding embedded shaders; it preserves the shader text shared with browser builds.
+
 ```powershell
 ./scripts/setup-windows.ps1
 ./scripts/build-windows.ps1

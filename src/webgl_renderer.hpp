@@ -1,5 +1,6 @@
 #pragma once
 #include "engine/renderer.hpp"
+#include "engine/mesh_instances.hpp"
 #include "engine/gui.hpp"
 #include "engine/view_lighting.hpp"
 #include "lighting_zones_render.hpp"
@@ -35,7 +36,7 @@ public:
     void setAssetUploadBudget(UploadBudget budget) { budget.validate();uploadBudget_=budget; }
     const UploadBudget& assetUploadBudget() const { return uploadBudget_; }
     void resetMeasurements() { measurements_.reset();lastReport_=-1000; }
-    void setInstancingEnabled(bool) {} // Draws individually; capability report declares this.
+    void setInstancingEnabled(bool value) {instancing_=value;}
     void setFrustumCullingEnabled(bool enabled) { culling_=enabled; }
     void setShadowsEnabled(bool value) {shadowsEnabled_=value;}
     void setLodEnabled(bool enabled) { quality_.lod=enabled; }
@@ -99,6 +100,16 @@ private:
     std::array<std::array<float,4>,3> diffuseGiMetadata_{};
     std::shared_ptr<const DiffuseGiSnapshot> diffuseGiSource_;
     void uploadDiffuseGi();
+    struct GpuBend {std::weak_ptr<const MeshBend> source;GLuint buffer=0;};
+    std::unordered_map<const MeshBend*,GpuBend> bends_;
+    GLuint objects_=0;
+    std::size_t objectCapacity_=0;
+    bool instancing_=true;
+    std::array<float,8> windValues_{};
+    bool windValuesValid_=false;
+    GLuint windProgram_=0;
+    std::vector<std::byte> packedObjects_;
+    void prepareObjects();
     RenderQuality quality_;
     RenderCapabilities capabilities_;
     EMSCRIPTEN_WEBGL_CONTEXT_HANDLE context_=0;
@@ -167,6 +178,7 @@ private:
     bool drawFogLightCache(FogUniform& fog);
     void drawFogGrid(const CameraComponent& camera,float aspect,const FogUniform& fog);
     void bindFogGrid(GLuint program,const CameraComponent& camera,float aspect);
+    void drawMesh(const MeshDraw& draw,const Mat4& vp,const SceneFrame& frame,std::uint32_t instances=1,std::uint32_t firstInstance=0,bool instanced=false,bool capturingSurface=false);
     void drawGui(double now);
     void drawSky(const RenderView& view,float aspect,bool capturingSurface=false);
     void drawRibbon(const FxBatch& batch,const Mat4& vp);

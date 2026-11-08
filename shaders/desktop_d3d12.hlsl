@@ -21,7 +21,9 @@ cbuffer Object : register(b1) {
     float4 layerColor[4],layerUv[4],weightUv,layerOptions,layerDetail[4];
     float4 wave,waterDetail,waterHorizon,waterZenith,transmission,absorptionFoam,foamColor;
     float4 advanced[9];
+    float4 windPlant;
 };
+cbuffer Wind : register(b8) {float4 windDirection,windClock;};
 cbuffer Screen : register(b2) { float4 screen; };
 cbuffer ShadowPass : register(b3) { column_major float4x4 shadowMatrix; };
 Texture2D baseImage : register(t0);
@@ -92,8 +94,24 @@ MeshOutput surfaceVertexFor(float3 position,float3 normal,float3 tangent,float3 
     output.planarSurface=maps.z>.5&&abs(dot(reflectionPlane,mul(objectModel,float4(0,0,0,1))))<.01&&abs(dot(output.planeNormal,reflectionPlane.xyz))>.999?1:0;return output;
 }
 MeshOutput surfaceVertex(float3 position,float3 normal,float3 tangent,float3 bitangent,float2 uv){return surfaceVertexFor(position,normal,tangent,bitangent,uv,model,normalMatrix,tint,float4(options.w,0,0,maps.z));}
-struct InstanceObject {column_major float4x4 model,normal;float4 color,flags;float4 padding[6];};
+struct InstanceObject {column_major float4x4 model,normal;float4 color,flags,windPlant;float4 padding[5];};
 StructuredBuffer<InstanceObject> instanceObjects:register(t23);
+StructuredBuffer<float4> bendVertices:register(t24);
+MeshOutput bendOutput(MeshOutput output,column_major float4x4 objectNormal,float4 bend,float phase) {
+    const float amount=windDirection.w*sin(windClock.x+phase)*(1-windClock.z+windClock.z*.5*(1+sin(windClock.y+phase*1.37)));
+    const float3 offset=windDirection.xyz*amount,gradient=mul(objectNormal,float4(bend.yzw*(2*bend.x),0)).xyz;
+    const float denominator=1+dot(gradient,offset),safeDenominator=abs(denominator)>=.05?denominator:denominator>=0?.05:-.05;
+    const float3 n=safeNormal(output.normal-gradient*(dot(offset,output.normal)/safeDenominator),output.normal);
+    const float3 oldTangent=output.tangent.xyz,oldBitangent=cross(output.normal,oldTangent)*output.tangent.w;
+    const float3 movedTangent=oldTangent+offset*dot(gradient,oldTangent),movedBitangent=oldBitangent+offset*dot(gradient,oldBitangent);
+    const float3 t=safeNormal(movedTangent-n*dot(n,movedTangent),oldTangent);
+    output.normal=n;output.tangent=float4(t,dot(cross(n,t),movedBitangent)<0?-1:1);
+    output.world+=offset*(bend.x*bend.x);output.position=mul(viewProjection,float4(output.world,1));return output;
+}
+MeshOutput windVS(MeshInput input,uint vertex:SV_VertexID){return bendOutput(surfaceVertex(input.position,input.normal,input.tangent.xyz,cross(input.normal,input.tangent.xyz)*input.tangent.w,input.uv),normalMatrix,bendVertices[vertex],windPlant.x);}
+MeshOutput windShadowVS(MeshInput input,uint vertex:SV_VertexID){MeshOutput output=windVS(input,vertex);output.position=mul(shadowMatrix,float4(output.world,1));return output;}
+MeshOutput instanceWindVS(MeshInput input,uint vertex:SV_VertexID,uint id:SV_InstanceID){const InstanceObject object=instanceObjects[id];return bendOutput(surfaceVertexFor(input.position,input.normal,input.tangent.xyz,cross(input.normal,input.tangent.xyz)*input.tangent.w,input.uv,object.model,object.normal,object.color,object.flags),object.normal,bendVertices[vertex],object.windPlant.x);}
+MeshOutput instanceWindShadowVS(MeshInput input,uint vertex:SV_VertexID,uint id:SV_InstanceID){MeshOutput output=instanceWindVS(input,vertex,id);output.position=mul(shadowMatrix,float4(output.world,1));return output;}
 MeshOutput instanceVS(MeshInput input,uint id:SV_InstanceID){const InstanceObject object=instanceObjects[id];return surfaceVertexFor(input.position,input.normal,input.tangent.xyz,cross(input.normal,input.tangent.xyz)*input.tangent.w,input.uv,object.model,object.normal,object.color,object.flags);}
 MeshOutput instanceShadowVS(MeshInput input,uint id:SV_InstanceID){MeshOutput output=instanceVS(input,id);output.position=mul(shadowMatrix,float4(output.world,1));return output;}
 MeshOutput meshVS(MeshInput input) {
@@ -246,6 +264,19 @@ float3 glassComposite(MeshOutput input,float3 normal,float3 display,float3 v,flo
     float3 attenuation=1;if(surfaceAdvanced[1].y>0)attenuation=pow(max(surfaceAdvanced[2].xyz,.0001),distance/surfaceAdvanced[1].y);
     const float f0=pow((ior-1)/(ior+1),2)*(surfaceAdvanced[5].x*2),f=f0+(1-f0)*pow(1-saturate(nv),5);
     return lerp(display,transmitted*attenuation,surfaceAdvanced[0].z*(1-f));
+}
+// Non-layered unlit materials do not require the lighting/water shader graph.
+// Keep alpha, reflection clipping, emission and fog identical to meshPS.
+float4 unlitPS(MeshOutput input):SV_Target {
+    const float4 texel=sampleMap(baseImage,0,input.uv);
+    const float3 emission=emissionCutoff.xyz*sampleMap(emissiveImage,4,input.uv).rgb;
+    const float alpha=texel.a*input.instanceColor.a;
+    if(reflectionOptions.y>.5&&dot(reflectionPlane,float4(input.world,1))<.002)discard;
+    if(options.y==1&&alpha<emissionCutoff.w)discard;
+    float3 color=max(input.instanceColor.rgb*texel.rgb,0)+emission;
+    if(maps.z>.5)color=cloudApply(color,input.world,maps.z>1.5);
+    const float3 display=surfaceFog(color,input);
+    return float4(outputOptions.x>.5?display:srgb(display),options.y<2?1:alpha);
 }
 float4 meshPS(MeshOutput input,bool front:SV_IsFrontFace):SV_Target {
     loadAdvanced(input.uv);

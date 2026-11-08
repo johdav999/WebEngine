@@ -1,6 +1,7 @@
 #include "desktop_graphics.hpp"
 #include "engine/render_frame.hpp"
 #include "engine/cluster_stream.hpp"
+#include "engine/mesh_instances.hpp"
 #include "engine/fx_frame.hpp"
 #include "engine/performance.hpp"
 #include "engine/view_lighting.hpp"
@@ -35,6 +36,23 @@ void checked(HRESULT hr,const char* action) {
 }
 std::string jsonString(std::string value){std::string out="\"";for(unsigned char c:value){if(c=='"'||c=='\\'){out+='\\';out+=c;}else if(c<32)out+=' ';else out+=c;}return out+'"';}
 D3D12_HEAP_PROPERTIES heap(D3D12_HEAP_TYPE type){D3D12_HEAP_PROPERTIES p{};p.Type=type;p.CreationNodeMask=p.VisibleNodeMask=1;return p;}
+// Zero is not a valid blend, comparison or stencil-operation enum. Initialize
+// disabled state too: software drivers may compile it when creating a PSO.
+D3D12_GRAPHICS_PIPELINE_STATE_DESC pipelineDescription(){
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC p{};
+    p.DepthStencilState.DepthFunc=D3D12_COMPARISON_FUNC_LESS;
+    p.DepthStencilState.StencilReadMask=D3D12_DEFAULT_STENCIL_READ_MASK;
+    p.DepthStencilState.StencilWriteMask=D3D12_DEFAULT_STENCIL_WRITE_MASK;
+    p.DepthStencilState.FrontFace=p.DepthStencilState.BackFace={D3D12_STENCIL_OP_KEEP,D3D12_STENCIL_OP_KEEP,D3D12_STENCIL_OP_KEEP,D3D12_COMPARISON_FUNC_ALWAYS};
+    for(auto& b:p.BlendState.RenderTarget){
+        b.SrcBlend=b.SrcBlendAlpha=D3D12_BLEND_ONE;
+        b.DestBlend=b.DestBlendAlpha=D3D12_BLEND_ZERO;
+        b.BlendOp=b.BlendOpAlpha=D3D12_BLEND_OP_ADD;
+        b.LogicOp=D3D12_LOGIC_OP_NOOP;
+        b.RenderTargetWriteMask=D3D12_COLOR_WRITE_ENABLE_ALL;
+    }
+    return p;
+}
 D3D12_RESOURCE_DESC bufferDescription(std::uint64_t bytes){D3D12_RESOURCE_DESC d{};d.Dimension=D3D12_RESOURCE_DIMENSION_BUFFER;d.Width=bytes;d.Height=1;d.DepthOrArraySize=d.MipLevels=1;d.SampleDesc.Count=1;d.Layout=D3D12_TEXTURE_LAYOUT_ROW_MAJOR;return d;}
 void transition(ID3D12GraphicsCommandList& list,ID3D12Resource* resource,D3D12_RESOURCE_STATES from,D3D12_RESOURCE_STATES to){D3D12_RESOURCE_BARRIER b{};b.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;b.Transition={resource,D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,from,to};list.ResourceBarrier(1,&b);}
 using Float4=std::array<float,4>;
@@ -43,8 +61,8 @@ struct ShadowConstants {Mat4 matrix;Float4 options,selection;};
 struct FrameConstants {Mat4 viewProjection;Float4 ambientCount;std::array<LightConstants,8> lights{};Float4 cameraEnvironment,environmentOptions;std::array<ShadowConstants,4> shadows{};Float4 forward;FogUniform fog;Float4 output;
     Float4 waterClock;Mat4 inverseViewProjection;Float4 viewport,extent;Mat4 reflectionViewProjection;Float4 reflectionPlane,reflectionOptions;WaterInteractionParameters interactions;LightingZoneConstants lightingZones;Float4 lightingZoneRotations;ReflectionProbeConstants reflectionProbe;CloudUniform cloud;};
 struct SkyConstants {SkyUniform sky;Float4 output;};
-struct ObjectConstants {Mat4 model,normal;Float4 tint,surface,emission,uv,options,maps;std::array<float,56> layers;std::array<float,28> water;std::array<float,36> advanced;};
-static_assert(sizeof(FrameConstants)==2896&&sizeof(ObjectConstants)==704&&sizeof(SkyConstants)==800);
+struct ObjectConstants {Mat4 model,normal;Float4 tint,surface,emission,uv,options,maps;std::array<float,56> layers;std::array<float,28> water;std::array<float,36> advanced;Float4 windPlant;};
+static_assert(sizeof(FrameConstants)==2896&&sizeof(ObjectConstants)==720&&sizeof(SkyConstants)==800);
 
 class D3D12Graphics final:public DesktopGraphics {
     static constexpr UINT frameCount=2,descriptorCount=65536;
@@ -83,7 +101,10 @@ class D3D12Graphics final:public DesktopGraphics {
     ComPtr<ID3D12DescriptorHeap> rtvs_,dsv_;
     std::array<ComPtr<ID3D12Resource>,frameCount> targets_;
     ComPtr<ID3D12Resource> depth_,msaaColor_,shadowMaps_,hdrColor_,bloom_;ComPtr<ID3D12RootSignature> root_;
-    std::map<std::array<UINT,7>,ComPtr<ID3D12PipelineState>> meshPipelines_;
+    std::map<std::array<UINT,8>,ComPtr<ID3D12PipelineState>> meshPipelines_;
+    std::map<const MeshBend*,PoseBuffer<MeshBend>> bends_;
+    std::map<const MeshWindState*,PoseBuffer<MeshWindState>> winds_;
+    std::uint64_t windUploadBytes_=0,bendUploadBytes_=0,windDraws_=0;
     ComPtr<ID3D12PipelineState> guiPipeline_;
     ComPtr<ID3D12PipelineState> bloomPipeline_,compositePipeline_;
     ComPtr<ID3D12Resource> fogGrid_;
@@ -218,7 +239,7 @@ class D3D12Graphics final:public DesktopGraphics {
     void prune(Frame& frame){
         for(auto it=meshes_.begin();it!=meshes_.end();)if(it->second.source.expired()){frame.retained.push_back(it->second.vertices);frame.retained.push_back(it->second.indices);frame.retained.push_back(it->second.skin);it=meshes_.erase(it);}else ++it;
         for(auto it=textures_.begin();it!=textures_.end();)if(it->second.source.expired()){frame.retained.push_back(it->second.image);it=textures_.erase(it);}else ++it;
-        prunePoses(frame,skins_);prunePoses(frame,morphs_);
+        prunePoses(frame,skins_);prunePoses(frame,morphs_);prunePoses(frame,bends_);prunePoses(frame,winds_);
     }
 #include "d3d12_pipelines.inc"
 #include "d3d12_environment.inc"
@@ -230,14 +251,33 @@ class D3D12Graphics final:public DesktopGraphics {
         wchar_t validation[4]{};
         if(GetEnvironmentVariableW(L"WEBENGINE_D3D12_VALIDATION",validation,4)&&validation[0]==L'1'){
             ComPtr<ID3D12Debug> debug;checked(D3D12GetDebugInterface(IID_PPV_ARGS(&debug)),"Requested D3D12 debug layer");debug->EnableDebugLayer();debug_=true;
+            wchar_t gpuValidation[4]{};
+            if(GetEnvironmentVariableW(L"WEBENGINE_D3D12_GPU_VALIDATION",gpuValidation,4)&&gpuValidation[0]==L'1'){
+                ComPtr<ID3D12Debug1> gpu;checked(debug.As(&gpu),"Requested D3D12 GPU validation");gpu->SetEnableGPUBasedValidation(TRUE);
+            }
         }
         checked(CreateDXGIFactory2(0,IID_PPV_ARGS(&factory_)),"Create DXGI factory");
         ComPtr<IDXGIAdapter1> adapter;
-        for(UINT i=0;;++i){ComPtr<IDXGIAdapter1> next;if(factory_->EnumAdapterByGpuPreference(i,DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,IID_PPV_ARGS(&next))==DXGI_ERROR_NOT_FOUND)break;DXGI_ADAPTER_DESC1 desc{};next->GetDesc1(&desc);if(desc.Flags&DXGI_ADAPTER_FLAG_SOFTWARE)continue;if(SUCCEEDED(D3D12CreateDevice(next.Get(),D3D_FEATURE_LEVEL_11_0,IID_PPV_ARGS(&device_)))){adapter=std::move(next);break;}}
+        // Explicit diagnostic selection, never an implicit fallback from hardware.
+        wchar_t warp[4]{};
+        const bool software=GetEnvironmentVariableW(L"WEBENGINE_D3D12_WARP",warp,4)&&warp[0]==L'1';
+        if(software){
+            checked(factory_->EnumWarpAdapter(IID_PPV_ARGS(&adapter)),"Enumerate WARP adapter");
+            checked(D3D12CreateDevice(adapter.Get(),D3D_FEATURE_LEVEL_11_0,IID_PPV_ARGS(&device_)),"Create WARP D3D12 device");
+        }else for(UINT i=0;;++i){
+            ComPtr<IDXGIAdapter1> next;
+            const auto result=factory_->EnumAdapterByGpuPreference(i,DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,IID_PPV_ARGS(&next));
+            if(result==DXGI_ERROR_NOT_FOUND)break;
+            checked(result,"Enumerate hardware adapter");
+            if(!next)throw std::runtime_error("DXGI returned a null hardware adapter");
+            DXGI_ADAPTER_DESC1 desc{};checked(next->GetDesc1(&desc),"Hardware adapter description");
+            if(desc.Flags&DXGI_ADAPTER_FLAG_SOFTWARE)continue;
+            if(SUCCEEDED(D3D12CreateDevice(next.Get(),D3D_FEATURE_LEVEL_11_0,IID_PPV_ARGS(&device_)))){adapter=std::move(next);break;}
+        }
         if(!device_)throw std::runtime_error("No hardware D3D12 adapter available; no implicit WARP/Dawn fallback");
         if(debug_)checked(device_.As(&debugQueue_),"D3D12 debug queue");
         DXGI_ADAPTER_DESC1 info{};checked(adapter->GetDesc1(&info),"Adapter description");char utf8[1024]{};WideCharToMultiByte(CP_UTF8,0,info.Description,-1,utf8,sizeof(utf8),nullptr,nullptr);
-        adapter_="{\"device\":"+jsonString(utf8)+",\"vendorId\":"+std::to_string(info.VendorId)+",\"deviceId\":"+std::to_string(info.DeviceId)+",\"backend\":\"D3D12\",\"software\":false}";
+        adapter_="{\"device\":"+jsonString(utf8)+",\"vendorId\":"+std::to_string(info.VendorId)+",\"deviceId\":"+std::to_string(info.DeviceId)+",\"backend\":\"D3D12\",\"software\":"+(software?"true":"false")+"}";
         D3D12_COMMAND_QUEUE_DESC q{};q.Type=D3D12_COMMAND_LIST_TYPE_DIRECT;checked(device_->CreateCommandQueue(&q,IID_PPV_ARGS(&queue_)),"Create command queue");
         checked(device_->CreateFence(0,D3D12_FENCE_FLAG_NONE,IID_PPV_ARGS(&fence_)),"Create fence");event_=CreateEventW(nullptr,FALSE,FALSE,nullptr);if(!event_)throw std::runtime_error("Create fence event failed");
         D3D12_DESCRIPTOR_HEAP_DESC hd{};hd.Type=D3D12_DESCRIPTOR_HEAP_TYPE_RTV;hd.NumDescriptors=frameCount+9;checked(device_->CreateDescriptorHeap(&hd,IID_PPV_ARGS(&rtvs_)),"Create RTV heap");hd.Type=D3D12_DESCRIPTOR_HEAP_TYPE_DSV;hd.NumDescriptors=7;checked(device_->CreateDescriptorHeap(&hd,IID_PPV_ARGS(&dsv_)),"Create DSV heap");
@@ -322,7 +362,7 @@ class D3D12Graphics final:public DesktopGraphics {
             {m.roughness,m.metallic,m.normalScale,m.occlusionStrength},{m.emissive.x,m.emissive.y,m.emissive.z,m.alphaCutoff},
             {m.uvScale.x,m.uvScale.y,m.uvOffset.x,m.uvOffset.y},
             {m.shader==MaterialShader::Water?2.f:m.shader==MaterialShader::Unlit?1.f:0.f,float(m.alphaMode),m.doubleSided?1.f:0.f,draw.receivesShadow?1.f:0.f},
-            {m.normalTexture?1.f:0.f,float(wraps),draw.layer==RenderLayer::World?(draw.blend==BlendMode::Additive?2.f:1.f):0.f,m.layers.enabled?1.f:0.f},materialLayerParameters(m.layers),water,materialAdvancedParameters(m.advanced)};
+            {m.normalTexture?1.f:0.f,float(wraps),draw.layer==RenderLayer::World?(draw.blend==BlendMode::Additive?2.f:1.f):0.f,m.layers.enabled?1.f:0.f},materialLayerParameters(m.layers),water,materialAdvancedParameters(m.advanced),{draw.windPhase,0,0,0}};
         list_->SetGraphicsRootConstantBufferView(1,upload(frame,&object,sizeof(object)));auto material=materialBinding(frame,draw,surface);
         list_->SetGraphicsRootDescriptorTable(2,material);material.ptr+=5*srvStride_;list_->SetGraphicsRootDescriptorTable(11,material);
         if(m.layers.enabled)++layeredDraws_;if(m.shader==MaterialShader::Water)++waterDraws_;
@@ -332,6 +372,7 @@ class D3D12Graphics final:public DesktopGraphics {
         if(draw.skinPose){auto& image=poseBuffer(frame,draw.skinPose,skins_,draw.skinPose->bones.data(),draw.skinPose->bones.size()*sizeof(BoneUniform),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,skinUploads_,skinUploadBytes_);
             list_->SetGraphicsRootShaderResourceView(10,image.GetGPUVirtualAddress());list_->IASetVertexBuffers(1,1,&gpu.skinVb);++skinnedDraws_;}
         if(objects)list_->SetGraphicsRootShaderResourceView(16,objects);
+        if(draw.bend){list_->SetGraphicsRootShaderResourceView(21,bendBuffer(frame,draw.bend).GetGPUVirtualAddress());list_->SetGraphicsRootConstantBufferView(22,windBuffer(frame,draw.wind).GetGPUVirtualAddress());++windDraws_;}
         list_->SetPipelineState(materialPipeline(draw,shadow,objects!=0));list_->IASetVertexBuffers(0,1,&vertices);list_->IASetIndexBuffer(&gpu.ib);
         list_->DrawIndexedInstanced(draw.indexCount,instances,draw.firstIndex,0,0);++draws_;const auto triangles=std::uint64_t(draw.indexCount/3)*instances;triangles_+=triangles;
         submittedInstances_+=instances;instancedDraws_+=instances>1;maxInstances_=std::max(maxInstances_,std::uint64_t(instances));
@@ -410,13 +451,17 @@ public:
         });
         viewCameraIds_=std::move(ids);clearCollectedFrames();resetGpuTiming();
     }
+    void checkValidation() {
+        if(debugQueue_){const auto end=debugQueue_->GetNumStoredMessages();
+            for(;checkedMessages_<end;++checkedMessages_){SIZE_T bytes=0;debugQueue_->GetMessage(checkedMessages_,nullptr,&bytes);if(bytes>16384)continue;std::vector<unsigned char> data(bytes);auto* message=reinterpret_cast<D3D12_MESSAGE*>(data.data());if(SUCCEEDED(debugQueue_->GetMessage(checkedMessages_,message,&bytes))&&(message->Severity==D3D12_MESSAGE_SEVERITY_ERROR||message->Severity==D3D12_MESSAGE_SEVERITY_CORRUPTION))error_=std::string("D3D12 validation: ")+message->pDescription;}
+        }
+        if(!error_.empty())throw std::runtime_error(error_);
+    }
     void service() override {
         checked(device_->GetDeviceRemovedReason(),"D3D12 device service");
         collectGpuTimings();
         finishCapture();
-        if(debugQueue_){const auto end=debugQueue_->GetNumStoredMessages();
-            for(;checkedMessages_<end;++checkedMessages_){SIZE_T bytes=0;debugQueue_->GetMessage(checkedMessages_,nullptr,&bytes);if(bytes>16384)continue;std::vector<unsigned char> data(bytes);auto* message=reinterpret_cast<D3D12_MESSAGE*>(data.data());if(SUCCEEDED(debugQueue_->GetMessage(checkedMessages_,message,&bytes))&&(message->Severity==D3D12_MESSAGE_SEVERITY_ERROR||message->Severity==D3D12_MESSAGE_SEVERITY_CORRUPTION))error_=std::string("D3D12 validation: ")+message->pDescription;}
-        }
+        checkValidation();
     }
     void render(double seconds,double) override {
         ProfileScope cpuProfile(ProfileCategory::Render,"Direct D3D12 render");
@@ -449,7 +494,7 @@ public:
             layeredDraws_=cameraLodParts_=shadowLodParts_=shadowCulledParts_=0;
             waterDraws_=waterSnapshots_=reflectionPasses_=reflectionDraws_=reflectionTriangles_=underwaterPasses_=waterPresentCopies_=0;textureUploadBytes_=0;
             screenReflectionSnapshots_=0;
-            particles_=meshParticles_=particleDraws_=trailDraws_=trailSegments_=particleUploadBytes_=trailUploadBytes_=0;submittedInstances_=instancedDraws_=maxInstances_=objectUploadBytes_=0;
+            particles_=meshParticles_=particleDraws_=trailDraws_=trailSegments_=particleUploadBytes_=trailUploadBytes_=0;submittedInstances_=instancedDraws_=maxInstances_=objectUploadBytes_=0;windUploadBytes_=bendUploadBytes_=windDraws_=0;
             beginGpuTiming();const auto gpuFrame=beginGpuSpan("Frame");
             {GpuSpan timing(*this,"Initialize targets");initializeWaterTargets();list_->SetGraphicsRootDescriptorTable(12,waterBinding(frame));}
             auto* target=targets_[index].Get();
@@ -625,7 +670,8 @@ public:
             {GpuSpan timing(*this,"GUI");gui(frame,guiData);}const bool copying=!capturePath_.empty()&&!captureBuffer_;
             if(copying){GpuSpan timing(*this,"Framebuffer capture");copyCapture(target);}else transition(*list_.Get(),target,D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_PRESENT);
             endGpuSpan(gpuFrame);resolveGpuTiming();
-            checked(list_->Close(),"Close draw list");ID3D12CommandList* commands[]{list_.Get()};queue_->ExecuteCommandLists(1,commands);
+            checked(list_->Close(),"Close draw list");checkValidation();ID3D12CommandList* commands[]{list_.Get()};
+            queue_->ExecuteCommandLists(1,commands);
             frame.fence=++nextFence_;checked(queue_->Signal(fence_.Get(),frame.fence),"Submit frame fence");if(copying)captureFence_=frame.fence;
             for(auto* surface:recordedSurfaces_)surface->captured=true;
             surfacePasses_=recordedSurfaces_.size();
@@ -667,7 +713,7 @@ public:
                    <<",\"fogLightCacheSlots\":"<<fogLightCacheSlots_
                    <<",\"skinnedDrawCalls\":"<<skinnedDraws_<<",\"morphDrawCalls\":"<<morphDraws_<<",\"skinUploads\":"<<skinUploads_<<",\"morphUploads\":"<<morphUploads_<<",\"skinUploadBytes\":"<<skinUploadBytes_<<",\"morphUploadBytes\":"<<morphUploadBytes_
                    <<",\"particles\":"<<particles_<<",\"meshParticles\":"<<meshParticles_<<",\"particleDrawCalls\":"<<particleDraws_<<",\"trailDrawCalls\":"<<trailDraws_<<",\"trailSegments\":"<<trailSegments_<<",\"particleUploadBytes\":"<<particleUploadBytes_<<",\"trailUploadBytes\":"<<trailUploadBytes_
-                    <<",\"submittedInstances\":"<<submittedInstances_<<",\"instancedDrawCalls\":"<<instancedDraws_<<",\"maxInstancesPerDraw\":"<<maxInstances_<<",\"objectUploadBytes\":"<<objectUploadBytes_<<",\"textureUploadBytes\":"<<textureUploadBytes_<<",\"gpuTextureBytes\":"<<gpuTextureBytes<<",\"compressedTextureCount\":"<<compressedCount<<",\"fogGridPasses\":"<<fogGridPasses_
+                    <<",\"windUploadBytes\":"<<windUploadBytes_<<",\"bendUploadBytes\":"<<bendUploadBytes_<<",\"windDraws\":"<<windDraws_<<",\"submittedInstances\":"<<submittedInstances_<<",\"instancedDrawCalls\":"<<instancedDraws_<<",\"maxInstancesPerDraw\":"<<maxInstances_<<",\"objectUploadBytes\":"<<objectUploadBytes_<<",\"textureUploadBytes\":"<<textureUploadBytes_<<",\"gpuTextureBytes\":"<<gpuTextureBytes<<",\"compressedTextureCount\":"<<compressedCount<<",\"fogGridPasses\":"<<fogGridPasses_
                       <<",\"cachedSkinPoses\":"<<skins_.size()<<",\"cachedMorphPoses\":"<<morphs_.size()<<",\"cachedMeshes\":"<<meshes_.size()<<",\"cachedTextures\":"<<textures_.size()<<",\"cachedMaterialPipelines\":"<<meshPipelines_.size()<<"},\"gpu\":"<<gpuMeasurements_.gpuJson(gpuNow(),gpuState())<<",\"gpuProfile\":"<<gpuProfileCached_<<",\"lightingSlots\":"<<reportedLighting_.diagnosticsJson()<<'}';
         return {initialized_&&scene_&&error_.empty(),presented_,width_,height_,sampleCount_,error_,state.str(),performance.str()};
     }

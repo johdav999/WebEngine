@@ -2,6 +2,7 @@
 #include "engine/scene.hpp"
 #include "engine/dynamic_gi.hpp"
 #include "engine/dynamic_reflections.hpp"
+#include "engine/mesh_instances.hpp"
 #include "engine/decal.hpp"
 #include "engine/effect_component.hpp"
 #include "engine/cinematic_runtime.hpp"
@@ -314,7 +315,9 @@ void Scene::collect(SceneFrame& frame,std::uint32_t visibilityMask,const Frustum
             frame.meshes.push_back(std::move(draw));frame.layerDraws[layer].push_back(index);
             frame.storageGrowths+=(meshCapacity!=frame.meshes.capacity())+(layerCapacity!=frame.layerDraws[layer].capacity());
         };
-        if(const auto* mesh=dynamic_cast<const MeshComponent*>(&node); mesh && mesh->mesh && !mesh->mesh->indices.empty() && (mesh->visibilityMask&visibilityMask)) {
+        const auto* instances=dynamic_cast<const MeshInstancesComponent*>(&node);
+        if(instances&&(instances->visibilityMask&visibilityMask))instances->appendDraws(frame,world,context.frustum);
+        if(const auto* mesh=dynamic_cast<const MeshComponent*>(&node); !instances && mesh && mesh->mesh && !mesh->mesh->indices.empty() && (mesh->visibilityMask&visibilityMask)) {
             mesh->lodPolicy.validate();
             if(!std::isfinite(mesh->opacity)||mesh->opacity<0||mesh->opacity>1
                 ||(mesh->blend!=BlendMode::Opaque&&mesh->blend!=BlendMode::Alpha&&mesh->blend!=BlendMode::Additive))

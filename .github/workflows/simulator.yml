@@ -1,0 +1,79 @@
+name: Simulator release checks
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  native:
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Configure standalone simulator
+        run: cmake -S examples/simulator -B build/simulator-sdk -DWEBENGINE_SOURCE_DIR="${{ github.workspace }}" -DWEBENGINE_BUILD_SIMULATOR=ON -DWEBENGINE_BUILD_SIMULATOR_TESTS=ON -DWEBENGINE_BUILD_SIMULATOR_EXAMPLE=ON
+      - run: cmake --build build/simulator-sdk --config Release --parallel 2
+      - run: ctest --test-dir build/simulator-sdk -C Release --output-on-failure
+      - if: runner.os == 'Windows'
+        run: python scripts/simulator-parity.py record build/parity.txt build/simulator-sdk/Release/simulator_parity.exe
+      - if: runner.os != 'Windows'
+        run: python scripts/simulator-parity.py record build/parity.txt build/simulator-sdk/simulator_parity
+      - uses: actions/upload-artifact@v4
+        with:
+          name: simulator-parity-${{ matrix.os }}
+          path: build/parity.txt
+          if-no-files-found: error
+  wasm:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install pinned Emscripten
+        run: |
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git .tools/emsdk
+          .tools/emsdk/emsdk install "$(cat .emscripten-version)"
+          .tools/emsdk/emsdk activate "$(cat .emscripten-version)"
+      - name: Build and test standalone Wasm
+        run: |
+          source .tools/emsdk/emsdk_env.sh
+          emcmake cmake -S examples/simulator -B build/simulator-sdk -G Ninja -DCMAKE_BUILD_TYPE=Release -DWEBENGINE_SOURCE_DIR="$PWD" -DWEBENGINE_BUILD_SIMULATOR=ON -DWEBENGINE_BUILD_SIMULATOR_TESTS=ON -DWEBENGINE_BUILD_SIMULATOR_EXAMPLE=ON
+          cmake --build build/simulator-sdk --parallel 2
+          ctest --test-dir build/simulator-sdk --output-on-failure
+          python scripts/simulator-parity.py record build/parity.txt node build/simulator-sdk/simulator_parity.js
+      - name: Browser contract suite
+        run: |
+          npm install --prefix build/browser-tools playwright@1.56.1
+          build/browser-tools/node_modules/.bin/playwright install --with-deps chromium
+          python -m http.server 4191 --directory build/simulator-sdk > build/browser-server.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID"' EXIT
+          for attempt in $(seq 1 30); do
+            curl --fail --silent http://127.0.0.1:4191/browser.html > /dev/null && break
+            sleep 1
+          done
+          NODE_PATH="$PWD/build/browser-tools/node_modules" node scripts/simulator-browser-smoke.cjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: simulator-parity-wasm
+          path: build/parity.txt
+          if-no-files-found: error
+  parity:
+    needs: [native, wasm]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: simulator-parity-*
+          path: build/parity
+      - run: python scripts/simulator-parity.py compare build/parity/simulator-parity-ubuntu-24.04/parity.txt build/parity/simulator-parity-windows-2022/parity.txt build/parity/simulator-parity-wasm/parity.txt

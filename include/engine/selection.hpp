@@ -32,6 +32,7 @@ struct SelectionHit {
     std::optional<std::uint32_t> triangle; // Index-buffer triangle offset / 3; empty for bounds/proxies.
     Vec3 normal{},barycentric{}; // World geometric normal; weights for the triangle's three vertices.
     Vec2 uv{};
+    std::uint64_t instanceKey=0; // Nonzero MeshInstanceSet key; surface remains its component handle.
 };
 struct ActionHandle {
     ActorId target;

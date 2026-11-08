@@ -5,6 +5,8 @@
 #include "../src/retarget_example.hpp"
 #include <iostream>
 #include <limits>
+#include "engine/fbx_importer.hpp"
+#include "mixamo_fixture.hpp"
 using namespace engine;
 namespace {
 void check(bool v,const char* m){if(!v)throw std::runtime_error(m);}
@@ -72,5 +74,23 @@ void integration(){
     auto restored=SceneArchive::load(SceneArchive::save(scene));check(SceneArchive::save(*restored.scene)==SceneArchive::save(scene),"Scene roundtrip");
     Scene demo;populateRetargetExample(demo);demo.update(.5);check(demo.findSavedNode("retarget.target")&&demo.findSavedNode("retarget.source"),"Side-by-side demo builds");
 }
+void mixamoImport(){
+    const auto bytes=std::as_bytes(std::span(mixamoAnimationFbx,sizeof(mixamoAnimationFbx)-1));
+    FbxImportOptions options;options.resolveTexture=[](std::string_view)->std::vector<std::byte>{throw std::runtime_error("Unexpected texture IO");};
+    const auto source=FbxImporter::loadAnimationsMemory(bytes,options);
+    check(source->clips.size()==1&&source->joints.size()==3,"Animation-only FBX retains ancestors and clip");
+    check(source->clips[0].frameCount==31,"Default animation sampling includes endpoints");
+    rejects([&]{FbxImporter::loadMemory(bytes);});
+    auto target=*source;target.clips.clear();target.joints[1].name="Hips";target.joints[2].name="character:mixamorigSpine";
+    const auto p=matchMixamoJoints(*source,target);
+    check(p.joints.size()==2&&p.joints[0].translation==RetargetTranslation::ScaledDelta,"Mixamo Hips motion beneath synthetic root");
+    const auto clips=retargetAnimations(*source,target,p);
+    check(near(clips[0].frames[90+1].translation.x,1),"Imported hip translation survives bake");
+    target.joints.push_back({"other:Hips",0,{}});rejects([&]{matchMixamoJoints(*source,target);});
+    options.maxAnimationBytes=1;rejects([&]{FbxImporter::loadAnimationsMemory(bytes,options);});
+    options={};options.animationSampleRate=0;rejects([&]{FbxImporter::loadAnimationsMemory(bytes,options);});
+    options={};options.maxFileBytes=8;rejects([&]{FbxImporter::loadAnimationsMemory(bytes,options);});
+    rejects([&]{FbxImporter::loadAnimationsMemory({});});
 }
-int main(){try{transfer();mappingAndValidation();integration();std::cout<<"Animation retargeting passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+}
+int main(){try{transfer();mappingAndValidation();integration();mixamoImport();std::cout<<"Animation retargeting passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

@@ -1,0 +1,23 @@
+# Standalone entry: no engine root, dependency discovery or renderer required.
+include("${CMAKE_CURRENT_LIST_DIR}/../cmake/WebEngineModule.cmake")
+option(WEBENGINE_BUILD_SIMULATOR "Build portable simulator foundation" OFF)
+option(WEBENGINE_BUILD_SIMULATOR_TESTS "Build simulator contract tests" OFF)
+if(NOT WEBENGINE_BUILD_SIMULATOR)
+  if(WEBENGINE_BUILD_SIMULATOR_TESTS)
+    message(FATAL_ERROR "Simulator tests require WEBENGINE_BUILD_SIMULATOR=ON")
+  endif()
+  return()
+endif()
+webengine_add_module(engine_simulator ALIAS WebEngine::Simulator
+  PUBLIC_INCLUDE_DIR "${CMAKE_CURRENT_LIST_DIR}/../include"
+  SOURCES ../src/simulator/runtime.cpp)
+if(WEBENGINE_BUILD_SIMULATOR_TESTS)
+  enable_testing()
+  add_executable(simulator_tests ../tests/simulator_tests.cpp)
+  target_link_libraries(simulator_tests PRIVATE WebEngine::Simulator)
+  if(EMSCRIPTEN)
+    set_target_properties(simulator_tests PROPERTIES SUFFIX ".js")
+    target_link_options(simulator_tests PRIVATE -sENVIRONMENT=node -sEXIT_RUNTIME=1 -sALLOW_MEMORY_GROWTH=1)
+  endif()
+  add_test(NAME simulator_contracts COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} $<TARGET_FILE:simulator_tests>)
+endif()

@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WebEngine clothing</title>
+<link rel="icon" href="data:,">
+<style>body{margin:0;background:#17212b;color:#f3f6fa;font:16px system-ui}canvas{width:100vw;height:100vh;display:block}aside{position:absolute;top:20px;left:20px;max-width:290px;background:#18222eee;padding:20px;border-radius:12px}h1{font-size:22px;margin:0 0 10px}button{padding:9px;margin:3px;border:0;border-radius:5px;cursor:pointer}p{line-height:1.5}#status{color:#aad5ec}</style>
+<canvas id="viewport" width="1100" height="750"></canvas>
+<aside style="max-height:calc(100vh - 80px);overflow:auto"><h1>Character wardrobe</h1><p>A weighted cape responds to airflow and a moving block. Toggle wind or block movement to compare; shoulder pins follow the character.</p>
+<div id="controls"></div><p id="status">Loading…</p><small>Cloth milestone 8 · weighted fabric · aerodynamic wind · moving collision</small></aside>
+<script>
+window.engineStatus=(text,error)=>{document.getElementById('status').textContent=text;if(error)console.error(text);};
+window.engineStats=()=>{};window.enginePerformance=()=>{};
+var Module={canvas:document.getElementById('viewport')};
+['Shirt','Trousers','Boots','Hat','Colors','Save outfit','Load outfit','Pause / resume','Cape on / off','Wind on / off','Reset cloth','Teleport','Moving block on / off'].forEach((label,i)=>{const b=document.createElement('button');b.textContent=label;b.onclick=()=>Module._clothing_command?.(i);document.getElementById('controls').append(b);});
+</script><script src="clothing_demo.js"></script></html>

@@ -6,7 +6,7 @@
 namespace engine {
 class FbxSkinImport {
 public:
-    FbxSkinImport(const ufbx_scene& scene,const FbxImportOptions& options,Mesh& result);
+    FbxSkinImport(const ufbx_scene& scene,const FbxImportOptions& options,Mesh& result,bool animationsOnly=false);
     SkinVertex vertex(const ufbx_node& node,std::uint32_t corner);
     void finish();
     bool active() const { return bool(skeleton_); }

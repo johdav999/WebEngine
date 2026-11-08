@@ -4,7 +4,8 @@ The browser renderer supports WebGPU and WebGL 2. `Renderer` is a facade with
 no WebGPU, GLES or Emscripten types in its public header. The implementations
 and their GPU resources live in `src/webgpu_renderer.*` and
 `src/webgl_renderer.*`; both compile into the browser executable. Native builds
-still supply the portable core and tests, rather than a native graphics backend.
+supply the portable core and optional separate Windows backends; see
+[native contracts](windows-native.md).
 
 ## Selection and failure
 
@@ -46,7 +47,7 @@ after acquisition also retain this recovery path. WebGL 1 is not supported.
 | Paged terrain sculpt/paint and dirty writeback | Atomic source/halo edits, affected rebuilds, shared paint geometry and IndexedDB generation-checked batches | Same portable edit/residency/writeback contracts and recovery; lighting/shadow limits unchanged |
 | Ordered views, Background/World/Overlay and canvas GUI | Supported | Supported |
 | [Camera render surfaces](render-surfaces.md) | Single-sample SDR attachments sampled by window views | Complete RGBA8/depth framebuffers sampled by window views |
-| Fullscreen/mesh sphere skies, gradient/panorama/atmosphere, clouds and day/night light updates | Supported | Supported (IBL remains unavailable) |
+| Fullscreen/mesh sphere skies, gradient/panorama/atmosphere, clouds and day/night light updates | Supported | Supported (lighting environment is separate; compact PBR is opt-in) |
 | RGBA textures, UV transforms, color/opacity, alpha mask, double-sided/mirrored meshes | Supported | Supported |
 | Skeletal/morph geometry | GPU skinning, morph streams | CPU deformation into backend vertex buffers |
 | Alpha/additive particles, transparent mesh ordering and flipbooks | Supported | Supported |
@@ -61,7 +62,8 @@ after acquisition also retain this recovery path. WebGL 1 is not supported.
 | Directional/spot maps and optional cascades | Supported | Supported |
 | Volumetric fog box | Shared compute grid for World geometry, sky and FX, with direct and analytic modes | Same depth sampling with an FP16 raster atlas. Devices without the target format use direct integration |
 | HDR bloom and color grading | Supported | EXT_color_buffer_float required; standard rendering otherwise |
-| Instancing | Supported | Unavailable |
+| Compatible opaque/masked mesh instancing | Supported | Supported; packed divisor attributes |
+| Bulk static foliage and explicit-time GPU wind | Shared mesh/bend resources, instanced color/shadows | Same instance/wind geometry with basic lighting |
 | Authored BC7/ETC2/ASTC uploads | When device supports them | Retained RGBA pixels |
 | GPU timestamp measurements | When supported/enabled | Unavailable |
 
@@ -79,10 +81,14 @@ coordinates convert the shared top-left viewports to GL coordinates. Each layer
 clears depth within the active view; later layers compose above previous layers.
 GUI renders once afterward with the existing logical/CSS coordinate conversion.
 
-The fallback submits individual draws and uploads CPU-deformed geometry; it does
-not claim WebGPU's batching or changed-only skeletal upload costs. Performance
+The fallback consumes compatible `RenderFrame` mesh batches and caches changed
+object attributes in 176-byte packed records, below WebGL's 255-byte stride limit.
+GPU foliage uses shared immutable bend data and a 32-byte shared wind payload.
+Skeletal/morph geometry still uses CPU deformation and drawing-time vertex uploads;
+this does not add changed-only skeletal upload caching. Performance
 draw/triangle counts reflect submitted work. Fallback upload counters count buffer
-and texture payload uploads; they do not count GL uniform calls. Encoding CPU time
+and texture payload uploads plus the shared wind payload; other GL uniform calls
+are not counted. Encoding CPU time
 includes fallback resource preparation. GPU durations remain unavailable/null.
 
 ## Ownership and restoration

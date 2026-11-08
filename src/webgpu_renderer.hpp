@@ -4,6 +4,7 @@
 #include "webgpu_cluster_hierarchy.hpp"
 #include "underwater_render.hpp"
 #include "engine/scene.hpp"
+#include "engine/mesh_instances.hpp"
 #include "engine/camera_component.hpp"
 #include "engine/performance.hpp"
 #include "engine/render_frame.hpp"
@@ -246,6 +247,15 @@ private:
     wgpu::BindGroupLayout textureLayout_;
     wgpu::BindGroupLayout materialLayout_;
     wgpu::BindGroupLayout skinLayout_;
+    wgpu::BindGroupLayout windLayout_;
+    wgpu::PipelineLayout windPipelineLayout_,shadowWindPipelineLayout_;
+    struct GpuBend {std::weak_ptr<const MeshBend> source;wgpu::Buffer vertices;};
+    struct GpuWind {std::weak_ptr<const MeshWindState> source;wgpu::Buffer buffer;wgpu::BindGroup binding;std::array<float,8> values{};bool initialized=false;};
+    std::unordered_map<const MeshBend*,GpuBend> bends_;
+    std::unordered_map<const MeshWindState*,GpuWind> winds_;
+    void uploadBend(const std::shared_ptr<const MeshBend>&);
+    void uploadWind(const std::shared_ptr<const MeshWindState>&);
+    void bindWind(wgpu::RenderPassEncoder&,const MeshDraw&);
 
     std::unordered_map<const Mesh*,GpuMesh> meshes_;
     std::map<std::pair<const Texture*,TextureSemantic>,GpuTexture> textures_;

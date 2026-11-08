@@ -84,6 +84,7 @@ add_library(engine_core
   src/mesh.cpp
   src/mesh_optimizer.cpp
   src/mesh_component.cpp
+  src/mesh_instances.cpp
   src/fbx_importer.cpp
   src/glb_importer.cpp
   src/camera_component.cpp
@@ -775,9 +776,18 @@ endif()
 # Optional portable compiled modules and host examples.
 include(cmake/modules.cmake)
 include(cmake/quests.cmake)
+include(cmake/rpg.cmake)
+if(WEBENGINE_BUILD_RPG_TESTS)
+  enable_testing()
+endif()
 include(cmake/hybrid_terrain.cmake)
 include(cmake/network.cmake)
 include(cmake/planet.cmake)
 
 include(cmake/browser.cmake)
+include(cmake/rpg_hosts.cmake)
 include(cmake/host_integration.cmake)
+
+include(cmake/simulator.cmake)
+include(cmake/clothing.cmake)
+include(cmake/foliage.cmake)

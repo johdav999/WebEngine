@@ -74,4 +74,15 @@
     endif()
     string(REPLACE "// FOG_GRID_SAMPLING" "${FOG_GRID_SAMPLING_WGSL}" ${SHADER} "${${SHADER}}")
   endforeach()
+  # MSVC limits individual string literals. Adjacent raw literals retain every
+  # shader byte (including newlines) while keeping each source line separate.
+  foreach(SHADER MESH_SHADER PARTICLE_SHADER SKY_SHADER GUI_SHADER WATER_CAPTURE_SHADER UNDERWATER_SHADER)
+    string(REPLACE "\n" "\n)WGSL\"\nR\"WGSL(" ${SHADER} "${${SHADER}}")
+  endforeach()
+  foreach(SHADER FOG_GLSL SKY_VERTEX_GLSL SKY_FRAGMENT_GLSL UNDERWATER_VERTEX_GLSL UNDERWATER_FRAGMENT_GLSL)
+    string(REPLACE "\n" "\n)GLSL\"\nR\"GLSL(" ${SHADER} "${${SHADER}}")
+  endforeach()
+  foreach(SHADER POST_SHADER POST_VERTEX_GLSL POST_FRAGMENT_GLSL)
+    string(REPLACE "\n" "\n)SHADER\"\nR\"SHADER(" ${SHADER} "${${SHADER}}")
+  endforeach()
   configure_file(cmake/shaders.hpp.in generated/shaders.hpp @ONLY)

@@ -71,6 +71,9 @@ protected:
     // Required implementation children cannot be removed or reparented independently.
     void protectChild(Node& descendant);
 private:
+    friend class ClothingInstance;
+    friend class FoliageStream;
+    friend class MeshInstancesComponent;
     friend class ReplayGhost;
     friend class ArchiveCodec;
     friend class Scene;

@@ -80,7 +80,7 @@ mirroring and visibility. The renderer's usual static mesh detail policy applies
 RenderFrame batches compatible opaque parts, explicitly permitting opaque instance
 reordering; transparent parts join FxFrame's existing center-sorted queue with
 ordinary meshes, quads and trails. WebGPU supports the existing opaque instancing;
-WebGL2 retains its existing per-instance submission/basic material lighting limits.
+WebGL2 batches compatible mesh instances and retains its basic material lighting limits.
 No new shader, GPU geometry per particle or render pass is required. Existing mesh
 and object upload counters cover mesh FX; `meshParticles` reports collected live
 mesh particles per view (including size-zero or offscreen records).

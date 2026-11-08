@@ -96,6 +96,7 @@
     const controls=document.createElement('div');controls.style.cssText='display:flex;flex-wrap:wrap;gap:8px;align-items:end';box.append(controls);
     field(controls,'Translation scale',displayNumber(retargetState.profile.scale),v=>retargetEdit(p=>p.scale=v),'number','retarget-scale');
     button(controls,'Estimate scale',()=>call(()=>Module._engine_editor_retarget_action(1)),'retarget-estimate');
+    button(controls,'Match Mixamo joints',()=>call(()=>Module._engine_editor_retarget_action(3)),'retarget-mixamo');
     retargetState.profile.rotation.forEach((v,j)=>field(controls,'Model rotation '+'XYZW'[j],displayNumber(v),value=>retargetEdit(p=>p.rotation[j]=value),'number'));
     const rows=document.createElement('div');rows.id='retarget-mappings';rows.style.cssText='max-height:300px;overflow:auto';box.append(rows);
     info.joints.forEach((target,i)=>{const row=document.createElement('div');row.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:10px';rows.append(row);const mapped=retargetState.profile.joints.find(j=>j.target===target),label=target||'(unnamed root)';

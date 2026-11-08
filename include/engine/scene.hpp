@@ -18,6 +18,8 @@ class PhysicsWorld;
 class SelectionSystem;
 class Application;
 class CinematicRuntime;
+class MeshBend;
+class MeshWindState;
 enum class SceneLifecycleState { Detached, Loaded, Active };
 struct Frustum;
 struct MeshDraw {
@@ -41,6 +43,10 @@ struct MeshDraw {
     MeshLodPolicy lodPolicy;
     bool receivesDecals=true;
     std::uint32_t visibilityMask=1;
+    std::shared_ptr<const MeshBend> bend;
+    std::shared_ptr<const MeshWindState> wind;
+    float windPhase=0;
+    std::uint64_t instanceKey=0;
 };
 struct SceneLight {
     LightType type; Vec3 position, direction, color; float intensity, range; ShadowSettings shadow; Vec3 shadowCenter;

@@ -17,7 +17,8 @@ EMSCRIPTEN_KEEPALIVE int engine_editor_retarget_file(const void* data,int size,i
     if(!data||size<1||size>64*1024*1024)throw std::invalid_argument("Retarget source exceeds 64 MiB");
     const auto bytes=std::span(static_cast<const std::byte*>(data),std::size_t(size));std::shared_ptr<const Skeleton> candidate;
     if(kind==0)candidate=AnimationLibraryArchive::load(bytes)->data().skeleton;
-    else {auto mesh=kind==1?GlbImporter::loadMemory(bytes):kind==2?FbxImporter::loadMemory(bytes):nullptr;if(mesh)candidate=mesh->skeleton;}
+    else if(kind==2)candidate=FbxImporter::loadAnimationsMemory(bytes);
+    else if(kind==1)candidate=GlbImporter::loadMemory(bytes)->skeleton;
     if(!candidate||candidate->clips.empty())throw std::invalid_argument("Choose an animated FBX, GLB or .weanim source");
     auto profile=matchAnimationJoints(*candidate,*document->library()->data().skeleton);
     if(!profile.joints.empty())try{profile.translationScale=estimateRetargetScale(*candidate,*document->library()->data().skeleton,profile);}catch(const std::invalid_argument&){/* Keep suggestions for manual repair. */}
@@ -33,6 +34,7 @@ EMSCRIPTEN_KEEPALIVE int engine_editor_retarget_action(int action){return perfor
     if(!retargetSource)throw std::logic_error("Load a retarget source first");
     if(action==1){const auto value=estimateRetargetScale(*retargetSource,*document->library()->data().skeleton,retargetProfile);retargetProfile.translationScale=value;}
     else if(action==2)document->edit(document->library()->appendRetargeted(*retargetSource,retargetProfile));
+    else if(action==3){auto p=matchMixamoJoints(*retargetSource,*document->library()->data().skeleton);p.translationScale=estimateRetargetScale(*retargetSource,*document->library()->data().skeleton,p);retargetProfile=std::move(p);}
     else throw std::invalid_argument("Unknown retarget action");
 });}
 }

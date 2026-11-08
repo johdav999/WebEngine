@@ -1,0 +1,70 @@
+name: RPG rendered hosts
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python tools/setup_windows.py
+      - run: cmake -S . -B build/rpg-host -A x64 -DBUILD_TESTING=OFF -DWEBENGINE_BUILD_WINDOWS=ON -DWEBENGINE_WINDOWS_DAWN=OFF -DWEBENGINE_BUILD_RPG=ON -DWEBENGINE_BUILD_QUESTS=ON -DWEBENGINE_BUILD_RPG_QUESTS=ON -DWEBENGINE_BUILD_RPG_DEMO=ON
+      - run: cmake --build build/rpg-host --config Release --target rpg_demo_windows rpg_host_tests --parallel 4
+      - run: ctest --test-dir build/rpg-host -C Release -R rpg_host --output-on-failure
+      - name: D3D12 rendered smoke
+        id: native-smoke
+        env:
+          WEBENGINE_D3D12_WARP: '1'
+          WEBENGINE_D3D12_VALIDATION: '1'
+          WEBENGINE_D3D12_GPU_VALIDATION: '1'
+        run: python scripts/rpg-native-smoke.py build/rpg-host/Release/rpg_demo_windows.exe build/evidence/rpg-d3d12
+      - name: Native diagnostics
+        if: always()
+        run: if (Test-Path rpg-host-error.txt) { Get-Content rpg-host-error.txt }
+      - run: python scripts/rpg-check-frames.py build/evidence/rpg-d3d12
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rpg-windows-host
+          path: |
+            build/evidence/rpg-d3d12
+            build/rpg-host/Release
+            rpg-host-error.txt
+  browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Emscripten
+        run: |
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git .tools/emsdk
+          .tools/emsdk/emsdk install "$(cat .emscripten-version)"
+          .tools/emsdk/emsdk activate "$(cat .emscripten-version)"
+      - name: Build shared tests and browser host
+        id: browser-build
+        run: |
+          source .tools/emsdk/emsdk_env.sh
+          emcmake cmake -S . -B build/rpg-host -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DWEBENGINE_BUILD_RPG=ON -DWEBENGINE_BUILD_QUESTS=ON -DWEBENGINE_BUILD_RPG_QUESTS=ON -DWEBENGINE_BUILD_RPG_DEMO=ON
+          cmake --build build/rpg-host --target rpg_demo rpg_host_tests --parallel 4
+          ctest --test-dir build/rpg-host -R rpg_host --output-on-failure
+      - name: WebGPU input and pixel acceptance
+        env:
+          DEBUG: 'pw:browser'
+        run: |
+          npm install --no-save playwright@1.62.1 pngjs@7.0.0
+          npx playwright install --with-deps chromium
+          RPG_HEADED=1 RPG_BACKENDS=webgpu EVIDENCE_DIR=build/evidence/rpg-host/webgpu xvfb-run -a node scripts/rpg-host-smoke.cjs
+      - name: WebGL2 input and pixel acceptance
+        if: always() && steps.browser-build.outcome == 'success'
+        run: RPG_BACKENDS=webgl2 EVIDENCE_DIR=build/evidence/rpg-host/webgl2 node scripts/rpg-host-smoke.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rpg-browser-host
+          path: |
+            build/rpg-host/rpg-site
+            build/evidence/rpg-host

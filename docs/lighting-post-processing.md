@@ -85,6 +85,7 @@ Unavailable devices keep the requested setting and render the standard path.
 Float-target MSAA is checked separately; requested 4x falls back to 1x if needed.
 WebGL2 defaults to basic lighting and supports an opt-in compact PBR tier with
 baked environment lighting. [WebGL2 compact PBR](lighting-improvements.md#webgl2-compact-pbr)
+Compatible mesh draws also support instancing.
 
 All fields validate together before replacing quality: exposure -8..8, bloom
 strength 0..2, threshold 0..32, saturation/contrast 0..2, cascades 1..4, finite

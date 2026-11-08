@@ -77,6 +77,38 @@ AnimationRetargetProfile matchAnimationJoints(const Skeleton& source,const Skele
     for(const auto& t:target.joints)for(const auto& s:source.joints)if(t.name==s.name){p.joints.push_back({s.name,t.name,t.parent<0?RetargetTranslation::ScaledDelta:RetargetTranslation::Bind});break;}
     return p;
 }
+AnimationRetargetProfile matchMixamoJoints(const Skeleton& source,const Skeleton& target){
+    rig(source);rig(target);
+    const auto canonical=[](std::string_view n)->std::string {
+        if(const auto p=n.rfind(':');p!=std::string_view::npos)n.remove_prefix(p+1);
+        if(n.starts_with("mixamorig"))n.remove_prefix(9);
+        for(auto body:{"Hips","Spine","Spine1","Spine2","Neck","Head","HeadTop_End"})
+            if(n==body)return std::string(n);
+        auto limb=n;
+        if(limb.starts_with("Left"))limb.remove_prefix(4);
+        else if(limb.starts_with("Right"))limb.remove_prefix(5);
+        else return {};
+        for(auto part:{"Shoulder","Arm","ForeArm","Hand","UpLeg","Leg","Foot","ToeBase","Toe_End"})
+            if(limb==part)return std::string(n);
+        for(auto finger:{"HandThumb","HandIndex","HandMiddle","HandRing","HandPinky"})
+            for(char digit='1';digit<='4';++digit)
+                if(limb==std::string(finger)+digit)return std::string(n);
+        return {};
+    };
+    const auto names=[&](const Skeleton& s){
+        std::vector<std::string> result;
+        for(const auto& j:s.joints){auto n=canonical(j.name);
+            if(!n.empty())require(std::find(result.begin(),result.end(),n)==result.end(),"Ambiguous Mixamo joint aliases");
+            result.push_back(std::move(n));}
+        return result;
+    };
+    const auto a=names(source),b=names(target);AnimationRetargetProfile p;
+    for(std::size_t t=0;t<b.size();++t)if(!b[t].empty())for(std::size_t s=0;s<a.size();++s)if(a[s]==b[t]){
+        p.joints.push_back({source.joints[s].name,target.joints[t].name,b[t]=="Hips"?RetargetTranslation::ScaledDelta:RetargetTranslation::Bind});break;
+    }
+    require(std::any_of(p.joints.begin(),p.joints.end(),[&](const auto& j){return canonical(j.source)=="Hips";}),"Mixamo mapping requires Hips on both rigs");
+    p.validate(source,target);return p;
+}
 float estimateRetargetScale(const Skeleton& source,const Skeleton& target,const AnimationRetargetProfile& profile){
     rig(source);rig(target);const auto r=resolve(source,target,profile);const auto sw=bindWorlds(source),tw=bindWorlds(target);
     std::array<float,256> ratios;std::size_t count=0;

@@ -20,9 +20,10 @@ root is allowed), counts and parent relationships must match, and local bind mat
 must agree within `1e-4`. Source joint samples are remapped by name into destination
 order. For compatible hierarchies with different proportions or bind poses, use
 the explicit [Retarget clips](animation-retargeting.md) workflow instead.
-Neither path is an arbitrary animation-only file decoder. Existing importer geometry,
-image and sample budgets still apply. Missing companion images may produce importer
-warnings; textures/geometry from the animation source are not retained by the library.
+FBX sources use the skeleton/clip decoder and accept animation-only exports without
+geometry or texture decoding. GLB sources retain existing model-import budgets.
+See [Mixamo import and binding](mixamo.md) for rest-pose requirements and the explicit
+Mixamo naming preset. Neither path infers arbitrary rig compatibility.
 
 Clip markers use one line per marker: `seconds | name | payload`. Save markers
 sorts them by time; runtime validation checks time bounds and marker limits. Both

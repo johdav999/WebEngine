@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>WebEngine foliage</title><link rel="icon" href="data:,">
+<style>body{margin:0;background:#1c271f;color:#f1f4df;font:15px system-ui}canvas{width:100vw;height:100vh;display:block}aside{position:absolute;left:16px;top:16px;padding:18px;background:#16251de8;border:1px solid #789363;border-radius:8px;width:220px}h1{font-size:21px;margin:0 0 12px}button{display:block;width:100%;padding:8px;margin:6px 0;background:#33513a;color:inherit;border:1px solid #789363;border-radius:4px;cursor:pointer}p{font-size:12px;line-height:1.5}</style>
+<canvas id="viewport" width="1100" height="750"></canvas><aside><h1>Foliage clearing</h1><div id="status">Loading…</div>
+<button onclick="Module._foliage_command(0)">Toggle wind</button><button onclick="Module._foliage_command(1)">Harvest nearest plant</button><button onclick="Module._foliage_command(2)">Move visual focus</button><button onclick="Module._foliage_command(3)">Regrow plants</button><button onclick="Module._foliage_command(4)">Save removals</button><button onclick="Module._foliage_command(5)">Restore removals</button><button onclick="Module._foliage_command(6)">Pause / resume</button>
+<p>Seeded trees, bushes and masked grass. Moving visual focus streams cells while trunk collision stays around the clearing. Wind follows simulation time.</p></aside>
+<script>
+window.engineStatus=(text,error)=>{document.getElementById('status').textContent=text;if(error)console.error(text)};
+window.engineStats=()=>{};window.enginePerformance=value=>{window.foliagePerformance=value};
+var Module={canvas:document.getElementById('viewport'),onAbort(e){document.getElementById('status').textContent=String(e)}};
+</script><script src="foliage_demo.js"></script></html>
