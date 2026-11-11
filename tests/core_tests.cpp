@@ -59,6 +59,29 @@ int main() {
     rejected=false;
     try { Transform zero; zero.scale.x=0; inverseAffine(zero.matrix()); } catch(const std::invalid_argument&) { rejected=true; }
     check(rejected,"Singular transforms are rejected");
+    Node rotationNode;
+    Mat4 physicsQuarterTurn;
+    physicsQuarterTurn.m={2.14289612e-05f,-4.1467938e-05f,-1.00000012f,0,
+        -.00038036186f,.99999994f,-4.14761598e-05f,0,
+        1.00000012f,.000380362733f,2.13980675e-05f,0,2.00338197f,.759959936f,-99.986969f,1};
+    try {
+        rotationNode.setWorldTransform(physicsQuarterTurn);
+        const auto actual=rotationNode.worldMatrix();
+        for(int i=0;i<16;++i)check(std::abs(actual.m[i]-physicsQuarterTurn.m[i])<.0002f,
+            "Quaternion-derived near-gimbal physics matrix round trips");
+    } catch(const std::exception&) { check(false,"Near-gimbal float noise must not reject a rigid pose"); }
+    for(float sign:{-1.f,1.f}) for(int step=-100;step<=100;++step) {
+        Transform pose;pose.position={2,1,-4};
+        pose.rotation={.12f,sign*pi/2+step*.00001f,-.08f};
+        pose.scale={1.2f,.7f,2};
+        const auto expected=pose.matrix();
+        try {
+            rotationNode.setWorldTransform(expected);
+            const auto actual=rotationNode.worldMatrix();
+            for(int i=0;i<16;++i)
+                check(std::abs(actual.m[i]-expected.m[i])<.0002f,"Near-gimbal TRS round trip preserves the matrix");
+        } catch(const std::exception&) { check(false,"Valid near-gimbal transforms must not throw"); }
+    }
     if(failures) return 1;
     std::cout<<"Engine core tests passed\n";
 }
