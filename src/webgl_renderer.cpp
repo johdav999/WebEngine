@@ -157,6 +157,7 @@ uniform vec2 waterExtent;
 uniform vec3 viewForward;
 uniform vec4 tint,uvTransform;
 uniform vec3 emissive;
+uniform bool hasEmissiveMap;
 uniform bool unlit,masked,toneMapped,shadowPass,receivesShadow;
 uniform highp sampler2DArray environmentAtlas;
 #ifdef WEBENGINE_COMPACT_PBR
@@ -660,10 +661,13 @@ void main() {
         lighting+=ambient*body*surfaceAdvanced[3].xyz*surfaceAdvanced[1].z*.25;
         lighting+=ambient*surfaceAdvanced[4].xyz*surfaceAdvanced[1].w*pow(1.0-nv,mix(1.0,5.0,surfaceAdvanced[2].w));
     }
-    vec3 linear=(pbr ? lighting : body*(unlit ? vec3(1.0) : lighting))+emissive;
+    // The terrain weights and conventional emission map share a texture unit.
+    vec3 emission=emissive;
+    if(hasEmissiveMap) emission*=pow(texture(layerWeights,sampleUv).rgb,vec3(2.2));
+    vec3 linear=(pbr ? lighting : body*(unlit ? vec3(1.0) : lighting))+emission;
     if(water) {
         vec3 reflection=mix(reflectionHorizon.rgb,reflectionZenith.rgb,clamp(reflect(-viewDirection,n).y,0.0,1.0));
-        linear=waterLighting*(1.0-fWater*reflectionHorizon.w)+reflection*fWater*reflectionHorizon.w+emissive;
+        linear=waterLighting*(1.0-fWater*reflectionHorizon.w)+reflection*fWater*reflectionHorizon.w+emission;
     }
 #ifdef VOLUMETRIC_CLOUDS
     if(fogWorld) linear=cloudApply(linear,worldPosition,fogAdditive);
@@ -1404,6 +1408,8 @@ void WebGlRenderer::drawMesh(const MeshDraw& draw,const Mat4& vp,const SceneFram
         const auto& wind=draw.wind->parameters();if(!windValuesValid_||windProgram_!=meshProgram_||windValues_!=wind){windValues_=wind;windValuesValid_=true;windProgram_=meshProgram_;glUniform4fv(glGetUniformLocation(meshProgram_,"windDirection"),1,wind.data());glUniform4fv(glGetUniformLocation(meshProgram_,"windClock"),1,wind.data()+4);++counters_.uploadCalls;counters_.uploadBytes+=32;}
     } else glDisableVertexAttribArray(15);
     glUniform4f(glGetUniformLocation(meshProgram_,"tint"),draw.color.x,draw.color.y,draw.color.z,draw.opacity);
+    const bool hasEmissiveMap=!m.layers.enabled&&!shadowPass_&&m.emissiveTexture;
+    glUniform1i(glGetUniformLocation(meshProgram_,"hasEmissiveMap"),hasEmissiveMap);
     glUniform1i(glGetUniformLocation(meshProgram_,"layered"),m.layers.enabled);
     if(m.layers.enabled) {
         const auto sources=materialTextures(m);const auto parameters=materialLayerParameters(m.layers);
@@ -1424,6 +1430,12 @@ void WebGlRenderer::drawMesh(const MeshDraw& draw,const Mat4& vp,const SceneFram
         catch(const UploadDeferred&) {++counters_.deferredAssetUploads;++counters_.deferredAssetDraws;glActiveTexture(GL_TEXTURE0);return;}
         glUniform1i(glGetUniformLocation(meshProgram_,"layerOne"),5);glActiveTexture(GL_TEXTURE0);
         glUniform1i(glGetUniformLocation(meshProgram_,"compactBaseSurface"),surface!=0);
+    }
+    if(hasEmissiveMap) {
+        glActiveTexture(GL_TEXTURE8);
+        try {texture(m.emissiveTexture);}
+        catch(const UploadDeferred&) {++counters_.deferredAssetUploads;++counters_.deferredAssetDraws;glActiveTexture(GL_TEXTURE0);return;}
+        glUniform1i(glGetUniformLocation(meshProgram_,"layerWeights"),8);glActiveTexture(GL_TEXTURE0);
     }
     if(!m.layers.enabled) {
         const auto sources=materialTextures(m);
@@ -1490,6 +1502,7 @@ void WebGlRenderer::drawParticles(const FxBatch& batch,const CameraComponent& ca
     glUseProgram(meshProgram_);glUniform1i(glGetUniformLocation(meshProgram_,"instanceMode"),0);glUniform1i(glGetUniformLocation(meshProgram_,"gpuWind"),0);glUniform1i(glGetUniformLocation(meshProgram_,"hdrOutput"),hdr_);glBindVertexArray(particleVao_);glBindBuffer(GL_ARRAY_BUFFER,particleBuffer_);glActiveTexture(GL_TEXTURE0);
     glUniform1i(glGetUniformLocation(meshProgram_,"ribbon"),0);
     glUniform1i(glGetUniformLocation(meshProgram_,"layered"),0);
+    glUniform1i(glGetUniformLocation(meshProgram_,"hasEmissiveMap"),0);
     glActiveTexture(GL_TEXTURE3);glBindTexture(GL_TEXTURE_2D,waterDepth_);glUniform1i(glGetUniformLocation(meshProgram_,"sceneDepth"),3);glActiveTexture(GL_TEXTURE0);
     try { texture(batch.texture); } catch(const UploadDeferred&) { ++counters_.deferredAssetUploads;++counters_.deferredAssetDraws;return; }
     matrix(meshProgram_,"model",Mat4::identity());matrix(meshProgram_,"normalMatrix",Mat4::identity());matrix(meshProgram_,"vp",vp);
@@ -1524,7 +1537,7 @@ void WebGlRenderer::drawRibbon(const FxBatch& batch,const Mat4& vp) {
     glActiveTexture(GL_TEXTURE3);glBindTexture(GL_TEXTURE_2D,waterDepth_);glUniform1i(glGetUniformLocation(meshProgram_,"sceneDepth"),3);glActiveTexture(GL_TEXTURE0);
     matrix(meshProgram_,"model",Mat4::identity());matrix(meshProgram_,"normalMatrix",Mat4::identity());matrix(meshProgram_,"vp",vp);
     const auto neutralAdvanced=materialAdvancedParameters(MaterialAdvanced{});glUniform4fv(glGetUniformLocation(meshProgram_,"advanced"),9,neutralAdvanced.data());
-    for(const auto* name:{"layered","water","sceneWater","masked"})glUniform1i(glGetUniformLocation(meshProgram_,name),0);
+    for(const auto* name:{"layered","water","sceneWater","masked","hasEmissiveMap"})glUniform1i(glGetUniformLocation(meshProgram_,name),0);
     for(const auto* name:{"ribbon","unlit","fogWorld","toneMapped"})glUniform1i(glGetUniformLocation(meshProgram_,name),1);
     glUniform1i(glGetUniformLocation(meshProgram_,"fogAdditive"),batch.blend==BlendMode::Additive);
     glUniform1f(glGetUniformLocation(meshProgram_,"particleSoftDistance"),batch.softDistance);
