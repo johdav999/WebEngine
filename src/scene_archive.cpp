@@ -46,7 +46,7 @@ public:
     bool reading=false;
     std::uint32_t collisionDepth=0;
     bool referencesOnly=false; // In-memory duplication transport; never a persisted format.
-    std::uint32_t version=41;
+    std::uint32_t version=42;
     std::uint32_t effectDepth=0,prefabDepth=0;
     std::span<const std::byte> input;
     std::vector<std::byte> output;
@@ -398,6 +398,7 @@ public:
             v.dayNight.hour,v.dayNight.daySeconds,v.dayNight.azimuth,v.dayNight.sunIntensity,v.dayNight.moonIntensity);
         if(version>=41)fields(v.clouds.volumetric,v.clouds.baseHeight,v.clouds.thickness,v.clouds.extinction,
                              v.clouds.maxDistance,v.clouds.detail,v.clouds.anisotropy);
+        if(version>=42)io(v.clouds.billowing);
         v.validate();
     }
 
@@ -854,13 +855,13 @@ namespace {
 constexpr std::array<std::byte,8> magic={std::byte{'W'},std::byte{'E'},std::byte{'S'},std::byte{'C'},std::byte{'E'},std::byte{'N'},std::byte{'E'},std::byte{0}};
 std::vector<std::byte> envelope(std::vector<std::byte> payload,const ArchiveLimits& limits) {
     ArchiveCodec header(limits);auto signature=magic;header.bytes(signature.data(),signature.size());
-    std::uint32_t version=41,crc=checksum(payload);std::uint64_t size=payload.size();header.fields(version,size,crc);header.bytes(payload.data(),payload.size());return std::move(header.output);
+    std::uint32_t version=42,crc=checksum(payload);std::uint64_t size=payload.size();header.fields(version,size,crc);header.bytes(payload.data(),payload.size());return std::move(header.output);
 }
 std::span<const std::byte> open(std::span<const std::byte> bytes,const ArchiveLimits& limits,std::uint32_t& version) {
     require(bytes.size()<=limits.maxBytes,"Archive size limit exceeded");ArchiveCodec header(bytes,limits);
     std::array<std::byte,8> signature{};header.bytes(signature.data(),signature.size());require(signature==magic,"This is not a WebEngine archive");
     std::uint32_t crc=0;std::uint64_t size=0;header.fields(version,size,crc);
-    require(version>=1&&version<=41,"Unsupported WebEngine archive version");require(size==bytes.size()-header.offset,"Truncated archive or trailing data");
+    require(version>=1&&version<=42,"Unsupported WebEngine archive version");require(size==bytes.size()-header.offset,"Truncated archive or trailing data");
     const auto payload=bytes.subspan(header.offset);require(checksum(payload)==crc,"Archive checksum mismatch");return payload;
 }
 }

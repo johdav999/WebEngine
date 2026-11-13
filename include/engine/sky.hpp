@@ -14,6 +14,7 @@ struct SkyClouds {
     Vec2 wind{0.015f,0.006f},offset{}; // Noise-domain units/second; explicit accumulated phase.
     bool volumetric=false;
     float baseHeight=1200,thickness=800,extinction=.006f,maxDistance=30000,detail=.35f,anisotropy=.55f;
+    bool billowing=false; // Cellular silhouettes for volumetric clouds.
 };
 struct SkyAtmosphere {
     Vec3 sunDirection{0.4f,0.8f,0.2f}; // World-space direction towards the sun.
@@ -48,12 +49,12 @@ struct SkyUniform {
     std::array<float,4> sun,air,clouds,cloudWind;
     FogUniform fog;
     std::array<float,4> fogRight{},fogUp{};
-    std::array<float,4> cloudLayer{},cloudShape{},cloudOrigin{};
+    std::array<float,4> cloudLayer{},cloudShape{},cloudOrigin{}; // cloudShape.w selects the billowing profile.
     CloudUniform cloud{};
 };
 static_assert(sizeof(SkyUniform)==784 && offsetof(SkyUniform,cloudLayer)==672 && offsetof(SkyUniform,cloud)==720);
 SkyUniform prepareSky(const SkyBackground& sky,const CameraComponent& camera,float aspect,std::uint32_t cloudSteps=0);
-std::shared_ptr<const Texture> skyCloudNoiseTexture(); // Shared immutable linear RGBA8, bordered 528x528 atlas of 64 depth slices.
+std::shared_ptr<const Texture> skyCloudNoiseTexture(bool billowing=false); // Shared immutable linear RGBA8, bordered 528x528 atlas of 64 depth slices.
 std::shared_ptr<const Mesh> skySphereMesh(); // Shared inward-facing unit sphere, unlit material.
 struct SkyDaylight { Vec3 sunDirection,color,ambient;float intensity,environmentIntensity;bool moon; };
 SkyDaylight evaluateDayNight(const SkyDayNight& settings);

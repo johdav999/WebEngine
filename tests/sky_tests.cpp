@@ -123,7 +123,7 @@ static void volumetricCloudContracts() {
     camera.transform.position={-12345678,1700,8765432};
     const auto payload=prepareSky(sky,camera,1.5f,32);
     check(payload.cloudLayer==std::array<float,4>{1200,800,.006f,30000}&&
-          payload.cloudShape==std::array<float,4>{.35f,.55f,32,4},"Volumetric cloud payload");
+          payload.cloudShape==std::array<float,4>{.35f,.55f,32,0},"Volumetric cloud payload");
     const auto phase=[](float coordinate,float frequency,float offset) {
         const double value=double(coordinate)*frequency+offset;
         const float result=float(value-std::floor(value));
@@ -183,37 +183,40 @@ static void volumetricCloudContracts() {
     boundary.clouds.baseHeight=100000;boundary.clouds.thickness=20000;boundary.clouds.extinction=1;
     boundary.clouds.maxDistance=200000;boundary.clouds.detail=1;boundary.clouds.anisotropy=.95f;boundary.validate();
 
-    const auto texture=skyCloudNoiseTexture();
-    check(texture==skyCloudNoiseTexture()&&texture->width==528&&texture->height==528&&
-          texture->pixels.size()==1115136&&texture->wrapU==TextureWrap::Clamp&&texture->wrapV==TextureWrap::Clamp,
-          "Cloud noise atlas shares one immutable bounded source");
-    const auto pixel=[&](unsigned slice,unsigned x,unsigned y) {
-        return texture->pixels.begin()+(((slice/8)*66+y)*528+(slice%8)*66+x)*4;
-    };
-    unsigned minimum=255,maximum=0,different=0;
-    std::uint64_t redSeam=0,greenSeam=0;
-    for(unsigned slice=0;slice<64;++slice) {
-        for(unsigned coordinate=0;coordinate<66;++coordinate) {
-            check(std::equal(pixel(slice,0,coordinate),pixel(slice,0,coordinate)+4,pixel(slice,64,coordinate))&&
-                  std::equal(pixel(slice,65,coordinate),pixel(slice,65,coordinate)+4,pixel(slice,1,coordinate))&&
-                  std::equal(pixel(slice,coordinate,0),pixel(slice,coordinate,0)+4,pixel(slice,coordinate,64))&&
-                  std::equal(pixel(slice,coordinate,65),pixel(slice,coordinate,65)+4,pixel(slice,coordinate,1)),
-                  "Every atlas slice has wrapped XY borders and corners");
-        }
-        for(unsigned y=1;y<=64;++y)for(unsigned x=1;x<=64;++x) {
-            const auto value=pixel(slice,x,y);
-            minimum=std::min(minimum,unsigned(value[0]));maximum=std::max(maximum,unsigned(value[0]));
-            different+=value[0]!=value[1];
-            check(value[2]==0&&value[3]==255,"Noise atlas retains its data channel convention");
-            if(slice==0) {
-                const auto last=pixel(63,x,y);
-                redSeam+=unsigned(std::abs(int(value[0])-int(last[0])));
-                greenSeam+=unsigned(std::abs(int(value[1])-int(last[1])));
+    for(bool billowing:{false,true}) {
+        const auto texture=skyCloudNoiseTexture(billowing);
+        check(texture==skyCloudNoiseTexture(billowing)&&texture->width==528&&texture->height==528&&
+              texture->pixels.size()==1115136&&texture->wrapU==TextureWrap::Clamp&&texture->wrapV==TextureWrap::Clamp,
+              "Cloud noise atlas shares one immutable bounded source");
+        const auto pixel=[&](unsigned slice,unsigned x,unsigned y) {
+            return texture->pixels.begin()+(((slice/8)*66+y)*528+(slice%8)*66+x)*4;
+        };
+        unsigned minimum=255,maximum=0,different=0;
+        std::uint64_t redSeam=0,greenSeam=0;
+        for(unsigned slice=0;slice<64;++slice) {
+            for(unsigned coordinate=0;coordinate<66;++coordinate) {
+                check(std::equal(pixel(slice,0,coordinate),pixel(slice,0,coordinate)+4,pixel(slice,64,coordinate))&&
+                      std::equal(pixel(slice,65,coordinate),pixel(slice,65,coordinate)+4,pixel(slice,1,coordinate))&&
+                      std::equal(pixel(slice,coordinate,0),pixel(slice,coordinate,0)+4,pixel(slice,coordinate,64))&&
+                      std::equal(pixel(slice,coordinate,65),pixel(slice,coordinate,65)+4,pixel(slice,coordinate,1)),
+                      "Every atlas slice has wrapped XY borders and corners");
+            }
+            for(unsigned y=1;y<=64;++y)for(unsigned x=1;x<=64;++x) {
+                const auto value=pixel(slice,x,y);
+                minimum=std::min(minimum,unsigned(value[0]));maximum=std::max(maximum,unsigned(value[0]));
+                different+=value[0]!=value[1];
+                check(value[2]==0&&value[3]==255,"Noise atlas retains its data channel convention");
+                if(slice==0) {
+                    const auto last=pixel(63,x,y);
+                    redSeam+=unsigned(std::abs(int(value[0])-int(last[0])));
+                    greenSeam+=unsigned(std::abs(int(value[1])-int(last[1])));
+                }
             }
         }
+        check(minimum<100&&maximum>155&&different>64*64*32,"Base and detail cloud noise contain distinct density variation");
+        check(redSeam<16*64*64&&greenSeam<48*64*64,"Depth wrap interpolates neighboring periodic noise slices");
     }
-    check(minimum<100&&maximum>155&&different>64*64*32,"Base and detail cloud noise contain distinct density variation");
-    check(redSeam<16*64*64&&greenSeam<48*64*64,"Depth wrap interpolates neighboring periodic noise slices");
+    check(skyCloudNoiseTexture(true)->pixels!=skyCloudNoiseTexture()->pixels,"Billowing clouds use a distinct density profile");
 }
 
 int main() try {
@@ -249,17 +252,23 @@ int main() try {
     check(bytes==SceneArchive::save(*restored.scene,restored.views,restored.assets),"Sky archive does not round trip exactly");
     sky.geometry=SkyGeometry::Sphere;sky.clouds.enabled=sky.clouds.volumetric=true;sky.clouds.offset={17,23};sky.dayNight.enabled=true;sky.dayNight.hour=18;
     sky.clouds.baseHeight=1600;sky.clouds.thickness=900;sky.clouds.extinction=.012f;
-    sky.clouds.maxDistance=42000;sky.clouds.detail=.7f;sky.clouds.anisotropy=.4f;
+    sky.clouds.billowing=true;sky.clouds.maxDistance=42000;sky.clouds.detail=.7f;sky.clouds.anisotropy=.4f;
     scene.setSky(sky);auto weather=SceneArchive::load(SceneArchive::save(scene));
     check(weather.scene->sky()->geometry==SkyGeometry::Sphere&&weather.scene->sky()->clouds.offset.x==17&&weather.scene->sky()->dayNight.hour==18,"Sphere/weather/cycle archive state lost");
     const auto& clouds=weather.scene->sky()->clouds;
-    check(clouds.volumetric&&clouds.baseHeight==1600&&clouds.thickness==900&&clouds.extinction==.012f&&
+    check(clouds.volumetric&&clouds.billowing&&clouds.baseHeight==1600&&clouds.thickness==900&&clouds.extinction==.012f&&
           clouds.maxDistance==42000&&clouds.detail==.7f&&clouds.anisotropy==.4f,"Volumetric cloud archive fields lost");
     auto copied=SceneArchive::clone(scene);
-    check(copied.scene->sky()->clouds.volumetric&&copied.scene->sky()->clouds.detail==.7f,"Clone retains volumetric clouds");
-    constexpr std::size_t cloudExtensionBytes=1+6*sizeof(float);
-    auto legacy40=SceneArchive::save(scene);
-    legacy40.erase(legacy40.end()-5-cloudExtensionBytes,legacy40.end()-5); // No fog, empty lighting zones follow this sky.
+    check(copied.scene->sky()->clouds.volumetric&&copied.scene->sky()->clouds.billowing&&copied.scene->sky()->clouds.detail==.7f,"Clone retains volumetric clouds");
+    constexpr std::size_t volumetricCloudBytes=1+6*sizeof(float);
+    auto legacy41=SceneArchive::save(scene);
+    legacy41.erase(legacy41.end()-6); // No fog and empty lighting zones follow the sky.
+    repairFixture(legacy41,41);
+    const auto previousClouds=SceneArchive::load(legacy41).scene->sky()->clouds;
+    check(previousClouds.volumetric&&!previousClouds.billowing&&previousClouds.detail==.7f,
+          "Version 41 retains its original volumetric cloud profile");
+    auto legacy40=legacy41;
+    legacy40.erase(legacy40.end()-5-volumetricCloudBytes,legacy40.end()-5);
     repairFixture(legacy40,40);
     const auto oldClouds=SceneArchive::load(legacy40).scene->sky()->clouds;
     check(oldClouds.enabled&&!oldClouds.volumetric&&oldClouds.baseHeight==1200&&oldClouds.thickness==800&&
@@ -272,7 +281,7 @@ int main() try {
     const auto skyBytes=legacy.size()-withoutSky.size()+1;legacy.pop_back();
     legacy.erase(legacy.end()-skyBytes-8,legacy.end()-skyBytes-4); // Empty v25 physical surface catalog.
     legacy.erase(legacy.end()-skyBytes-8,legacy.end()-skyBytes-4);
-    legacy.erase(legacy.end()-cloudExtensionBytes,legacy.end());
+    legacy.erase(legacy.end()-volumetricCloudBytes-1,legacy.end());
     legacy.erase(legacy.end()-95,legacy.end());legacy[8]=std::byte{5};
     const auto length=std::uint64_t(legacy.size()-24);for(int i=0;i<8;++i) legacy[12+i]=std::byte((length>>(8*i))&255);
     std::uint32_t crc=0xffffffffu;for(std::size_t i=24;i<legacy.size();++i) {crc^=std::to_integer<unsigned>(legacy[i]);for(int b=0;b<8;++b)crc=(crc>>1)^((crc&1)?0xedb88320u:0u);}

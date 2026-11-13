@@ -14,7 +14,8 @@ float cloudDensity(vec3 point,float height) {
     float h=(height-skyCloudLayer.x)/skyCloudLayer.y;
     if(h<=0.0 || h>=1.0) return 0.0;
     vec2 value=cloudNoise(point);
-    float shape=smoothstep(1.0-skyClouds.x,1.0-skyClouds.x+0.18,
+    float edgeWidth=mix(0.18,0.09,cloudShape.w);
+    float shape=smoothstep(1.0-skyClouds.x,1.0-skyClouds.x+edgeWidth,
         value.x-cloudShape.x*(1.0-value.y)*0.12);
     float profile=smoothstep(0.0,0.16,h)*(1.0-smoothstep(0.65,1.0,h));
     return shape*profile*skyClouds.y;
@@ -29,6 +30,14 @@ float cloudSunlight(vec3 point,float height) {
         optical+=cloudDensity(point+skySun.xyz*(s*cloudOrigin.w),height+skySun.y*s)*((b*b-a*a)*distance);
     }
     return exp(-min(80.0,optical*skyCloudLayer.z));
+}
+vec3 cloudAmbient(float day) {
+    vec3 ambient=mix(vec3(.012,.018,.035),vec3(.18,.22,.29),day);
+    return mix(ambient,vec3(.018,.031,.078),cloudShape.w);
+}
+vec3 cloudLightColor() {
+    vec3 color=mix(vec3(1,.45,.22),vec3(1,.98,.92),smoothstep(0.0,.35,skySun.y));
+    return mix(color,vec3(.60,.76,1.0),cloudShape.w);
 }
 vec3 volumetricClouds(vec3 d,vec3 offset,vec3 background) {
     if(cloudShape.z<1.0) return cloudLayer(d,background);
@@ -45,8 +54,8 @@ vec3 volumetricClouds(vec3 d,vec3 offset,vec3 background) {
     int steps=int(clamp(cloudShape.z,1.0,64.0));
     float ds=(leave-enter)/float(steps);
     float day=smoothstep(-0.08,0.2,skySun.y);
-    vec3 ambient=mix(vec3(0.012,0.018,0.035),vec3(0.18,0.22,0.29),day);
-    vec3 sunColor=mix(vec3(1.0,0.45,0.22),vec3(1.0,0.98,0.92),smoothstep(0.0,0.35,skySun.y));
+    vec3 ambient=cloudAmbient(day);
+    vec3 sunColor=cloudLightColor();
     float g=cloudShape.y,mu=clamp(dot(d,skySun.xyz),-1.0,1.0);
     float phase=(1.0-g*g)/pow(max(1.0+g*g-2.0*g*mu,0.001),1.5);
     vec3 origin=vec3(cloudOrigin.x+offset.x*cloudOrigin.w,originY*cloudOrigin.w,

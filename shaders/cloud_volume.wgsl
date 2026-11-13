@@ -14,7 +14,8 @@ fn cloudDensity(point:vec3f,height:f32) -> f32 {
     let h=(height-sky.cloudLayer.x)/sky.cloudLayer.y;
     if(h<=0.0 || h>=1.0) {return 0.0;}
     let value=cloudNoise(point);
-    let shape=smoothstep(1.0-sky.clouds.x,1.0-sky.clouds.x+0.18,
+    let edgeWidth=mix(0.18,0.09,sky.cloudShape.w);
+    let shape=smoothstep(1.0-sky.clouds.x,1.0-sky.clouds.x+edgeWidth,
         value.x-sky.cloudShape.x*(1.0-value.y)*0.12);
     let profile=smoothstep(0.0,0.16,h)*(1.0-smoothstep(0.65,1.0,h));
     return shape*profile*sky.clouds.y;
@@ -29,6 +30,14 @@ fn cloudSunlight(point:vec3f,height:f32) -> f32 {
         optical+=cloudDensity(point+sky.sun.xyz*(s*sky.cloudOrigin.w),height+sky.sun.y*s)*((b*b-a*a)*distance);
     }
     return exp(-min(80.0,optical*sky.cloudLayer.z));
+}
+fn cloudAmbient(day:f32) -> vec3f {
+    let ambient=mix(vec3f(.012,.018,.035),vec3f(.18,.22,.29),day);
+    return mix(ambient,vec3f(.018,.031,.078),sky.cloudShape.w);
+}
+fn cloudLightColor() -> vec3f {
+    let color=mix(vec3f(1,.45,.22),vec3f(1,.98,.92),smoothstep(0.0,.35,sky.sun.y));
+    return mix(color,vec3f(.60,.76,1.0),sky.cloudShape.w);
 }
 fn volumetricClouds(d:vec3f,offset:vec3f,background:vec3f) -> vec3f {
     if(!volumetricCloudsEnabled || sky.cloudShape.z<1.0) {
@@ -47,8 +56,8 @@ fn volumetricClouds(d:vec3f,offset:vec3f,background:vec3f) -> vec3f {
     if(leave<=enter) {return background;}
     let steps=u32(clamp(sky.cloudShape.z,1.0,64.0));let ds=(leave-enter)/f32(steps);
     let day=smoothstep(-0.08,0.2,sky.sun.y);
-    let ambient=mix(vec3f(0.012,0.018,0.035),vec3f(0.18,0.22,0.29),day);
-    let sunColor=mix(vec3f(1.0,0.45,0.22),vec3f(1.0,0.98,0.92),smoothstep(0.0,0.35,sky.sun.y));
+    let ambient=cloudAmbient(day);
+    let sunColor=cloudLightColor();
     let g=sky.cloudShape.y;let mu=clamp(dot(d,sky.sun.xyz),-1.0,1.0);
     let phase=(1.0-g*g)/pow(max(1.0+g*g-2.0*g*mu,0.001),1.5);
     let origin=vec3f(sky.cloudOrigin.x+offset.x*sky.cloudOrigin.w,originY*sky.cloudOrigin.w,

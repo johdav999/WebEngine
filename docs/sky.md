@@ -149,6 +149,12 @@ external asset, worker or clock is introduced. Backends upload it lazily and
 recreate it after device/context loss. Disabled shader variants compile out
 volumetric sampling.
 
+Set `SkyClouds::billowing=true` to select a second atlas whose broad density
+banks carry periodic cellular lobes, smaller eroded tufts, and a steeper density
+edge. The billowing profile uses cool fill and highlights. This works with
+the same ray sample budget in the sky, depth grid, and cloud shadows. The atlas
+is generated once on demand.
+
 `scale/8000` converts world coordinates to repeating noise-domain units. Existing
 `offset` and caller-driven `advanceSky` own wind phase. Use slower wind values
 than the legacy defaults when modelling ordinary weather. Preparing a view wraps
@@ -158,7 +164,8 @@ origins remain zero, preserving the legacy translation-invariant payload.
 Validated settings allow base height -10000..100000, thickness 1..20000,
 extinction 0..1, distance 1..200000, detail 0..1 and anisotropy 0..0.95.
 Invalid data is rejected before scene replacement. These settings persist in
-archive format 41; earlier formats load with volumetric clouds disabled. Renderer
+archive format 41; earlier formats load with volumetric clouds disabled. Format 42
+persists the optional billowing profile. Older scenes use the smooth profile. Renderer
 quality and the generated noise resource are not serialized.
 
 `RenderQuality::volumetricCloudDepth=true` (default) extends an active volume to

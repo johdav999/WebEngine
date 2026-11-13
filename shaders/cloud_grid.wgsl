@@ -18,8 +18,8 @@ fn cloudGridCompute(@builtin(global_invocation_id) id:vec3u) {
     else {let a=(sky.cloudLayer.x-originY)/d.y;let b=(sky.cloudLayer.x+sky.cloudLayer.y-originY)/d.y;enter=max(0.0,min(a,b));leave=min(leave,max(a,b));}
     let count=u32(clamp(sky.cloudShape.z,1,64));let ds=max(0.0,leave-enter)/f32(count);
     let origin=vec3f(sky.cloudOrigin.x+offset.x*sky.cloudOrigin.w,originY*sky.cloudOrigin.w,sky.cloudOrigin.z+offset.z*sky.cloudOrigin.w);
-    let day=smoothstep(-0.08,0.2,sky.sun.y);let ambient=mix(vec3f(.012,.018,.035),vec3f(.18,.22,.29),day);
-    let sunColor=mix(vec3f(1,.45,.22),vec3f(1,.98,.92),smoothstep(0.0,.35,sky.sun.y));
+    let day=smoothstep(-0.08,0.2,sky.sun.y);let ambient=cloudAmbient(day);
+    let sunColor=cloudLightColor();
     let g=sky.cloudShape.y;let phase=(1-g*g)/pow(max(1+g*g-2*g*clamp(dot(d,sky.sun.xyz),-1,1),.001),1.5);
     var radiance=vec3f(0);var transmission=1.0;var slice=1u;
     for(var step=0u;step<64u && step<count;step++) {

@@ -22,38 +22,87 @@ float cloudNoise(Vec3 point,std::uint32_t frequency,std::uint32_t seed) {
     return mix(mix(mix(at(0,0,0),at(1,0,0),tx),mix(at(0,1,0),at(1,1,0),tx),ty),
                mix(mix(at(0,0,1),at(1,0,1),tx),mix(at(0,1,1),at(1,1,1),tx),ty),tz);
 }
+// Feature points repeat at each volume boundary. Keeping them near the center of
+// their cells bounds the search to the cell and its immediate neighbors.
+class CloudCells {
+public:
+    explicit CloudCells(int frequency):frequency_(frequency) {
+        offsets_.reserve(frequency*frequency*frequency);
+        for(int z=0;z<frequency;++z)for(int y=0;y<frequency;++y)for(int x=0;x<frequency;++x) {
+            offsets_.push_back(Vec3{cloudLattice(x,y,z,0x80dacb47u),cloudLattice(x,y,z,0xa1cf682du),
+                                    cloudLattice(x,y,z,0x38ce7ac9u)}*.60f+Vec3{.20f,.20f,.20f});
+        }
+    }
+
+    float sample(Vec3 point) const {
+        const Vec3 p=point*float(frequency_);
+        const int x=int(p.x),y=int(p.y),z=int(p.z);
+        const Vec3 local=p-Vec3{float(x),float(y),float(z)};
+        float nearest=1;
+        for(int dz=-1;dz<=1;++dz)for(int dy=-1;dy<=1;++dy)for(int dx=-1;dx<=1;++dx) {
+            const auto index=(wrap(z+dz)*frequency_+wrap(y+dy))*frequency_+wrap(x+dx);
+            const Vec3 delta=local-Vec3{float(dx),float(dy),float(dz)}-offsets_[index];
+            nearest=std::min(nearest,dot(delta,delta));
+        }
+        return 1-std::sqrt(nearest);
+    }
+
+private:
+    int wrap(int cell) const { return cell&(frequency_-1); }
+
+    int frequency_;
+    std::vector<Vec3> offsets_;
+};
+
+std::shared_ptr<const Texture> buildCloudNoise(bool billowing) {
+    auto texture=std::make_shared<Texture>();
+    texture->name=billowing ? "Billowing cloud linear density/detail noise" : "Volumetric cloud linear density/detail noise";
+    texture->width=texture->height=528;
+    texture->wrapU=texture->wrapV=TextureWrap::Clamp;
+    texture->pixels.resize(std::size_t(texture->width)*texture->height*4);
+    const auto byte=[](float value){return static_cast<std::uint8_t>(std::lround(std::clamp(value,0.f,1.f)*255));};
+    const CloudCells cells8(billowing?8:0),cells16(billowing?16:0),cells32(billowing?32:0);
+    for(unsigned z=0;z<64;++z) {
+        const unsigned tileX=(z%8)*66,tileY=(z/8)*66;
+        for(unsigned y=0;y<64;++y)for(unsigned x=0;x<64;++x) {
+            const Vec3 point{(x+.5f)/64,(y+.5f)/64,(z+.5f)/64};
+            float base=.625f*cloudNoise(point,4,0x68bc21ebu)+.25f*cloudNoise(point,8,0x68bc21ebu)+
+                             .125f*cloudNoise(point,16,0x68bc21ebu);
+            float detail;
+            if(billowing) {
+                const float billows=cells8.sample(point);
+                const float tufts=cells16.sample(point);
+                const float wisps=cells32.sample(point);
+                // Coarse weather retains coherent banks while cellular peaks add
+                // convex lobes and smaller scallops at their boundaries.
+                base=.67f*base+.23f*billows+.12f*tufts+.06f*wisps;
+                detail=.6f*tufts+.4f*wisps;
+            } else {
+                detail=.5f*cloudNoise(point,16,0x02e5be93u)+.5f*cloudNoise(point,32,0x02e5be93u);
+            }
+            const auto offset=((tileY+y+1)*texture->width+tileX+x+1)*4;
+            texture->pixels[offset]=byte(base);texture->pixels[offset+1]=byte(detail);
+            texture->pixels[offset+2]=0;texture->pixels[offset+3]=255;
+        }
+        // Wrapped XY borders keep bilinear filtering inside each depth tile.
+        for(unsigned y=0;y<66;++y)for(unsigned x=0;x<66;++x) {
+            if(x>0&&x<65&&y>0&&y<65)continue;
+            const unsigned sourceX=1+(x+63)%64,sourceY=1+(y+63)%64;
+            const auto source=((tileY+sourceY)*texture->width+tileX+sourceX)*4;
+            const auto target=((tileY+y)*texture->width+tileX+x)*4;
+            std::copy_n(texture->pixels.begin()+source,4,texture->pixels.begin()+target);
+        }
+    }
+    return texture;
+}
 } // namespace
 
-std::shared_ptr<const Texture> skyCloudNoiseTexture() {
-    static const std::shared_ptr<const Texture> result=[] {
-        auto texture=std::make_shared<Texture>();
-        texture->name="Volumetric cloud linear density/detail noise";
-        texture->width=texture->height=528;
-        texture->wrapU=texture->wrapV=TextureWrap::Clamp;
-        texture->pixels.resize(std::size_t(texture->width)*texture->height*4);
-        const auto byte=[](float value){return static_cast<std::uint8_t>(std::lround(std::clamp(value,0.f,1.f)*255));};
-        for(unsigned z=0;z<64;++z) {
-            const unsigned tileX=(z%8)*66,tileY=(z/8)*66;
-            for(unsigned y=0;y<64;++y)for(unsigned x=0;x<64;++x) {
-                const Vec3 point{(x+.5f)/64,(y+.5f)/64,(z+.5f)/64};
-                const float base=.625f*cloudNoise(point,4,0x68bc21ebu)+.25f*cloudNoise(point,8,0x68bc21ebu)+
-                                 .125f*cloudNoise(point,16,0x68bc21ebu);
-                const float detail=.5f*cloudNoise(point,16,0x02e5be93u)+.5f*cloudNoise(point,32,0x02e5be93u);
-                const auto offset=((tileY+y+1)*texture->width+tileX+x+1)*4;
-                texture->pixels[offset]=byte(base);texture->pixels[offset+1]=byte(detail);
-                texture->pixels[offset+2]=0;texture->pixels[offset+3]=255;
-            }
-            // Wrapped XY borders keep bilinear filtering inside each depth tile.
-            for(unsigned y=0;y<66;++y)for(unsigned x=0;x<66;++x) {
-                if(x>0&&x<65&&y>0&&y<65)continue;
-                const unsigned sourceX=1+(x+63)%64,sourceY=1+(y+63)%64;
-                const auto source=((tileY+sourceY)*texture->width+tileX+sourceX)*4;
-                const auto target=((tileY+y)*texture->width+tileX+x)*4;
-                std::copy_n(texture->pixels.begin()+source,4,texture->pixels.begin()+target);
-            }
-        }
-        return texture;
-    }();
+std::shared_ptr<const Texture> skyCloudNoiseTexture(bool billowing) {
+    if(billowing) {
+        static const auto result=buildCloudNoise(true);
+        return result;
+    }
+    static const auto result=buildCloudNoise(false);
     return result;
 }
 
@@ -124,7 +173,7 @@ SkyUniform prepareSky(const SkyBackground& sky,const CameraComponent& camera,flo
         {sky.atmosphere.rayleigh,sky.atmosphere.mie,sky.atmosphere.anisotropy,sky.atmosphere.altitude},
         {sky.clouds.enabled ? sky.clouds.coverage : 0,sky.clouds.density,sky.clouds.scale,0},
         {sky.clouds.offset.x,sky.clouds.offset.y,0,0},{},{r.x*fogExtent*aspect,r.y*fogExtent*aspect,r.z*fogExtent*aspect,0},{u.x*fogExtent,u.y*fogExtent,u.z*fogExtent,0},
-        {c.baseHeight,c.thickness,c.extinction,c.maxDistance},{c.detail,c.anisotropy,float(effectiveSteps),4},
+        {c.baseHeight,c.thickness,c.extinction,c.maxDistance},{c.detail,c.anisotropy,float(effectiveSteps),c.billowing?1.f:0.f},
         cloudOrigin};
 }
 std::shared_ptr<const Mesh> skySphereMesh() {

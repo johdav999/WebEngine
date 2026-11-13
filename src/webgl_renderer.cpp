@@ -1320,7 +1320,7 @@ void WebGlRenderer::cloudProducerUniforms(GLuint program) {
     glUniform4fv(glGetUniformLocation(program,"cloudShadow"),1,activeCloud_.shadow.data());
     matrix(program,"cloudInverseVp",cloudInverseVp_);
     glActiveTexture(GL_TEXTURE1);
-    try {texture(skyCloudNoiseTexture());} catch(...) {glActiveTexture(GL_TEXTURE0);throw;}
+    try {texture(skyCloudNoiseTexture(scene_->sky()->clouds.billowing));} catch(...) {glActiveTexture(GL_TEXTURE0);throw;}
     glActiveTexture(GL_TEXTURE0);glUniform1i(glGetUniformLocation(program,"cloudNoiseAtlas"),1);
 }
 void WebGlRenderer::drawCloudGrid() {
@@ -1564,7 +1564,7 @@ void WebGlRenderer::drawSky(const RenderView& view,float aspect,bool capturingSu
     try {
         if(sky.geometry==SkyGeometry::Sphere) {MeshDraw draw;draw.mesh=skySphereMesh();sphere=&mesh(draw);}
         texture(sky.mode==SkyMode::Panorama ? sky.panorama : Texture::white());
-        if(payload.cloudShape[2]>0) {glActiveTexture(GL_TEXTURE1);texture(skyCloudNoiseTexture());glActiveTexture(GL_TEXTURE0);}
+        if(payload.cloudShape[2]>0) {glActiveTexture(GL_TEXTURE1);texture(skyCloudNoiseTexture(sky.clouds.billowing));glActiveTexture(GL_TEXTURE0);}
     }
     catch(const UploadDeferred&) {
         glActiveTexture(GL_TEXTURE0);activeCloud_={};glUseProgram(meshProgram_);bindClouds(meshProgram_);

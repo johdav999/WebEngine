@@ -590,7 +590,7 @@ public:
                 if(constants.cloud.layer[3]>.5f||constants.cloud.sun[3]>0) {
                     cloudSky=SkyConstants{prepareSky(*scene_->sky(),camera,aspect,quality_.volumetricCloudSteps),constants.output};
                     cloudSky->sky.fog=constants.fog;cloudSky->sky.cloud=constants.cloud;
-                    list_->SetGraphicsRootDescriptorTable(20,texture(frame,skyCloudNoiseTexture(),false,true));
+                    list_->SetGraphicsRootDescriptorTable(20,texture(frame,skyCloudNoiseTexture(scene_->sky()->clouds.billowing),false,true));
                     if(constants.cloud.sun[3]>0){GpuSpan timing(*this,"Cloud shadow",int(resolved.index));drawCloudShadow(frame,*cloudSky);}
                 }
                 const D3D12_RECT rect{LONG(resolved.x),LONG(resolved.y),LONG(resolved.x+resolved.width),LONG(resolved.y+resolved.height)};

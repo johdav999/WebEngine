@@ -874,7 +874,7 @@ bool WebGpuRenderer::prepareSkyBindings(const RenderView& view,float aspect) {
     const auto& sky=*scene_->sky();auto payload=prepareSky(sky,*view.camera,aspect,quality_.volumetricCloudSteps);payload.fog=prepareFog(scene_->fog(),*view.camera,view.fogEnabled);
     payload.cloud=prepareRenderClouds(scene_->sky(),*view.camera,quality_,view.skyEnabled,shadowResolution_,shadowReceivingEnabled_&&shadowsEnabled_);
     const auto source=sky.mode==SkyMode::Panorama ? sky.panorama : Texture::white();
-    const auto noiseSource=payload.cloudShape[2]>0?skyCloudNoiseTexture():Texture::white();
+    const auto noiseSource=payload.cloudShape[2]>0?skyCloudNoiseTexture(sky.clouds.billowing):Texture::white();
     GpuTexture* texture=nullptr;GpuTexture* noise=nullptr;
     try {
         texture=&uploadTexture(source);

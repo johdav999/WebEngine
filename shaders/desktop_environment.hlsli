@@ -81,7 +81,8 @@ float cloudDensity(float3 samplePoint,float height) {
     const float h=(height-skyCloudLayer.x)/skyCloudLayer.y;
     if(h<=0.0||h>=1.0)return 0.0;
     const float2 value=cloudNoise(samplePoint);
-    const float shape=smoothstep(1.0-skyClouds.x,1.0-skyClouds.x+.18,
+    const float edgeWidth=lerp(.18,.09,skyCloudShape.w);
+    const float shape=smoothstep(1.0-skyClouds.x,1.0-skyClouds.x+edgeWidth,
         value.x-skyCloudShape.x*(1.0-value.y)*.12);
     const float profile=smoothstep(0.0,.16,h)*(1.0-smoothstep(.65,1.0,h));
     return shape*profile*skyClouds.y;
@@ -96,6 +97,14 @@ float cloudSunlight(float3 samplePoint,float height) {
         optical+=cloudDensity(samplePoint+skySun.xyz*(s*skyCloudOrigin.w),height+skySun.y*s)*((b*b-a*a)*distance);
     }
     return exp(-min(80.0,optical*skyCloudLayer.z));
+}
+float3 cloudAmbient(float day) {
+    const float3 ambient=lerp(float3(.012,.018,.035),float3(.18,.22,.29),day);
+    return lerp(ambient,float3(.018,.031,.078),skyCloudShape.w);
+}
+float3 cloudLightColor() {
+    const float3 color=lerp(float3(1,.45,.22),float3(1,.98,.92),smoothstep(0.0,.35,skySun.y));
+    return lerp(color,float3(.60,.76,1.0),skyCloudShape.w);
 }
 float3 volumetricClouds(float3 d,float3 offset,float3 background) {
     if(skyCloudShape.z<1.0)return cloudLayer(d,background);
@@ -113,8 +122,8 @@ float3 volumetricClouds(float3 d,float3 offset,float3 background) {
     const uint steps=uint(clamp(skyCloudShape.z,1.0,64.0));
     const float ds=(leave-enter)/float(steps);
     const float day=smoothstep(-.08,.2,skySun.y);
-    const float3 ambient=lerp(float3(.012,.018,.035),float3(.18,.22,.29),day);
-    const float3 sunColor=lerp(float3(1.0,.45,.22),float3(1.0,.98,.92),smoothstep(0.0,.35,skySun.y));
+    const float3 ambient=cloudAmbient(day);
+    const float3 sunColor=cloudLightColor();
     const float g=skyCloudShape.y,mu=clamp(dot(d,skySun.xyz),-1.0,1.0);
     const float phase=(1.0-g*g)/pow(max(1.0+g*g-2.0*g*mu,.001),1.5);
     const float3 origin=float3(skyCloudOrigin.x+offset.x*skyCloudOrigin.w,originY*skyCloudOrigin.w,
@@ -172,8 +181,8 @@ float4 cloudGridPS(float4 pixel:SV_Position):SV_Target {
     const float ds=max(0.0,leave-enter)/float(count),prefix=slice*float(count)/32.0;
     const float3 origin=float3(skyCloudOrigin.x+offset.x*skyCloudOrigin.w,originY*skyCloudOrigin.w,skyCloudOrigin.z+offset.z*skyCloudOrigin.w);
     const float day=smoothstep(-.08,.2,skySun.y);
-    const float3 ambient=lerp(float3(.012,.018,.035),float3(.18,.22,.29),day);
-    const float3 sunColor=lerp(float3(1,.45,.22),float3(1,.98,.92),smoothstep(0.0,.35,skySun.y));
+    const float3 ambient=cloudAmbient(day);
+    const float3 sunColor=cloudLightColor();
     const float g=skyCloudShape.y;
     const float phase=(1-g*g)/pow(max(1+g*g-2*g*clamp(dot(d,skySun.xyz),-1.0,1.0),.001),1.5);
     float3 radiance=0;

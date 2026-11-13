@@ -28,8 +28,8 @@ void main() {
     float ds=(leave-enter)/float(count),prefix=enter+(leave-enter)*slice/32.0;
     vec3 origin=vec3(cloudOrigin.x+offset.x*cloudOrigin.w,originY*cloudOrigin.w,cloudOrigin.z+offset.z*cloudOrigin.w);
     float day=smoothstep(-0.08,0.2,skySun.y);
-    vec3 ambient=mix(vec3(.012,.018,.035),vec3(.18,.22,.29),day);
-    vec3 sunColor=mix(vec3(1,.45,.22),vec3(1,.98,.92),smoothstep(0.0,.35,skySun.y));
+    vec3 ambient=cloudAmbient(day);
+    vec3 sunColor=cloudLightColor();
     float g=cloudShape.y,phase=(1.0-g*g)/pow(max(1.0+g*g-2.0*g*clamp(dot(d,skySun.xyz),-1.0,1.0),.001),1.5);
     vec3 radiance=vec3(0);float transmission=1.0;
     for(int step=0;step<64;++step) {

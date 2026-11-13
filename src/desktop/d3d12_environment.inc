@@ -163,7 +163,7 @@ void drawSky(Frame& frame,const RenderView& view,float aspect,const FogUniform& 
     list_->SetGraphicsRootConstantBufferView(7,upload(frame,&constants,sizeof(constants)));
     list_->SetGraphicsRootDescriptorTable(2,texture(frame,sky.mode==SkyMode::Panorama?sky.panorama:Texture::white(),true));
     const bool volume=constants.sky.cloudShape[2]>0;
-    if(volume)list_->SetGraphicsRootDescriptorTable(20,texture(frame,skyCloudNoiseTexture(),false,true));
+    if(volume)list_->SetGraphicsRootDescriptorTable(20,texture(frame,skyCloudNoiseTexture(sky.clouds.billowing),false,true));
     const bool sphere=sky.geometry==SkyGeometry::Sphere;list_->SetPipelineState(skyPipeline(sphere,volume));
     if(sphere){auto& gpu=mesh(frame,skySphereMesh());list_->IASetVertexBuffers(0,1,&gpu.vb);list_->IASetIndexBuffer(&gpu.ib);list_->DrawIndexedInstanced(gpu.ib.SizeInBytes/4,1,0,0,0);}
     else list_->DrawInstanced(3,1,0,0);
